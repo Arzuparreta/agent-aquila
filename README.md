@@ -15,7 +15,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 - JWT auth (`/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/me`)
 - CRUD APIs for `contacts`, `emails`, `deals`, `events`
 - **Automations**: `/api/v1/automations` (user-defined rules + manual test run)
-- **OAuth connectors**: Google (Gmail, Calendar, Drive) and optional Microsoft Graph (mail, calendar, OneDrive) under `/api/v1/oauth/...` — see `.env.example` for client IDs, redirect base, and post-auth redirect
+- **OAuth connectors**: Google Workspace and Microsoft 365 (Graph) — register redirect URIs in each vendor console once, then paste app credentials under **Settings → External connectors** (stored in Postgres; no OAuth env vars required for normal use)
 - **Operations cockpit** (Next.js `/cockpit`): ReAct-style agent with hybrid RAG and **human-gated pending operations** — CRM create/update (contacts, deals, events) plus **connector actions** (email send, calendar create, file upload, Teams message) after approval (`POST /api/v1/agent/runs`, `/api/v1/agent/proposals/...` or list `/api/v1/agent/pending-operations`, preview `/api/v1/agent/pending-operations/{id}/preview`, capabilities `/api/v1/agent/capabilities`). Configure connectors via `/api/v1/connectors` (create, `GET/PATCH /connectors/{id}`, `POST /connectors/preview`, `POST /connectors/dry-run`).
 - **Chunked hybrid RAG**: per-entity text is split into labeled chunks, embedded, and searched with **dense vectors + PostgreSQL full-text (RRF fusion)**. Falls back to legacy single-vector row search if `rag_chunks` is empty. Rebuild indexes with `POST /api/v1/ai/rag/backfill`.
 - Per-user AI settings (OpenAI-compatible / Ollama / OpenRouter) and encrypted API keys
@@ -30,7 +30,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 - `backend/` FastAPI app, SQLAlchemy models, services, routes, Alembic migrations, ARQ worker (`app/worker.py`)
 - `frontend/` Next.js dashboard app
 - `docker-compose.yml` local orchestration
-- `.env.example` environment template (Postgres, JWT, CORS, Redis, OAuth, agent limits)
+- `.env.example` environment template (Postgres, JWT, CORS, Redis, optional OAuth env fallbacks, agent limits)
 - `docs/testing.md` how to run backend pytest and frontend lint
 
 ## Local run
@@ -55,8 +55,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
    - Backend docs: `http://localhost:8000/docs`
    - Postgres from your host (optional): `localhost:5433` → container `5432` (avoids clashing with a local PostgreSQL on `5432`)
    - Redis from your host (optional): `localhost:6379`
-
-   For **OAuth** (connector login from the UI), configure the Google/Microsoft variables in `.env` and use the redirect URIs documented there.
+   - **OAuth** (Gmail, Outlook, etc.): **Settings → External connectors** — set the app’s public URL, then follow the on-page steps for Google and/or Microsoft. Migrations run when the API container starts (`docker compose up`).
 
 ## API quickstart
 

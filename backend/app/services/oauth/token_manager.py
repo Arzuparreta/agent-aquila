@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.connector_connection import ConnectorConnection
 from app.services.connector_service import ConnectorService
-from app.services.instance_oauth_service import get_google_runtime_config
+from app.services.instance_oauth_service import get_google_runtime_config, get_microsoft_runtime_config
 from app.services.oauth import google_oauth, microsoft_oauth
 from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
 
@@ -52,6 +52,7 @@ class TokenManager:
         elif TokenManager.is_microsoft(provider):
             oauth_mod = microsoft_oauth
             refresher_name = "microsoft"
+            ms_cfg = await get_microsoft_runtime_config(db)
         else:
             token = str(creds.get("access_token") or creds.get("token") or "")
             return token, creds, provider
@@ -73,7 +74,9 @@ class TokenManager:
                     refresh_token, connection_id=row.id, config=google_cfg
                 )
             else:
-                refreshed = await oauth_mod.refresh_access_token(refresh_token, connection_id=row.id)
+                refreshed = await microsoft_oauth.refresh_access_token(
+                    refresh_token, connection_id=row.id, config=ms_cfg
+                )
         except ConnectorNeedsReauth:
             row.meta = {**(row.meta or {}), "status": "needs_reauth"}
             await db.commit()

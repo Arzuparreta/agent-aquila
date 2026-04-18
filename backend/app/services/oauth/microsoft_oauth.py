@@ -1,6 +1,7 @@
 """Microsoft Graph OAuth 2.0 (Azure AD v2.0 endpoint)."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -20,20 +21,37 @@ SCOPES_TEAMS = ["ChannelMessage.Send", "ChannelMessage.Read.All"]
 SCOPES_IDENTITY = ["openid", "email", "profile", "offline_access", "User.Read"]
 
 
-def is_configured() -> bool:
-    return bool(settings.microsoft_oauth_client_id and settings.microsoft_oauth_client_secret)
+@dataclass(frozen=True)
+class MicrosoftOAuthRuntimeConfig:
+    client_id: str
+    client_secret: str
+    tenant: str
 
 
-def _tenant() -> str:
-    return (settings.microsoft_oauth_tenant or "common").strip() or "common"
+def runtime_config_from_env() -> MicrosoftOAuthRuntimeConfig:
+    return MicrosoftOAuthRuntimeConfig(
+        client_id=settings.microsoft_oauth_client_id,
+        client_secret=settings.microsoft_oauth_client_secret,
+        tenant=(settings.microsoft_oauth_tenant or "common").strip() or "common",
+    )
 
 
-def _authorize_url() -> str:
-    return f"{AUTH_BASE}/{_tenant()}/oauth2/v2.0/authorize"
+def is_runtime_ready(config: MicrosoftOAuthRuntimeConfig) -> bool:
+    return bool(config.client_id and config.client_secret)
 
 
-def _token_url() -> str:
-    return f"{AUTH_BASE}/{_tenant()}/oauth2/v2.0/token"
+def _tenant_normalized(config: MicrosoftOAuthRuntimeConfig) -> str:
+    return (config.tenant or "common").strip() or "common"
+
+
+def authorize_url_for_tenant(tenant: str) -> str:
+    t = (tenant or "common").strip() or "common"
+    return f"{AUTH_BASE}/{t}/oauth2/v2.0/authorize"
+
+
+def token_url_for_tenant(tenant: str) -> str:
+    t = (tenant or "common").strip() or "common"
+    return f"{AUTH_BASE}/{t}/oauth2/v2.0/token"
 
 
 def redirect_uri_for_base(base: str) -> str:
@@ -42,6 +60,10 @@ def redirect_uri_for_base(base: str) -> str:
 
 def redirect_uri() -> str:
     return redirect_uri_for_base(settings.google_oauth_redirect_base)
+
+
+def is_configured() -> bool:
+    return is_runtime_ready(runtime_config_from_env())
 
 
 def scopes_for_intent(intent: str) -> list[str]:
@@ -80,12 +102,23 @@ def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
     return out
 
 
-def build_authorize_url(state: str, scopes: list[str], *, redirect_uri_override: str | None = None) -> str:
-    if not is_configured():
-        raise OAuthError("Microsoft OAuth is not configured. Set MICROSOFT_OAUTH_CLIENT_ID / SECRET.")
+def build_authorize_url(
+    state: str,
+    scopes: list[str],
+    config: MicrosoftOAuthRuntimeConfig | None = None,
+    *,
+    redirect_uri_override: str | None = None,
+) -> str:
+    cfg = config or runtime_config_from_env()
+    if not is_runtime_ready(cfg):
+        raise OAuthError(
+            "Microsoft OAuth is not configured. Add your Azure app Client ID and secret under Settings, "
+            "or set MICROSOFT_OAUTH_CLIENT_ID / MICROSOFT_OAUTH_CLIENT_SECRET on the server."
+        )
     redir = redirect_uri_override or redirect_uri()
+    tenant = _tenant_normalized(cfg)
     params = {
-        "client_id": settings.microsoft_oauth_client_id,
+        "client_id": cfg.client_id,
         "response_type": "code",
         "redirect_uri": redir,
         "response_mode": "query",
@@ -93,22 +126,29 @@ def build_authorize_url(state: str, scopes: list[str], *, redirect_uri_override:
         "state": state,
         "prompt": "consent",
     }
-    return f"{_authorize_url()}?{urlencode(params)}"
+    return f"{authorize_url_for_tenant(tenant)}?{urlencode(params)}"
 
 
-async def exchange_code(code: str, *, redirect_uri_override: str | None = None) -> dict[str, Any]:
-    if not is_configured():
+async def exchange_code(
+    code: str,
+    config: MicrosoftOAuthRuntimeConfig | None = None,
+    *,
+    redirect_uri_override: str | None = None,
+) -> dict[str, Any]:
+    cfg = config or runtime_config_from_env()
+    if not is_runtime_ready(cfg):
         raise OAuthError("Microsoft OAuth is not configured.")
     redir = redirect_uri_override or redirect_uri()
+    tenant = _tenant_normalized(cfg)
     form = {
-        "client_id": settings.microsoft_oauth_client_id,
-        "client_secret": settings.microsoft_oauth_client_secret,
+        "client_id": cfg.client_id,
+        "client_secret": cfg.client_secret,
         "code": code,
         "grant_type": "authorization_code",
         "redirect_uri": redir,
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(_token_url(), data=form)
+        r = await client.post(token_url_for_tenant(tenant), data=form)
     if r.status_code >= 300:
         raise OAuthError(f"Microsoft token exchange failed: {r.status_code} {r.text[:300]}")
     data = r.json()
@@ -117,17 +157,24 @@ async def exchange_code(code: str, *, redirect_uri_override: str | None = None) 
     return data
 
 
-async def refresh_access_token(refresh_token: str, *, connection_id: int | None = None) -> dict[str, Any]:
-    if not is_configured():
+async def refresh_access_token(
+    refresh_token: str,
+    *,
+    connection_id: int | None = None,
+    config: MicrosoftOAuthRuntimeConfig | None = None,
+) -> dict[str, Any]:
+    cfg = config or runtime_config_from_env()
+    if not is_runtime_ready(cfg):
         raise OAuthError("Microsoft OAuth is not configured.")
+    tenant = _tenant_normalized(cfg)
     form = {
-        "client_id": settings.microsoft_oauth_client_id,
-        "client_secret": settings.microsoft_oauth_client_secret,
+        "client_id": cfg.client_id,
+        "client_secret": cfg.client_secret,
         "refresh_token": refresh_token,
         "grant_type": "refresh_token",
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(_token_url(), data=form)
+        r = await client.post(token_url_for_tenant(tenant), data=form)
     if r.status_code in (400, 401):
         raise ConnectorNeedsReauth(connection_id, "microsoft", r.text[:300])
     if r.status_code >= 300:

@@ -35,3 +35,21 @@ class GoogleOAuthAppCredentialsUpdate(BaseModel):
     client_id: str = Field(default="", max_length=512)
     client_secret: str | None = Field(default=None, max_length=512)
     redirect_base: str = Field(default="", max_length=1024)
+
+
+class MicrosoftOAuthAppCredentialsResponse(BaseModel):
+    """Azure AD *application* OAuth client — configured in-app, not per-user."""
+
+    client_id: str
+    tenant: str
+    redirect_base: str
+    redirect_uri: str
+    configured: bool
+    has_saved_secret: bool
+
+
+class MicrosoftOAuthAppCredentialsUpdate(BaseModel):
+    client_id: str = Field(default="", max_length=512)
+    client_secret: str | None = Field(default=None, max_length=512)
+    tenant: str = Field(default="common", max_length=64)
+    redirect_base: str = Field(default="", max_length=1024)

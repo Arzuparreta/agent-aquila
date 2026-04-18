@@ -7,10 +7,10 @@ from app.models.base import Base, TimestampMixin
 
 
 class InstanceOAuthSettings(Base, TimestampMixin):
-    """Singleton row (id=1) for Google OAuth *application* credentials entered in the UI.
+    """Singleton row (id=1) for OAuth *application* credentials (Google + Microsoft) from the UI.
 
-    User refresh tokens live on ``ConnectorConnection`` rows; this table only holds the
-    Google Cloud OAuth client ID/secret and optional API base URL override.
+    ``google_oauth_redirect_base`` is the shared public API origin used for both providers'
+    callback URLs. User refresh tokens live on ``ConnectorConnection`` rows.
     """
 
     __tablename__ = "instance_oauth_settings"
@@ -19,3 +19,6 @@ class InstanceOAuthSettings(Base, TimestampMixin):
     google_oauth_client_id: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     google_oauth_client_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_oauth_redirect_base: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    microsoft_oauth_client_id: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    microsoft_oauth_client_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    microsoft_oauth_tenant: Mapped[str] = mapped_column(String(64), default="", nullable=False)

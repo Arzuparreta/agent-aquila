@@ -18,6 +18,8 @@ from app.models.user import User
 from app.schemas.oauth import (
     GoogleOAuthAppCredentialsResponse,
     GoogleOAuthAppCredentialsUpdate,
+    MicrosoftOAuthAppCredentialsResponse,
+    MicrosoftOAuthAppCredentialsUpdate,
     OAuthStartRequest,
     OAuthStartResponse,
     OAuthStatusResponse,
@@ -26,8 +28,11 @@ from app.services.connector_service import ConnectorService
 from app.services.instance_oauth_service import (
     get_google_app_credentials_form,
     get_google_runtime_config,
+    get_microsoft_app_credentials_form,
+    get_microsoft_runtime_config,
     get_redirect_base as get_instance_redirect_base,
     save_google_app_credentials,
+    save_microsoft_app_credentials,
 )
 from app.services.job_queue import enqueue as enqueue_job
 from app.services.oauth import google_oauth, microsoft_oauth, state_store
@@ -409,11 +414,40 @@ async def _upsert_microsoft_connection(
 @router.get("/microsoft/status", response_model=OAuthStatusResponse)
 async def microsoft_status(db: AsyncSession = Depends(get_db)) -> OAuthStatusResponse:
     base = await get_instance_redirect_base(db)
+    ms_cfg = await get_microsoft_runtime_config(db)
     return OAuthStatusResponse(
-        configured=microsoft_oauth.is_configured(),
+        configured=microsoft_oauth.is_runtime_ready(ms_cfg),
         redirect_uri=microsoft_oauth.redirect_uri_for_base(base),
         providers=["graph_mail", "graph_calendar", "graph_onedrive"],
     )
+
+
+@router.get("/microsoft/app-credentials", response_model=MicrosoftOAuthAppCredentialsResponse)
+async def get_microsoft_app_credentials(
+    db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)
+) -> MicrosoftOAuthAppCredentialsResponse:
+    data = await get_microsoft_app_credentials_form(db)
+    return MicrosoftOAuthAppCredentialsResponse(**data)
+
+
+@router.put("/microsoft/app-credentials", response_model=MicrosoftOAuthAppCredentialsResponse)
+async def put_microsoft_app_credentials(
+    payload: MicrosoftOAuthAppCredentialsUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> MicrosoftOAuthAppCredentialsResponse:
+    try:
+        await save_microsoft_app_credentials(
+            db,
+            client_id=payload.client_id,
+            client_secret=payload.client_secret,
+            tenant=payload.tenant,
+            redirect_base=payload.redirect_base,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    data = await get_microsoft_app_credentials_form(db)
+    return MicrosoftOAuthAppCredentialsResponse(**data)
 
 
 @router.post(
@@ -426,10 +460,12 @@ async def microsoft_start(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> OAuthStartResponse:
-    if not microsoft_oauth.is_configured():
+    ms_cfg = await get_microsoft_runtime_config(db)
+    if not microsoft_oauth.is_runtime_ready(ms_cfg):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Microsoft OAuth is not configured. Set MICROSOFT_OAUTH_CLIENT_ID / MICROSOFT_OAUTH_CLIENT_SECRET.",
+            detail="Microsoft sign-in for this app is not set up yet. Open Settings and save your Azure "
+            "Application (client) ID and secret (one-time), then try again.",
         )
     scopes = microsoft_oauth.scopes_for_intent(payload.intent)
     state = await state_store.create_state(
@@ -444,7 +480,9 @@ async def microsoft_start(
     try:
         base = await get_instance_redirect_base(db)
         ms_redir = microsoft_oauth.redirect_uri_for_base(base)
-        url = microsoft_oauth.build_authorize_url(state, scopes, redirect_uri_override=ms_redir)
+        url = microsoft_oauth.build_authorize_url(
+            state, scopes, ms_cfg, redirect_uri_override=ms_redir
+        )
     except OAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return OAuthStartResponse(authorize_url=url, state=state, scopes=scopes, configured=True)
@@ -490,8 +528,11 @@ async def microsoft_callback(
 
     base = await get_instance_redirect_base(db)
     ms_redir = microsoft_oauth.redirect_uri_for_base(base)
+    ms_cfg = await get_microsoft_runtime_config(db)
     try:
-        token_payload = await microsoft_oauth.exchange_code(code, redirect_uri_override=ms_redir)
+        token_payload = await microsoft_oauth.exchange_code(
+            code, ms_cfg, redirect_uri_override=ms_redir
+        )
     except OAuthError as exc:
         return RedirectResponse(
             _frontend_redirect(

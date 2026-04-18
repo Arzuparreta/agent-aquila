@@ -35,6 +35,8 @@ Background **Redis** and the **ARQ worker** are for runtime mail/calendar/drive 
   cd backend && alembic upgrade head
   ```
 
+  A full `docker compose up` (API + frontend) also runs `alembic upgrade head` when the backend container starts, so pytest against Compose Postgres only needs the one-off `alembic upgrade head` when you are **not** starting the API container.
+
 ---
 
 ## Running the suite

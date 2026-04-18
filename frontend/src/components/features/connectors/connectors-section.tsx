@@ -24,14 +24,17 @@ const PROVIDER_EXAMPLES = [
   { id: "graph_teams", label: "Microsoft Teams (Graph)" }
 ];
 
-type GoogleStatus = {
-  configured: boolean;
-  redirect_uri: string;
-  providers: string[];
-};
-
 type GoogleAppCredentials = {
   client_id: string;
+  redirect_base: string;
+  redirect_uri: string;
+  configured: boolean;
+  has_saved_secret: boolean;
+};
+
+type MicrosoftAppCredentials = {
+  client_id: string;
+  tenant: string;
   redirect_base: string;
   redirect_uri: string;
   configured: boolean;
@@ -66,12 +69,16 @@ export function ConnectorsSection() {
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [oauthPublicBase, setOauthPublicBase] = useState("");
   const [googleApp, setGoogleApp] = useState<GoogleAppCredentials | null>(null);
   const [googleFormClientId, setGoogleFormClientId] = useState("");
-  const [googleFormRedirectBase, setGoogleFormRedirectBase] = useState("");
   const [googleFormSecret, setGoogleFormSecret] = useState("");
   const [googleSetupSaving, setGoogleSetupSaving] = useState(false);
-  const [msStatus, setMsStatus] = useState<GoogleStatus | null>(null);
+  const [msApp, setMsApp] = useState<MicrosoftAppCredentials | null>(null);
+  const [msFormClientId, setMsFormClientId] = useState("");
+  const [msFormTenant, setMsFormTenant] = useState("common");
+  const [msFormSecret, setMsFormSecret] = useState("");
+  const [msSetupSaving, setMsSetupSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -95,25 +102,30 @@ export function ConnectorsSection() {
     }
   }, []);
 
-  const loadGoogleApp = useCallback(async () => {
+  const loadOAuthForms = useCallback(async () => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     try {
-      const data = await apiFetch<GoogleAppCredentials>("/oauth/google/app-credentials");
-      setGoogleApp(data);
-      setGoogleFormClientId(data.client_id);
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
-      setGoogleFormRedirectBase(data.redirect_base.trim() ? data.redirect_base : origin);
+      const [g, m] = await Promise.all([
+        apiFetch<GoogleAppCredentials>("/oauth/google/app-credentials"),
+        apiFetch<MicrosoftAppCredentials>("/oauth/microsoft/app-credentials")
+      ]);
+      setGoogleApp(g);
+      setGoogleFormClientId(g.client_id);
+      setMsApp(m);
+      setMsFormClientId(m.client_id);
+      setMsFormTenant(m.tenant.trim() ? m.tenant : "common");
+      const rb = g.redirect_base.trim() || m.redirect_base.trim() || origin;
+      setOauthPublicBase(rb);
     } catch {
       setGoogleApp(null);
+      setMsApp(null);
     }
   }, []);
 
   useEffect(() => {
     void load();
-    void loadGoogleApp();
-    void apiFetch<GoogleStatus>("/oauth/microsoft/status")
-      .then(setMsStatus)
-      .catch(() => setMsStatus(null));
-  }, [load, loadGoogleApp]);
+    void loadOAuthForms();
+  }, [load, loadOAuthForms]);
 
   // Absorb OAuth callback query params (`?oauth=success|error&...`) so the user sees feedback.
   useEffect(() => {
@@ -127,18 +139,18 @@ export function ConnectorsSection() {
       const niceProv = prov === "microsoft" ? "Microsoft" : prov === "google" ? "Google" : prov;
       setInfo(`${niceProv} connected${account ? ` as ${account}` : ""}. Initial sync scheduled.`);
       void load();
-      void loadGoogleApp();
+      void loadOAuthForms();
     } else if (status === "error") {
       const err = params.get("error") || "unknown";
       const detail = params.get("detail") || "";
-      setError(`Google OAuth failed: ${err}${detail ? ` — ${detail}` : ""}`);
+      setError(`Sign-in failed: ${err}${detail ? ` — ${detail}` : ""}`);
     }
     const url = new URL(window.location.href);
     ["oauth", "provider", "account", "connection_ids", "scopes", "error", "detail"].forEach((k) =>
       url.searchParams.delete(k)
     );
     window.history.replaceState({}, "", url.toString());
-  }, [load, loadGoogleApp]);
+  }, [load, loadOAuthForms]);
 
   const startOAuth = async (vendor: "google" | "microsoft", intent: string) => {
     setError(null);
@@ -170,12 +182,13 @@ export function ConnectorsSection() {
         method: "PUT",
         body: JSON.stringify({
           client_id: googleFormClientId.trim(),
-          redirect_base: googleFormRedirectBase.trim(),
+          redirect_base: oauthPublicBase.trim(),
           client_secret: googleFormSecret.trim() ? googleFormSecret.trim() : null
         })
       });
       setGoogleApp(updated);
       setGoogleFormSecret("");
+      void loadOAuthForms();
       setInfo(
         updated.configured
           ? "Google link saved. You can use Connect Google below, or update these fields any time."
@@ -185,6 +198,36 @@ export function ConnectorsSection() {
       setError(e instanceof Error ? e.message : "Could not save Google settings");
     } finally {
       setGoogleSetupSaving(false);
+    }
+  };
+
+  const saveMicrosoftAppSetup = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    setMsSetupSaving(true);
+    try {
+      const updated = await apiFetch<MicrosoftAppCredentials>("/oauth/microsoft/app-credentials", {
+        method: "PUT",
+        body: JSON.stringify({
+          client_id: msFormClientId.trim(),
+          tenant: msFormTenant.trim() || "common",
+          redirect_base: oauthPublicBase.trim(),
+          client_secret: msFormSecret.trim() ? msFormSecret.trim() : null
+        })
+      });
+      setMsApp(updated);
+      setMsFormSecret("");
+      void loadOAuthForms();
+      setInfo(
+        updated.configured
+          ? "Microsoft link saved. You can use Connect Microsoft below, or update these fields any time."
+          : "Saved. Add the Client secret if Azure still asks for it, then try Connect Microsoft."
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save Microsoft settings");
+    } finally {
+      setMsSetupSaving(false);
     }
   };
 
@@ -265,13 +308,34 @@ export function ConnectorsSection() {
         </div>
       ) : null}
 
+      <div className="mt-4 rounded-md border border-sky-200 bg-sky-50/60 p-4">
+        <h3 className="text-sm font-semibold text-slate-900">This app&apos;s web address</h3>
+        <p className="mt-1 text-xs text-slate-600">
+          Use the same address people type to open this site (example: <span className="font-mono">http://localhost:3002</span>{" "}
+          at home, or your real domain in production). No trailing slash. Google and Microsoft both use it for secure
+          return links after sign-in.
+        </p>
+        <label className="mt-2 block text-xs font-medium text-slate-800">
+          Public URL
+          <Input
+            className="mt-1 font-mono text-xs"
+            value={oauthPublicBase}
+            onChange={(e) => setOauthPublicBase(e.target.value)}
+            placeholder="https://your-site.example"
+            autoComplete="off"
+          />
+        </label>
+        <p className="mt-2 text-xs text-slate-500">
+          This value is saved when you click &quot;Save Google link&quot; or &quot;Save Microsoft link&quot; below.
+        </p>
+      </div>
+
       <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
         <div className="flex flex-col gap-1">
           <h3 className="text-sm font-semibold text-slate-900">Google Workspace</h3>
           <p className="text-xs text-slate-600">
-            First, link this app to Google once (any signed-in person can do it). Then use{" "}
-            <span className="font-medium">Connect Google</span> to pick which Google account to use — no server
-            configuration files.
+            Link Google once here (any signed-in person can do it). Then use{" "}
+            <span className="font-medium">Connect Google</span> to choose which mailbox and calendars to use.
           </p>
         </div>
 
@@ -294,7 +358,7 @@ export function ConnectorsSection() {
             <li>
               Under <span className="font-medium">Authorized redirect URIs</span>, add this exact line (copy–paste):{" "}
               <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
-                {`${googleFormRedirectBase.replace(/\/$/, "") || "(set website address below)"}/api/v1/oauth/google/callback`}
+                {`${oauthPublicBase.replace(/\/$/, "") || "(set Public URL above)"}/api/v1/oauth/google/callback`}
               </code>
             </li>
             <li>
@@ -304,19 +368,6 @@ export function ConnectorsSection() {
           </ol>
 
           <p className="text-xs font-medium text-slate-800">Step 2 — Paste into this page</p>
-          <label className="text-xs font-medium text-slate-800">
-            Website address for this app
-            <Input
-              className="mt-1 font-mono text-xs"
-              value={googleFormRedirectBase}
-              onChange={(e) => setGoogleFormRedirectBase(e.target.value)}
-              placeholder="https://the-address-you-type-in-the-browser"
-              autoComplete="off"
-            />
-            <span className="mt-1 block font-normal text-slate-500">
-              Usually the same as the start of the URL in your address bar. We pre-fill it when possible.
-            </span>
-          </label>
           <label className="text-xs font-medium text-slate-800">
             Client ID (from Google)
             <Input
@@ -393,42 +444,123 @@ export function ConnectorsSection() {
       </div>
 
       <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Microsoft 365 (Graph)</h3>
-            <p className="text-xs text-slate-600">
-              {msStatus?.configured
-                ? `Azure AD client configured. Redirect URI: ${msStatus.redirect_uri}`
-                : "Microsoft OAuth not configured on server. Set MICROSOFT_OAUTH_CLIENT_ID / MICROSOFT_OAUTH_CLIENT_SECRET and restart."}
-            </p>
-          </div>
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-slate-900">Microsoft 365 (Graph)</h3>
+          <p className="text-xs text-slate-600">
+            Link Microsoft Entra (Azure AD) once here. Then use <span className="font-medium">Connect Microsoft</span>{" "}
+            to sign in with the account that should own mail, calendar, and OneDrive.
+          </p>
         </div>
+
+        <form className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3" onSubmit={(e) => void saveMicrosoftAppSetup(e)}>
+          <p className="text-xs font-medium text-slate-800">Step 1 — Azure / Entra (external site)</p>
+          <ol className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
+            <li>
+              Open{" "}
+              <a
+                className="font-medium text-slate-900 underline underline-offset-2"
+                href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Azure Portal → App registrations
+              </a>
+              , create a registration, then <span className="font-medium">Add a platform → Web</span>.
+            </li>
+            <li>
+              Under <span className="font-medium">Redirect URIs</span>, add this exact line:{" "}
+              <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
+                {`${oauthPublicBase.replace(/\/$/, "") || "(set Public URL above)"}/api/v1/oauth/microsoft/callback`}
+              </code>
+            </li>
+            <li>
+              Create a <span className="font-medium">Client secret</span> under Certificates &amp; secrets, and note the{" "}
+              <span className="font-medium">Application (client) ID</span> from the Overview page.
+            </li>
+          </ol>
+
+          <p className="text-xs font-medium text-slate-800">Step 2 — Paste into this page</p>
+          <label className="text-xs font-medium text-slate-800">
+            Application (client) ID
+            <Input
+              className="mt-1 font-mono text-xs"
+              value={msFormClientId}
+              onChange={(e) => setMsFormClientId(e.target.value)}
+              placeholder="Azure Overview → Application (client) ID"
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-slate-800">
+            Directory (tenant) ID or <span className="font-mono">common</span>
+            <Input
+              className="mt-1 font-mono text-xs"
+              value={msFormTenant}
+              onChange={(e) => setMsFormTenant(e.target.value)}
+              placeholder="common"
+              autoComplete="off"
+            />
+            <span className="mt-1 block font-normal text-slate-500">
+              Use <span className="font-mono">common</span> unless your IT team gave you a specific tenant ID.
+            </span>
+          </label>
+          <label className="text-xs font-medium text-slate-800">
+            Client secret (from Azure)
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={msFormSecret}
+              onChange={(e) => setMsFormSecret(e.target.value)}
+              placeholder={
+                msApp?.has_saved_secret
+                  ? "Leave blank to keep the saved secret, or paste a new one to replace it"
+                  : "Paste the secret (stored encrypted on this server)"
+              }
+              autoComplete="off"
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit bg-slate-900 text-white hover:bg-slate-800"
+            disabled={msSetupSaving}
+          >
+            {msSetupSaving ? "Saving…" : "Save Microsoft link"}
+          </Button>
+        </form>
+
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
             className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
-            disabled={!msStatus?.configured}
+            disabled={!msApp?.configured}
+            title={
+              msApp?.configured
+                ? undefined
+                : "Save the Application ID and secret above first, then these buttons open Microsoft sign-in."
+            }
             onClick={() => void connectMicrosoft("all")}
           >
             Connect Microsoft (Mail + Calendar + OneDrive)
           </Button>
           <Button
             type="button"
-            disabled={!msStatus?.configured}
+            disabled={!msApp?.configured}
+            title={msApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
             onClick={() => void connectMicrosoft("mail")}
           >
             Mail only
           </Button>
           <Button
             type="button"
-            disabled={!msStatus?.configured}
+            disabled={!msApp?.configured}
+            title={msApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
             onClick={() => void connectMicrosoft("calendar")}
           >
             Calendar only
           </Button>
           <Button
             type="button"
-            disabled={!msStatus?.configured}
+            disabled={!msApp?.configured}
+            title={msApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
             onClick={() => void connectMicrosoft("drive")}
           >
             OneDrive only
@@ -484,7 +616,7 @@ export function ConnectorsSection() {
       <div className="mt-6 space-y-2">
         <h3 className="text-sm font-medium text-slate-800">Saved connections</h3>
         {rows.length === 0 ? (
-          <p className="text-sm text-slate-500">None yet. Connect Google above to get started.</p>
+          <p className="text-sm text-slate-500">None yet. Connect Google or Microsoft above to get started.</p>
         ) : (
           <ul className="space-y-2">
             {rows.map((r) => {
