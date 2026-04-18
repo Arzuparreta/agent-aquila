@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Fernet key (urlsafe base64, 32 bytes). If unset, a deterministic key is derived from jwt_secret (dev only).
     fernet_encryption_key: str | None = None
     embedding_dimensions: int = 1536
+    # Comma-separated email domains allowed for agent-approved outbound mail (empty = allow all).
+    agent_email_domain_allowlist: str = Field(default="", validation_alias="AGENT_EMAIL_DOMAIN_ALLOWLIST")
+    agent_max_runs_per_hour: int = Field(default=60, ge=1, le=10_000, validation_alias="AGENT_MAX_RUNS_PER_HOUR")
+    agent_max_tool_steps: int = Field(default=10, ge=1, le=100, validation_alias="AGENT_MAX_TOOL_STEPS")
+    # When false, email ingest never auto-creates deals from triage/rules (aligns with human-gated agent policy).
+    email_ingest_auto_create_deals: bool = Field(default=True, validation_alias="EMAIL_INGEST_AUTO_CREATE_DEALS")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

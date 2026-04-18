@@ -4,6 +4,7 @@ from app.models.contact import Contact
 from app.models.deal import Deal
 from app.models.email import Email
 from app.models.event import Event
+from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.rag_chunk import RagChunk
 from app.models.user import User
@@ -17,6 +18,7 @@ __all__ = [
     "Deal",
     "Email",
     "Event",
+    "ConnectorConnection",
     "PendingProposal",
     "RagChunk",
     "User",

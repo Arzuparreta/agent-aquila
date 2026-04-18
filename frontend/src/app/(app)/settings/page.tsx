@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 
+import { ConnectorsSection } from "@/components/features/connectors/connectors-section";
 import { AdvancedSection } from "@/components/features/ai-settings/advanced-section";
 import { ModelSelector } from "@/components/features/ai-settings/model-selector";
 import { ProviderFields } from "@/components/features/ai-settings/provider-fields";
@@ -243,6 +244,8 @@ export default function SettingsPage() {
           ) : null}
         </Card>
       </form>
+
+      <ConnectorsSection />
     </div>
   );
 }

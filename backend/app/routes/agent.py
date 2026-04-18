@@ -5,9 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.models.pending_proposal import PendingProposal
 from app.models.user import User
-from app.schemas.agent import AgentRunCreate, AgentRunRead, PendingProposalRead
+from app.schemas.agent import (
+    AgentRunCreate,
+    AgentRunRead,
+    PendingOperationPreviewRead,
+    PendingOperationRead,
+    PendingProposalRead,
+)
+from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
+from app.services.capability_policy import risk_tier_for_kind
+from app.services.capability_registry import describe_capabilities
+from app.services.pending_execution_service import preview_for_proposal_kind
 from app.services.proposal_service import ProposalService, proposal_to_read
 
 router = APIRouter(prefix="/agent", tags=["agent"], dependencies=[Depends(get_current_user)])
@@ -19,6 +30,7 @@ async def create_agent_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AgentRunRead:
+    AgentRateLimitService.check(current_user.id)
     return await AgentService.run_agent(db, current_user, payload.message)
 
 
@@ -32,6 +44,50 @@ async def get_agent_run(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
+
+
+@router.get("/capabilities")
+async def agent_capabilities() -> dict:
+    return describe_capabilities()
+
+
+@router.get("/pending-operations", response_model=list[PendingOperationRead])
+async def list_pending_operations(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[PendingOperationRead]:
+    rows = await ProposalService.list_pending(db, current_user)
+    return [proposal_to_read(p) for p in rows]
+
+
+@router.get("/pending-operations/{operation_id}", response_model=PendingOperationRead)
+async def get_pending_operation(
+    operation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PendingOperationRead:
+    prop = await db.get(PendingProposal, operation_id)
+    if not prop or prop.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending operation not found")
+    return proposal_to_read(prop)
+
+
+@router.get("/pending-operations/{operation_id}/preview", response_model=PendingOperationPreviewRead)
+async def get_pending_operation_preview(
+    operation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PendingOperationPreviewRead:
+    prop = await db.get(PendingProposal, operation_id)
+    if not prop or prop.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending operation not found")
+    preview = preview_for_proposal_kind(prop.kind, dict(prop.payload))
+    return PendingOperationPreviewRead(
+        kind=prop.kind,
+        risk_tier=risk_tier_for_kind(prop.kind),
+        summary=prop.summary,
+        preview=preview,
+    )
 
 
 @router.get("/proposals", response_model=list[PendingProposalRead])

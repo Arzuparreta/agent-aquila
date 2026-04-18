@@ -20,11 +20,27 @@ class AgentStepRead(BaseModel):
 class PendingProposalRead(BaseModel):
     id: int
     kind: str
+    summary: str | None = None
+    risk_tier: str | None = None
+    idempotency_key: str | None = None
     status: str
     payload: dict[str, Any]
     created_at: datetime
     resolved_at: datetime | None = None
     resolution_note: str | None = None
+
+
+class PendingOperationPreviewRead(BaseModel):
+    """Structured preview for cockpit / clients (no side effects)."""
+
+    kind: str
+    risk_tier: str
+    summary: str | None = None
+    preview: dict[str, Any]
+
+
+# Same shape as pending proposals; list endpoint alias uses this name in OpenAPI.
+PendingOperationRead = PendingProposalRead
 
 
 class AgentRunRead(BaseModel):

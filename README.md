@@ -13,7 +13,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 
 - JWT auth (`/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/me`)
 - CRUD APIs for `contacts`, `emails`, `deals`, `events`
-- **Operations cockpit** (Next.js `/cockpit`): agent copilot with **human-gated deal proposals** (`POST /api/v1/agent/runs`, approve/reject under `/api/v1/agent/proposals/...`)
+- **Operations cockpit** (Next.js `/cockpit`): ReAct-style agent with hybrid RAG and **human-gated pending operations** — CRM create/update (contacts, deals, events) plus **connector actions** (email send, calendar create, file upload, Teams message) after approval (`POST /api/v1/agent/runs`, `/api/v1/agent/proposals/...` or list `/api/v1/agent/pending-operations`, preview `/api/v1/agent/pending-operations/{id}/preview`, capabilities `/api/v1/agent/capabilities`). Configure connectors via `/api/v1/connectors` (create, `GET/PATCH /connectors/{id}`, `POST /connectors/preview`, `POST /connectors/dry-run`).
 - **Chunked hybrid RAG**: per-entity text is split into labeled chunks, embedded, and searched with **dense vectors + PostgreSQL full-text (RRF fusion)**. Falls back to legacy single-vector row search if `rag_chunks` is empty. Rebuild indexes with `POST /api/v1/ai/rag/backfill`.
 - Per-user AI settings (OpenAI-compatible / Ollama / OpenRouter) and encrypted API keys
 - Deterministic email ingestion rule on `POST /api/v1/emails`:
@@ -69,6 +69,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 
 ## Notes for future AI evolution
 
+- Optional env: `AGENT_EMAIL_DOMAIN_ALLOWLIST`, `AGENT_MAX_RUNS_PER_HOUR`, `AGENT_MAX_TOOL_STEPS`, `EMAIL_INGEST_AUTO_CREATE_DEALS` (set `false` to stop auto deal creation on email ingest; aligns with human-gated agent mutations).
 - `services/` layer is the extension point for future AI workflows; the agent coordinator lives in `app/services/agent_service.py` with tools over the same CRM APIs.
 - `pgvector` extension is enabled in migration `0001_initial`; migration `0003_rag_agent` adds `rag_chunks` (HNSW + GIN fts), `agent_runs`, and `pending_proposals`.
 - `audit_logs` keeps deterministic history for replay/training pipelines.

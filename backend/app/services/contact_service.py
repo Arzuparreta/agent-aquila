@@ -26,19 +26,30 @@ class ContactService:
         return contact
 
     @staticmethod
-    async def create_contact(db: AsyncSession, payload: ContactCreate, user_id: int | None = None) -> Contact:
+    async def create_contact(
+        db: AsyncSession, payload: ContactCreate, user_id: int | None = None, *, commit: bool = True
+    ) -> Contact:
         contact = Contact(**payload.model_dump())
         db.add(contact)
         await db.flush()
         await create_audit_log(db, "contact", contact.id, "created", payload.model_dump(), user_id)
         await EmbeddingService.sync_contact(db, user_id, contact.id)
-        await db.commit()
-        await db.refresh(contact)
+        if commit:
+            await db.commit()
+            await db.refresh(contact)
+        else:
+            await db.flush()
+            await db.refresh(contact)
         return contact
 
     @staticmethod
     async def update_contact(
-        db: AsyncSession, contact_id: int, payload: ContactUpdate, user_id: int | None = None
+        db: AsyncSession,
+        contact_id: int,
+        payload: ContactUpdate,
+        user_id: int | None = None,
+        *,
+        commit: bool = True,
     ) -> Contact:
         contact = await ContactService.get_contact(db, contact_id)
         updates = payload.model_dump(exclude_unset=True)
@@ -46,8 +57,12 @@ class ContactService:
             setattr(contact, key, value)
         await create_audit_log(db, "contact", contact.id, "updated", updates, user_id)
         await EmbeddingService.sync_contact(db, user_id, contact.id)
-        await db.commit()
-        await db.refresh(contact)
+        if commit:
+            await db.commit()
+            await db.refresh(contact)
+        else:
+            await db.flush()
+            await db.refresh(contact)
         return contact
 
     @staticmethod

@@ -10,6 +10,7 @@ from app.models.email import Email
 from app.models.user import User
 from app.schemas.ai import EmailDraftResponse
 from app.schemas.email import EmailCreate
+from app.core.config import settings
 from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.audit_service import create_audit_log
 from app.services.embedding_service import EmbeddingService
@@ -92,6 +93,8 @@ class EmailService:
     async def _apply_ingestion_rules(
         db: AsyncSession, email: Email, contact_id: int, user_id: int | None, triage: dict
     ) -> None:
+        if not settings.email_ingest_auto_create_deals:
+            return
         if not triage.get("create_deal"):
             return
 

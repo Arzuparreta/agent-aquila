@@ -9,22 +9,8 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import { useAsyncAction } from "@/lib/useAsyncAction";
+import { PendingOperationCard } from "@/components/features/cockpit/pending-operation-card";
 import { AgentRun, PendingProposal } from "@/types/api";
-
-function entityHref(entityType: string, id: number): string {
-  switch (entityType) {
-    case "contact":
-      return `/contacts#${id}`;
-    case "deal":
-      return `/deals#${id}`;
-    case "email":
-      return `/emails#${id}`;
-    case "event":
-      return `/events#${id}`;
-    default:
-      return "#";
-  }
-}
 
 export default function CockpitPage() {
   const [input, setInput] = useState("");
@@ -88,7 +74,7 @@ export default function CockpitPage() {
       apiFetch<PendingProposal>(`/agent/proposals/${id}/approve`, { method: "POST" })
     );
     if (ok) {
-      setBanner({ variant: "success", message: "Proposal approved — deal created." });
+      setBanner({ variant: "success", message: "Proposal approved and applied." });
       await loadInbox();
     }
   };
@@ -127,8 +113,9 @@ export default function CockpitPage() {
       <div className="min-w-0 flex-1">
         <h1 className="mb-2 text-2xl font-semibold">Operations cockpit</h1>
         <p className="mb-4 text-sm text-slate-600">
-          Ask about festivals, bookings, and contacts. Answers use hybrid RAG (dense + keyword) over chunked CRM text.
-          Deals are never created until a human approves a proposal.
+          Ask about festivals, bookings, and contacts. Answers use hybrid RAG (dense + keyword) over chunked CRM text. The
+          copilot can propose CRM changes and outbound actions (email, calendar, files, Teams); nothing runs until you approve
+          it in the panel on the right. Add connector credentials in Settings.
         </p>
 
         {banner ? (
@@ -195,7 +182,8 @@ export default function CockpitPage() {
       <aside className="w-full shrink-0 lg:w-96">
         <h2 className="mb-2 text-lg font-semibold">Human approvals</h2>
         <p className="mb-3 text-xs text-slate-600">
-          Proposed deals from the copilot appear here until approved. Nothing is written to the pipeline without confirmation.
+          Proposed CRM changes and outbound connector actions from the copilot appear here until approved. Nothing runs
+          without confirmation.
         </p>
 
         <div className="mb-4 flex flex-wrap gap-2">
@@ -208,7 +196,7 @@ export default function CockpitPage() {
             {backfillAction.pending ? "Reindexing…" : "Reindex RAG (sample)"}
           </Button>
           <Link href="/settings" className="text-xs text-slate-600 underline">
-            AI settings
+            AI and connectors
           </Link>
         </div>
         {backfillAction.error ? (
@@ -220,42 +208,13 @@ export default function CockpitPage() {
             <Card className="p-3 text-sm text-slate-600">No pending proposals.</Card>
           ) : (
             inbox.map((p) => (
-              <Card key={p.id} className="p-3 text-sm">
-                <div className="text-xs uppercase text-slate-500">
-                  {p.kind} · #{p.id}
-                </div>
-                {p.kind === "create_deal" ? (
-                  <div className="mt-2 space-y-1">
-                    <div>
-                      <span className="font-medium">Title:</span> {String(p.payload.title ?? "")}
-                    </div>
-                    <div>
-                      <span className="font-medium">Contact:</span>{" "}
-                      <Link href={entityHref("contact", Number(p.payload.contact_id))} className="text-blue-700 underline">
-                        #{String(p.payload.contact_id)}
-                      </Link>
-                    </div>
-                    <div>
-                      <span className="font-medium">Status:</span> {String(p.payload.status ?? "new")}
-                    </div>
-                  </div>
-                ) : (
-                  <pre className="mt-2 max-h-32 overflow-auto text-xs">{JSON.stringify(p.payload, null, 2)}</pre>
-                )}
-                <div className="mt-3 flex gap-2">
-                  <Button
-                    type="button"
-                    className="bg-emerald-700 text-white hover:bg-emerald-800"
-                    disabled={proposalAction.pending}
-                    onClick={() => void approve(p.id)}
-                  >
-                    Approve
-                  </Button>
-                  <Button type="button" className="border-dashed" disabled={proposalAction.pending} onClick={() => void reject(p.id)}>
-                    Reject
-                  </Button>
-                </div>
-              </Card>
+              <PendingOperationCard
+                key={p.id}
+                proposal={p}
+                busy={proposalAction.pending}
+                onApprove={(id) => void approve(id)}
+                onReject={(id) => void reject(id)}
+              />
             ))
           )}
         </div>

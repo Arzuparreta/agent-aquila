@@ -26,26 +26,43 @@ class EventService:
         return event
 
     @staticmethod
-    async def create_event(db: AsyncSession, payload: EventCreate, user_id: int | None = None) -> Event:
+    async def create_event(
+        db: AsyncSession, payload: EventCreate, user_id: int | None = None, *, commit: bool = True
+    ) -> Event:
         event = Event(**payload.model_dump())
         db.add(event)
         await db.flush()
         await create_audit_log(db, "event", event.id, "created", payload.model_dump(mode="json"), user_id)
         await EmbeddingService.sync_event(db, user_id, event.id)
-        await db.commit()
-        await db.refresh(event)
+        if commit:
+            await db.commit()
+            await db.refresh(event)
+        else:
+            await db.flush()
+            await db.refresh(event)
         return event
 
     @staticmethod
-    async def update_event(db: AsyncSession, event_id: int, payload: EventUpdate, user_id: int | None = None) -> Event:
+    async def update_event(
+        db: AsyncSession,
+        event_id: int,
+        payload: EventUpdate,
+        user_id: int | None = None,
+        *,
+        commit: bool = True,
+    ) -> Event:
         event = await EventService.get_event(db, event_id)
         updates = payload.model_dump(exclude_unset=True)
         for key, value in updates.items():
             setattr(event, key, value)
         await create_audit_log(db, "event", event.id, "updated", payload.model_dump(mode="json", exclude_unset=True), user_id)
         await EmbeddingService.sync_event(db, user_id, event.id)
-        await db.commit()
-        await db.refresh(event)
+        if commit:
+            await db.commit()
+            await db.refresh(event)
+        else:
+            await db.flush()
+            await db.refresh(event)
         return event
 
     @staticmethod

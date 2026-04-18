@@ -3,20 +3,25 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import PendingProposalRead
-from app.schemas.deal import DealCreate
-from app.services.deal_service import DealService
+from app.services.audit_service import create_audit_log
+from app.services.capability_policy import enforce_email_recipients_allowed, risk_tier_for_kind
+from app.services.pending_execution_service import PendingExecutionService
 
 
 def proposal_to_read(p: PendingProposal) -> PendingProposalRead:
     return PendingProposalRead(
         id=p.id,
         kind=p.kind,
+        summary=p.summary,
+        risk_tier=risk_tier_for_kind(p.kind),
+        idempotency_key=p.idempotency_key,
         status=p.status,
         payload=dict(p.payload),
         created_at=p.created_at,
@@ -43,13 +48,22 @@ class ProposalService:
         if prop.status != "pending":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Proposal is not pending")
 
-        if prop.kind == "create_deal":
-            payload = dict(prop.payload)
-            deal_in = DealCreate(**payload)
-            await DealService.create_deal(db, deal_in, user.id, commit=False)
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown proposal kind: {prop.kind}")
+        if prop.kind == "connector_email_send":
+            enforce_email_recipients_allowed(dict(prop.payload))
 
+        try:
+            await PendingExecutionService.execute(db, user, prop.kind, dict(prop.payload), commit=False)
+        except ValidationError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.errors()) from exc
+
+        await create_audit_log(
+            db,
+            "pending_proposal",
+            prop.id,
+            "approved",
+            {"kind": prop.kind, "payload_keys": sorted(dict(prop.payload).keys())},
+            user.id,
+        )
         prop.status = "approved"
         prop.resolution_note = note
         prop.resolved_at = datetime.now(UTC)
@@ -68,6 +82,14 @@ class ProposalService:
         prop.status = "rejected"
         prop.resolution_note = note
         prop.resolved_at = datetime.now(UTC)
+        await create_audit_log(
+            db,
+            "pending_proposal",
+            prop.id,
+            "rejected",
+            {"kind": prop.kind},
+            user.id,
+        )
         await db.commit()
         await db.refresh(prop)
         return prop

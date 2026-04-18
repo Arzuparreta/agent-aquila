@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.models.contact import Contact
 from app.models.deal import Deal
@@ -22,24 +23,31 @@ from app.services.semantic_search_service import SemanticSearchService
 from app.services.user_ai_settings_service import UserAISettingsService
 
 AGENT_SYSTEM = """You are an operations copilot for a live music and artist booking business (festivals, concerts, venues, promoters).
-You help principals research the CRM and propose next actions. Never claim a deal, contact, or email was created or changed unless a human approved it in the system.
+You help principals research the CRM and propose next actions. Never claim anything was created, sent, or changed unless a human approved it in the system.
 Return ONLY valid JSON (no markdown, no code fences) with exactly this shape:
 {"phase":"tool"|"answer","tool":null|string,"args":{},"reply":null|string,"citations":[]}
 
 Rules:
 - phase "tool" requires a non-null "tool" name and "args" object.
 - phase "answer" requires a non-null "reply" string and "citations" as an array of strings like "deal:12" or "email:3".
-- Tools:
+- Read-only tools:
   - hybrid_rag_search — args: {"query": string, "limit_per_type": optional number 1-8, default 5}
   - get_entity — args: {"entity_type":"contact|email|deal|event","entity_id": number}
-  - propose_create_deal — args: {"contact_id": number, "title": string, "status": optional string default "new", "notes": optional string, "amount": optional number, "currency": optional string}
- Creates a PENDING item for human approval only; say clearly that it is not live until approved.
+- Proposal tools (each creates a PENDING human approval only; nothing applies until approved):
+  - propose_create_deal — {"contact_id": number, "title": string, "status": optional (new|contacted|negotiating|won|lost), "notes": optional, "amount": optional, "currency": optional}
+  - propose_update_deal — {"deal_id": number, optional: title, status, amount, currency, notes}
+  - propose_create_contact — {"name": string, optional: email, phone, role default "other", notes}
+  - propose_update_contact — {"contact_id": number, optional: name, email, phone, role, notes}
+  - propose_create_event — {"venue_name": string, "event_date": string ISO date YYYY-MM-DD, optional: deal_id, city, status default "confirmed", notes}
+  - propose_update_event — {"event_id": number, optional: venue_name, event_date, deal_id, city, status, notes}
+  - propose_connector_email_send — {"connection_id": number, "to": string or string[], "subject": string, "body": string, optional "content_type": "text"|"html"}
+  - propose_connector_calendar_create — {"connection_id": number, "summary": string, "start_iso": string, "end_iso": string, optional "description", "timezone" default "UTC"}
+  - propose_connector_file_upload — {"connection_id": number, "path": string, "mime_type": string, optional "content_text" or "content_base64"}
+  - propose_connector_teams_message — {"connection_id": number, "team_id": string, "channel_id": string, "body": string}
+- Optional on any proposal tool: "idempotency_key" (string, max 128 chars). Reuses an existing PENDING row with the same key instead of creating a duplicate.
 - Prefer hybrid_rag_search before answering factual questions about the business.
 - Be concise; operators are busy. Use the same language as the user when possible.
 """
-
-MAX_AGENT_STEPS = 10
-
 
 class AgentService:
     @staticmethod
@@ -134,7 +142,59 @@ class AgentService:
         }
 
     @staticmethod
-    async def _tool_propose_deal(
+    async def _insert_proposal(
+        db: AsyncSession,
+        user: User,
+        run_id: int,
+        kind: str,
+        payload: dict[str, Any],
+        summary: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        ikey = (idempotency_key or "").strip()[:128] or None
+        if ikey:
+            r = await db.execute(
+                select(PendingProposal).where(
+                    PendingProposal.user_id == user.id,
+                    PendingProposal.idempotency_key == ikey,
+                    PendingProposal.status == "pending",
+                )
+            )
+            existing = r.scalar_one_or_none()
+            if existing:
+                return {
+                    "proposal_id": existing.id,
+                    "kind": existing.kind,
+                    "status": "pending",
+                    "deduplicated": True,
+                    "message": "Existing pending operation with the same idempotency key.",
+                }
+        prop = PendingProposal(
+            user_id=user.id,
+            run_id=run_id,
+            idempotency_key=ikey,
+            kind=kind,
+            summary=summary[:500] if summary else None,
+            status="pending",
+            payload=payload,
+        )
+        db.add(prop)
+        await db.flush()
+        return {
+            "proposal_id": prop.id,
+            "kind": kind,
+            "status": "pending",
+            "message": "Proposal recorded. A human must approve it before it is executed.",
+        }
+
+    @staticmethod
+    def _idem(args: dict[str, Any]) -> str | None:
+        raw = args.get("idempotency_key")
+        return str(raw).strip()[:128] if raw is not None and str(raw).strip() else None
+
+    @staticmethod
+    async def _tool_propose_create_deal(
         db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
     ) -> dict[str, Any]:
         payload = {
@@ -147,21 +207,174 @@ class AgentService:
         }
         if payload["status"] not in ("new", "contacted", "negotiating", "won", "lost"):
             payload["status"] = "new"
-        prop = PendingProposal(
-            user_id=user.id,
-            run_id=run_id,
-            kind="create_deal",
-            status="pending",
-            payload=payload,
+        summary = f"Create deal: {payload['title']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "create_deal", payload, summary, idempotency_key=AgentService._idem(args)
         )
-        db.add(prop)
-        await db.flush()
-        return {
-            "proposal_id": prop.id,
-            "kind": "create_deal",
-            "status": "pending",
-            "message": "Proposal recorded. A human must approve it before the deal exists in the CRM.",
+
+    @staticmethod
+    async def _tool_propose_update_deal(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"deal_id": int(args["deal_id"])}
+        for key in ("title", "status", "amount", "currency", "notes"):
+            if key in args and args[key] is not None:
+                payload[key] = args[key]
+        if len(payload) <= 1:
+            return {"error": "no fields to update"}
+        summary = f"Update deal #{payload['deal_id']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "update_deal", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_create_contact(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = {
+            "name": str(args["name"])[:255],
+            "email": args.get("email"),
+            "phone": args.get("phone"),
+            "role": str(args.get("role") or "other"),
+            "notes": args.get("notes"),
         }
+        summary = f"Create contact: {payload['name']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "create_contact", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_update_contact(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"contact_id": int(args["contact_id"])}
+        for key in ("name", "email", "phone", "role", "notes"):
+            if key in args and args[key] is not None:
+                payload[key] = args[key]
+        if len(payload) <= 1:
+            return {"error": "no fields to update"}
+        summary = f"Update contact #{payload['contact_id']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "update_contact", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_create_event(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "venue_name": str(args["venue_name"])[:255],
+            "event_date": str(args["event_date"]),
+            "status": str(args.get("status") or "confirmed"),
+        }
+        if args.get("deal_id") is not None:
+            payload["deal_id"] = int(args["deal_id"])
+        if args.get("city") is not None:
+            payload["city"] = str(args["city"])[:255]
+        if args.get("notes") is not None:
+            payload["notes"] = args.get("notes")
+        summary = f"Create event: {payload['venue_name']} on {payload['event_date']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "create_event", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_update_event(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"event_id": int(args["event_id"])}
+        for key in ("venue_name", "event_date", "deal_id", "city", "status", "notes"):
+            if key in args and args[key] is not None:
+                payload[key] = args[key]
+        if len(payload) <= 1:
+            return {"error": "no fields to update"}
+        summary = f"Update event #{payload['event_id']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "update_event", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_email_send(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        to_raw = args["to"]
+        to_list = to_raw if isinstance(to_raw, list) else [str(to_raw)]
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "to": [str(x) for x in to_list],
+            "subject": str(args["subject"])[:998],
+            "body": str(args["body"]),
+            "content_type": str(args.get("content_type") or "text"),
+        }
+        summary = f"Send email: {payload['subject'][:80]}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_email_send", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_calendar_create(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "summary": str(args.get("summary") or args.get("title") or "Event")[:500],
+            "start_iso": str(args["start_iso"]),
+            "end_iso": str(args["end_iso"]),
+            "description": args.get("description"),
+            "timezone": str(args.get("timezone") or "UTC"),
+        }
+        summary = f"Calendar: {payload['summary'][:80]}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_calendar_create", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_file_upload(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "connection_id": int(args["connection_id"]),
+            "path": str(args["path"])[:1024],
+            "mime_type": str(args.get("mime_type") or "application/octet-stream"),
+        }
+        if args.get("content_base64"):
+            payload["content_base64"] = str(args["content_base64"])
+        elif args.get("content_text") is not None:
+            payload["content_text"] = str(args["content_text"])
+        else:
+            return {"error": "content_text or content_base64 required"}
+        summary = f"Upload file: {payload['path'][:80]}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_file_upload", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_teams_message(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "team_id": str(args["team_id"]),
+            "channel_id": str(args["channel_id"]),
+            "body": str(args["body"]),
+        }
+        summary = "Teams channel message"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_teams_message", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    _PROPOSAL_TOOL_METHODS: dict[str, str] = {
+        "propose_create_deal": "_tool_propose_create_deal",
+        "propose_update_deal": "_tool_propose_update_deal",
+        "propose_create_contact": "_tool_propose_create_contact",
+        "propose_update_contact": "_tool_propose_update_contact",
+        "propose_create_event": "_tool_propose_create_event",
+        "propose_update_event": "_tool_propose_update_event",
+        "propose_connector_email_send": "_tool_propose_connector_email_send",
+        "propose_connector_calendar_create": "_tool_propose_connector_calendar_create",
+        "propose_connector_file_upload": "_tool_propose_connector_file_upload",
+        "propose_connector_teams_message": "_tool_propose_connector_teams_message",
+    }
 
     @staticmethod
     async def run_agent(db: AsyncSession, user: User, message: str) -> AgentRunRead:
@@ -204,7 +417,7 @@ class AgentService:
         proposals_created: list[PendingProposal] = []
 
         try:
-            for _ in range(MAX_AGENT_STEPS):
+            for _ in range(settings.agent_max_tool_steps):
                 raw = await LLMClient.chat_completion(
                     api_key or "",
                     settings_row,
@@ -250,9 +463,11 @@ class AgentService:
                     result = await AgentService._tool_rag(db, user, args)
                 elif tool_name == "get_entity":
                     result = await AgentService._tool_get_entity(db, args)
-                elif tool_name == "propose_create_deal":
-                    result = await AgentService._tool_propose_deal(db, user, run.id, args)
-                    prop_id = result.get("proposal_id")
+                elif tool_name in AgentService._PROPOSAL_TOOL_METHODS:
+                    method_name = AgentService._PROPOSAL_TOOL_METHODS[tool_name]
+                    handler = getattr(AgentService, method_name)
+                    result = await handler(db, user, run.id, args)
+                    prop_id = result.get("proposal_id") if isinstance(result, dict) else None
                     if prop_id:
                         prop = await db.get(PendingProposal, int(prop_id))
                         if prop:

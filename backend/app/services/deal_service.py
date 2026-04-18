@@ -50,15 +50,26 @@ class DealService:
         return deal
 
     @staticmethod
-    async def update_deal(db: AsyncSession, deal_id: int, payload: DealUpdate, user_id: int | None = None) -> Deal:
+    async def update_deal(
+        db: AsyncSession,
+        deal_id: int,
+        payload: DealUpdate,
+        user_id: int | None = None,
+        *,
+        commit: bool = True,
+    ) -> Deal:
         deal = await DealService.get_deal(db, deal_id)
         updates = payload.model_dump(exclude_unset=True)
         for key, value in updates.items():
             setattr(deal, key, value)
         await create_audit_log(db, "deal", deal.id, "updated", payload.model_dump(mode="json", exclude_unset=True), user_id)
         await EmbeddingService.sync_deal(db, user_id, deal.id)
-        await db.commit()
-        await db.refresh(deal)
+        if commit:
+            await db.commit()
+            await db.refresh(deal)
+        else:
+            await db.flush()
+            await db.refresh(deal)
         return deal
 
     @staticmethod

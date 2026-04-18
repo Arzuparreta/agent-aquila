@@ -135,11 +135,32 @@ export type SemanticSearchHit = {
 export type PendingProposal = {
   id: number;
   kind: string;
+  summary: string | null;
+  risk_tier?: string | null;
+  idempotency_key?: string | null;
   status: string;
   payload: Record<string, unknown>;
   created_at: string;
   resolved_at: string | null;
   resolution_note: string | null;
+};
+
+export type PendingOperationPreview = {
+  kind: string;
+  risk_tier: string;
+  summary: string | null;
+  preview: Record<string, unknown>;
+};
+
+export type ConnectorConnection = {
+  id: number;
+  provider: string;
+  label: string;
+  meta: Record<string, unknown> | null;
+  token_expires_at?: string | null;
+  oauth_scopes?: string[] | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AgentStep = {
