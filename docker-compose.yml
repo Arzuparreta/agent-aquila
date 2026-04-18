@@ -21,6 +21,10 @@ services:
       context: ./backend
     env_file:
       - .env
+    # Linux: host.docker.internal is not defined by default (unlike Docker Desktop). Map it to the
+    # host gateway so URLs like http://host.docker.internal:11434 reach Ollama on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Clear host-only DATABASE_URL from .env; the app builds the asyncpg URL from POSTGRES_* with
     # URL-encoded credentials (raw passwords in compose interpolation break URLs and cause 500s on login).
     environment:
