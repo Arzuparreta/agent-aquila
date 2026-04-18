@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 
 type Automation = {
   id: number;
@@ -34,6 +35,7 @@ Subject: {subject}
 Search the CRM for context, then propose a reply (do not send).`;
 
 export default function AutomationsPage() {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<Automation[]>([]);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,9 +52,9 @@ export default function AutomationsPage() {
       const list = await apiFetch<Automation[]>("/automations");
       setRows(list);
     } catch (e) {
-      setBanner({ variant: "error", message: e instanceof Error ? e.message : "Failed to load automations" });
+      setBanner({ variant: "error", message: e instanceof Error ? e.message : t("automations.errors.loadFailed") });
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -61,7 +63,7 @@ export default function AutomationsPage() {
   const add = async (ev: FormEvent) => {
     ev.preventDefault();
     if (!name.trim() || !promptTemplate.trim()) {
-      setBanner({ variant: "error", message: "Name and prompt template are required." });
+      setBanner({ variant: "error", message: t("automations.errors.required") });
       return;
     }
     const conditions: Record<string, string> = {};
@@ -87,10 +89,10 @@ export default function AutomationsPage() {
       setBodyContains("");
       setPromptTemplate(PROMPT_EXAMPLE);
       setAutoApprove(false);
-      setBanner({ variant: "success", message: "Automation saved." });
+      setBanner({ variant: "success", message: t("automations.saved") });
       await load();
     } catch (e) {
-      setBanner({ variant: "error", message: e instanceof Error ? e.message : "Failed to save" });
+      setBanner({ variant: "error", message: e instanceof Error ? e.message : t("automations.errors.saveFailed") });
     } finally {
       setLoading(false);
     }
@@ -104,7 +106,7 @@ export default function AutomationsPage() {
       });
       await load();
     } catch (e) {
-      setBanner({ variant: "error", message: e instanceof Error ? e.message : "Failed" });
+      setBanner({ variant: "error", message: e instanceof Error ? e.message : t("automations.errors.failed") });
     }
   };
 
@@ -113,7 +115,7 @@ export default function AutomationsPage() {
       await apiFetch(`/automations/${id}`, { method: "DELETE" });
       await load();
     } catch (e) {
-      setBanner({ variant: "error", message: e instanceof Error ? e.message : "Failed" });
+      setBanner({ variant: "error", message: e instanceof Error ? e.message : t("automations.errors.failed") });
     }
   };
 
@@ -126,24 +128,21 @@ export default function AutomationsPage() {
       if (result.ok) {
         setBanner({
           variant: "success",
-          message: `Test run started — agent run #${result.agent_run_id} · ${result.status}`
+          message: t("automations.testStarted", { id: result.agent_run_id ?? "?", status: result.status ?? "" })
         });
       } else {
-        setBanner({ variant: "error", message: result.error || "Test failed" });
+        setBanner({ variant: "error", message: result.error || t("automations.testFailed") });
       }
     } catch (e) {
-      setBanner({ variant: "error", message: e instanceof Error ? e.message : "Failed" });
+      setBanner({ variant: "error", message: e instanceof Error ? e.message : t("automations.errors.failed") });
     }
   };
 
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Automations</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Trigger the agent whenever an inbound email matches a rule. The agent can propose replies, calendar
-          events, and other actions — which remain human-gated in the Cockpit inbox.
-        </p>
+        <h1 className="text-2xl font-semibold">{t("automations.title")}</h1>
+        <p className="mt-1 text-sm text-slate-600">{t("automations.intro")}</p>
       </div>
 
       {banner ? (
@@ -153,43 +152,43 @@ export default function AutomationsPage() {
       ) : null}
 
       <Card className="p-5">
-        <h2 className="text-lg font-semibold">New rule</h2>
+        <h2 className="text-lg font-semibold">{t("automations.newRule")}</h2>
         <form className="mt-4 grid gap-3" onSubmit={(e) => void add(e)}>
           <label className="text-sm font-medium text-slate-800">
-            Name
-            <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Auto-reply to venue inquiries" />
+            {t("automations.name")}
+            <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("automations.namePlaceholder")} />
           </label>
           <div className="grid gap-3 md:grid-cols-3">
             <label className="text-sm font-medium text-slate-800">
-              From contains
+              {t("automations.fromContains")}
               <Input
                 className="mt-1"
                 value={fromContains}
                 onChange={(e) => setFromContains(e.target.value)}
-                placeholder="@venue.com"
+                placeholder={t("automations.fromContainsPlaceholder")}
               />
             </label>
             <label className="text-sm font-medium text-slate-800">
-              Subject contains
+              {t("automations.subjectContains")}
               <Input
                 className="mt-1"
                 value={subjectContains}
                 onChange={(e) => setSubjectContains(e.target.value)}
-                placeholder="booking"
+                placeholder={t("automations.subjectContainsPlaceholder")}
               />
             </label>
             <label className="text-sm font-medium text-slate-800">
-              Body contains
+              {t("automations.bodyContains")}
               <Input
                 className="mt-1"
                 value={bodyContains}
                 onChange={(e) => setBodyContains(e.target.value)}
-                placeholder="festival"
+                placeholder={t("automations.bodyContainsPlaceholder")}
               />
             </label>
           </div>
           <label className="text-sm font-medium text-slate-800">
-            Prompt template
+            {t("automations.promptTemplate")}
             <textarea
               className="mt-1 min-h-[140px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs"
               value={promptTemplate}
@@ -197,24 +196,24 @@ export default function AutomationsPage() {
               spellCheck={false}
             />
             <span className="mt-1 block text-xs text-slate-500">
-              Placeholders: <code>{"{subject}"}</code>, <code>{"{from}"}</code>, <code>{"{body}"}</code>,
+              {t("automations.placeholders")} <code>{"{subject}"}</code>, <code>{"{from}"}</code>, <code>{"{body}"}</code>,
               <code>{"{thread_id}"}</code>, <code>{"{email_id}"}</code>
             </span>
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} />
-            Auto-approve agent proposals (advanced — off by default)
+            {t("automations.autoApprove")}
           </label>
           <Button type="submit" className="w-fit bg-slate-900 text-white hover:bg-slate-800" disabled={loading}>
-            Save rule
+            {t("automations.saveRule")}
           </Button>
         </form>
       </Card>
 
       <Card className="mt-6 p-5">
-        <h2 className="text-lg font-semibold">Rules</h2>
+        <h2 className="text-lg font-semibold">{t("automations.rules")}</h2>
         {rows.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">No automations yet.</p>
+          <p className="mt-2 text-sm text-slate-500">{t("automations.empty")}</p>
         ) : (
           <ul className="mt-4 space-y-3">
             {rows.map((r) => (
@@ -229,28 +228,31 @@ export default function AutomationsPage() {
                           r.enabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
                         }`}
                       >
-                        {r.enabled ? "enabled" : "disabled"}
+                        {r.enabled ? t("automations.statusEnabled") : t("automations.statusDisabled")}
                       </span>
                       {r.auto_approve ? (
-                        <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">auto-approve</span>
+                        <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{t("automations.autoApproveTag")}</span>
                       ) : null}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
-                      runs: {r.run_count} · last: {r.last_run_at ? new Date(r.last_run_at).toLocaleString() : "never"}
+                      {t("automations.runs", {
+                        count: r.run_count,
+                        when: r.last_run_at ? new Date(r.last_run_at).toLocaleString() : t("common.never")
+                      })}
                     </div>
                     <div className="mt-1 text-xs text-slate-600">
-                      conditions: <code className="font-mono">{JSON.stringify(r.conditions)}</code>
+                      {t("automations.conditions")} <code className="font-mono">{JSON.stringify(r.conditions)}</code>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" className="text-xs" onClick={() => void toggle(r)}>
-                      {r.enabled ? "Disable" : "Enable"}
+                      {r.enabled ? t("automations.disable") : t("automations.enable")}
                     </Button>
                     <Button type="button" className="text-xs" onClick={() => void testRun(r.id)}>
-                      Test run
+                      {t("automations.testRun")}
                     </Button>
                     <Button type="button" className="border-dashed text-xs" onClick={() => void remove(r.id)}>
-                      Delete
+                      {t("common.delete")}
                     </Button>
                   </div>
                 </div>

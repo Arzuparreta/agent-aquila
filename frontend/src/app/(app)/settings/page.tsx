@@ -9,14 +9,17 @@ import { ProviderFields } from "@/components/features/ai-settings/provider-field
 import { ProviderPicker } from "@/components/features/ai-settings/provider-picker";
 import { TestConnectionButton } from "@/components/features/ai-settings/test-connection-button";
 import { useSettingsForm } from "@/components/features/ai-settings/use-settings-form";
+import { LanguageSection } from "@/components/features/language/language-section";
 import { AlertBanner } from "@/components/ui/alert-banner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
+import { useTranslation } from "@/lib/i18n";
 
 type Banner = { variant: "error" | "success" | "info"; message: string };
 
 export default function SettingsPage() {
+  const { t } = useTranslation();
   const registry = useProviderRegistry();
   const ctrl = useSettingsForm({ providers: registry.providers, providersLoading: registry.loading });
   const [banner, setBanner] = useState<Banner | null>(null);
@@ -60,29 +63,31 @@ export default function SettingsPage() {
   const handleClearKey = async () => {
     setBanner(null);
     await ctrl.clearKey();
-    setBanner({ variant: "success", message: "API key cleared." });
+    setBanner({ variant: "success", message: t("settings.keyCleared") });
   };
 
   const modelPickerHint = ctrl.provider?.model_list_is_deployments
-    ? "Azure deployments appear here after a successful test."
+    ? t("settings.deploymentHint")
     : ctrl.tested?.ok
       ? undefined
-      : "Run Test connection to load available models.";
+      : t("settings.testToLoad");
 
   const testedOk = ctrl.tested?.ok === true;
   const disabledReason = !ctrl.provider
-    ? "Pick a provider first"
+    ? t("settings.disabledPickProvider")
     : !testedOk && ctrl.models.length === 0
-      ? "Test the connection to load models"
+      ? t("settings.disabledTestFirst")
       : null;
+
+  const encryptedNoteParts = t("settings.encryptedNote", { var: "FERNET_ENCRYPTION_KEY" }).split(/<code>|<\/code>/);
 
   return (
     <div className="mx-auto max-w-3xl">
+      <LanguageSection />
+
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold">AI settings</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Connect an AI provider, verify the connection, and pick a model. Keys are encrypted at rest.
-        </p>
+        <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
+        <p className="mt-1 text-sm text-slate-600">{t("settings.intro")}</p>
       </div>
 
       {banner ? (
@@ -108,7 +113,7 @@ export default function SettingsPage() {
           <section className="grid gap-2">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="ai-provider-combobox" className="text-sm font-medium text-slate-800">
-                Provider
+                {t("settings.providerLabel")}
                 <span className="ml-1 text-red-600">*</span>
               </label>
               {ctrl.provider?.docs_url ? (
@@ -118,7 +123,7 @@ export default function SettingsPage() {
                   rel="noreferrer"
                   className="text-xs text-slate-500 underline hover:text-slate-700"
                 >
-                  {ctrl.provider.label} docs
+                  {t("settings.docsLink", { label: ctrl.provider.label })}
                 </a>
               ) : null}
             </div>
@@ -139,7 +144,9 @@ export default function SettingsPage() {
 
               {/* Step 2: dynamic fields */}
               <section className="grid gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Credentials</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+                  {t("settings.credentials")}
+                </h2>
                 <ProviderFields
                   provider={ctrl.provider}
                   value={{ apiKey: ctrl.form.apiKey, baseUrl: ctrl.form.baseUrl, extras: ctrl.form.extras }}
@@ -161,7 +168,7 @@ export default function SettingsPage() {
                   disabled={!canTest}
                 />
                 {!canTest ? (
-                  <p className="text-xs text-slate-500">Fill in the required fields to enable the test.</p>
+                  <p className="text-xs text-slate-500">{t("settings.fillRequired")}</p>
                 ) : null}
               </section>
 
@@ -169,10 +176,12 @@ export default function SettingsPage() {
 
               {/* Step 4: model selection */}
               <section className="grid gap-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Model</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+                  {t("settings.modelSection")}
+                </h2>
                 <ModelSelector
                   id="chat-model"
-                  label={ctrl.provider.model_list_is_deployments ? "Chat deployment" : "Chat model"}
+                  label={ctrl.provider.model_list_is_deployments ? t("settings.chatDeployment") : t("settings.chatModel")}
                   required
                   value={ctrl.form.chatModel}
                   onChange={(value) => ctrl.setField("chatModel", value)}
@@ -188,25 +197,25 @@ export default function SettingsPage() {
               <AdvancedSection>
                 <ModelSelector
                   id="embedding-model"
-                  label="Embedding model"
+                  label={t("settings.embeddingModel")}
                   value={ctrl.form.embeddingModel}
                   onChange={(value) => ctrl.setField("embeddingModel", value)}
                   models={ctrl.models}
                   loading={ctrl.loadingModels}
                   capability="embedding"
                   disabledReason={disabledReason}
-                  helpText="Used for semantic search and RAG. Leave blank to use the provider default."
+                  helpText={t("settings.embeddingHelp")}
                 />
                 <ModelSelector
                   id="classify-model"
-                  label="Classify model (optional)"
+                  label={t("settings.classifyModel")}
                   value={ctrl.form.classifyModel}
                   onChange={(value) => ctrl.setField("classifyModel", value)}
                   models={ctrl.models}
                   loading={ctrl.loadingModels}
                   capability="chat"
                   disabledReason={disabledReason}
-                  helpText="Smaller/cheaper model for triage. Falls back to the chat model when empty."
+                  helpText={t("settings.classifyHelp")}
                 />
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
@@ -214,13 +223,13 @@ export default function SettingsPage() {
                     checked={ctrl.form.aiDisabled}
                     onChange={(event) => ctrl.setField("aiDisabled", event.target.checked)}
                   />
-                  Disable AI (skips embeddings, triage LLM, search, drafts)
+                  {t("settings.disableAi")}
                 </label>
                 {ctrl.settings?.has_api_key ? (
                   <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
-                    <span className="text-xs text-slate-500">A key is stored on this account.</span>
+                    <span className="text-xs text-slate-500">{t("settings.keyOnFile")}</span>
                     <Button type="button" className="border-dashed" onClick={() => void handleClearKey()}>
-                      Clear API key
+                      {t("settings.clearKey")}
                     </Button>
                   </div>
                 ) : null}
@@ -228,19 +237,21 @@ export default function SettingsPage() {
 
               <div className="flex items-center justify-between border-t border-slate-200 pt-4">
                 <span className="text-xs text-slate-500">
-                  Credentials are encrypted at rest using <code className="rounded bg-slate-100 px-1">FERNET_ENCRYPTION_KEY</code>.
+                  {encryptedNoteParts[0]}
+                  <code className="rounded bg-slate-100 px-1">{encryptedNoteParts[1] ?? "FERNET_ENCRYPTION_KEY"}</code>
+                  {encryptedNoteParts[2] ?? ""}
                 </span>
                 <Button
                   type="submit"
                   className="bg-slate-900 text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-slate-900"
                   disabled={!canSave || saving}
                 >
-                  {saving ? "Saving..." : "Save settings"}
+                  {saving ? t("settings.savingButton") : t("settings.saveButton")}
                 </Button>
               </div>
             </>
           ) : registry.loading ? (
-            <p className="text-sm text-slate-500">Loading providers...</p>
+            <p className="text-sm text-slate-500">{t("settings.providersLoading")}</p>
           ) : null}
         </Card>
       </form>

@@ -1,6 +1,7 @@
 "use client";
 
 import { Combobox, ComboboxOption } from "@/components/ui/combobox";
+import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { ModelCapability, ModelInfo } from "@/types/api";
 
@@ -39,6 +40,7 @@ export function ModelSelector({
   emptyHint,
   placeholder
 }: ModelSelectorProps) {
+  const { t } = useTranslation();
   const reactId = id ?? `model-${label.replace(/\s+/g, "-").toLowerCase()}`;
   const helpId = helpText ? `${reactId}-help` : undefined;
 
@@ -50,12 +52,12 @@ export function ModelSelector({
   }));
 
   const placeholderText = loading
-    ? "Loading models..."
+    ? t("modelSelector.loading")
     : disabledReason
       ? disabledReason
       : models.length === 0
-        ? emptyHint || "Test the connection to load models"
-        : placeholder || "Select or type a model";
+        ? emptyHint || t("modelSelector.empty")
+        : placeholder || t("modelSelector.placeholder");
 
   return (
     <div className="grid gap-1">

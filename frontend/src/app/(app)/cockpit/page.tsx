@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { PendingOperationCard } from "@/components/features/cockpit/pending-operation-card";
 import { AgentRun, PendingProposal } from "@/types/api";
 
 export default function CockpitPage() {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const [lastRun, setLastRun] = useState<AgentRun | null>(null);
@@ -52,17 +54,17 @@ export default function CockpitPage() {
     );
 
     if (!result) {
-      setMessages((m) => [...m, { role: "assistant", text: runAgent.error || "Request failed." }]);
+      setMessages((m) => [...m, { role: "assistant", text: runAgent.error || t("cockpit.requestFailed") }]);
       return;
     }
 
     setLastRun(result);
     let reply = (result.assistant_reply || "").trim();
     if (!reply) {
-      reply = result.error ? `Error: ${result.error}` : "No reply.";
+      reply = result.error ? t("cockpit.errorPrefix", { message: result.error }) : t("cockpit.noReply");
     }
     if (result.status !== "completed") {
-      reply = `${reply}\n\n(status: ${result.status})`;
+      reply = `${reply}\n\n${t("cockpit.statusSuffix", { status: result.status })}`;
     }
     setMessages((m) => [...m, { role: "assistant", text: reply }]);
     await loadInbox();
@@ -74,7 +76,7 @@ export default function CockpitPage() {
       apiFetch<PendingProposal>(`/agent/proposals/${id}/approve`, { method: "POST" })
     );
     if (ok) {
-      setBanner({ variant: "success", message: "Proposal approved and applied." });
+      setBanner({ variant: "success", message: t("cockpit.proposalApproved") });
       await loadInbox();
     }
   };
@@ -85,7 +87,7 @@ export default function CockpitPage() {
       apiFetch<PendingProposal>(`/agent/proposals/${id}/reject`, { method: "POST" })
     );
     if (ok) {
-      setBanner({ variant: "info", message: "Proposal rejected." });
+      setBanner({ variant: "info", message: t("cockpit.proposalRejected") });
       await loadInbox();
     }
   };
@@ -99,11 +101,12 @@ export default function CockpitPage() {
       })
     );
     if (counts) {
+      const summary = Object.entries(counts)
+        .map(([k, v]) => `${k} ${v}`)
+        .join(", ");
       setBanner({
         variant: "success",
-        message: `Reindexed rows: ${Object.entries(counts)
-          .map(([k, v]) => `${k} ${v}`)
-          .join(", ")}`
+        message: t("cockpit.reindexed", { summary })
       });
     }
   };
@@ -111,12 +114,8 @@ export default function CockpitPage() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row">
       <div className="min-w-0 flex-1">
-        <h1 className="mb-2 text-2xl font-semibold">Operations cockpit</h1>
-        <p className="mb-4 text-sm text-slate-600">
-          Ask about festivals, bookings, and contacts. Answers use hybrid RAG (dense + keyword) over chunked CRM text. The
-          copilot can propose CRM changes and outbound actions (email, calendar, files, Teams); nothing runs until you approve
-          it in the panel on the right. Add connector credentials in Settings.
-        </p>
+        <h1 className="mb-2 text-2xl font-semibold">{t("cockpit.title")}</h1>
+        <p className="mb-4 text-sm text-slate-600">{t("cockpit.intro")}</p>
 
         {banner ? (
           <div className="mb-3">
@@ -131,12 +130,7 @@ export default function CockpitPage() {
 
         <Card className="mb-4 flex max-h-[min(70vh,720px)] flex-col p-4">
           <div className="mb-3 flex-1 space-y-3 overflow-y-auto text-sm">
-            {messages.length === 0 ? (
-              <p className="text-slate-500">
-                Example: &quot;What open deals mention festivals this summer?&quot; or &quot;Summarize the last email from the
-                Blue Note promoter.&quot;
-              </p>
-            ) : null}
+            {messages.length === 0 ? <p className="text-slate-500">{t("cockpit.example")}</p> : null}
             {messages.map((msg, i) => (
               <div
                 key={`${i}-${msg.role}`}
@@ -144,7 +138,7 @@ export default function CockpitPage() {
                   msg.role === "user" ? "ml-8 bg-slate-900 text-white" : "mr-8 border border-slate-200 bg-white"
                 }`}
               >
-                <div className="text-xs font-medium opacity-70">{msg.role === "user" ? "You" : "Copilot"}</div>
+                <div className="text-xs font-medium opacity-70">{msg.role === "user" ? t("cockpit.you") : t("cockpit.copilot")}</div>
                 <div className="mt-1 whitespace-pre-wrap">{msg.text}</div>
               </div>
             ))}
@@ -153,21 +147,19 @@ export default function CockpitPage() {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about your CRM…"
+              placeholder={t("cockpit.askPlaceholder")}
               disabled={runAgent.pending}
             />
             <Button type="submit" className="shrink-0 bg-slate-900 text-white hover:bg-slate-800" disabled={runAgent.pending}>
-              {runAgent.pending ? "…" : "Send"}
+              {runAgent.pending ? t("common.ellipsis") : t("common.send")}
             </Button>
           </form>
-          {runAgent.error ? (
-            <p className="mt-2 text-xs text-red-600">{runAgent.error}</p>
-          ) : null}
+          {runAgent.error ? <p className="mt-2 text-xs text-red-600">{runAgent.error}</p> : null}
         </Card>
 
         {lastRun && lastRun.steps.length > 0 ? (
           <details className="text-xs text-slate-600">
-            <summary className="cursor-pointer font-medium text-slate-800">Trace (agent steps)</summary>
+            <summary className="cursor-pointer font-medium text-slate-800">{t("cockpit.trace")}</summary>
             <ul className="mt-2 space-y-1 font-mono">
               {lastRun.steps.map((s) => (
                 <li key={s.step_index}>
@@ -180,11 +172,8 @@ export default function CockpitPage() {
       </div>
 
       <aside className="w-full shrink-0 lg:w-96">
-        <h2 className="mb-2 text-lg font-semibold">Human approvals</h2>
-        <p className="mb-3 text-xs text-slate-600">
-          Proposed CRM changes and outbound connector actions from the copilot appear here until approved. Nothing runs
-          without confirmation.
-        </p>
+        <h2 className="mb-2 text-lg font-semibold">{t("cockpit.approvals")}</h2>
+        <p className="mb-3 text-xs text-slate-600">{t("cockpit.approvalsIntro")}</p>
 
         <div className="mb-4 flex flex-wrap gap-2">
           <Button
@@ -193,19 +182,17 @@ export default function CockpitPage() {
             disabled={backfillAction.pending}
             onClick={() => void backfill()}
           >
-            {backfillAction.pending ? "Reindexing…" : "Reindex RAG (sample)"}
+            {backfillAction.pending ? t("cockpit.reindexing") : t("cockpit.reindex")}
           </Button>
           <Link href="/settings" className="text-xs text-slate-600 underline">
-            AI and connectors
+            {t("cockpit.aiAndConnectors")}
           </Link>
         </div>
-        {backfillAction.error ? (
-          <p className="mb-2 text-xs text-red-600">{backfillAction.error}</p>
-        ) : null}
+        {backfillAction.error ? <p className="mb-2 text-xs text-red-600">{backfillAction.error}</p> : null}
 
         <div className="space-y-3">
           {inbox.length === 0 ? (
-            <Card className="p-3 text-sm text-slate-600">No pending proposals.</Card>
+            <Card className="p-3 text-sm text-slate-600">{t("cockpit.noProposals")}</Card>
           ) : (
             inbox.map((p) => (
               <PendingOperationCard

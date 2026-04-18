@@ -1,6 +1,7 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
+import { useTranslation } from "@/lib/i18n";
 import { AIProvider, ProviderField } from "@/types/api";
 
 type ProviderFieldsValue = {
@@ -26,6 +27,7 @@ type ProviderFieldsProps = {
  *   - anything else → the free-form `extras` JSON bag (string values only)
  */
 export function ProviderFields({ provider, value, storedApiKey, onChange, idPrefix = "pf" }: ProviderFieldsProps) {
+  const { t } = useTranslation();
   const set = (patch: Partial<ProviderFieldsValue>) => onChange({ ...value, ...patch });
 
   const renderInput = (field: ProviderField) => {
@@ -34,7 +36,9 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
     const required = field.required;
 
     if (field.key === "api_key") {
-      const placeholder = storedApiKey ? "••••••••  (leave blank to keep existing)" : field.placeholder || "sk-...";
+      const placeholder = storedApiKey
+        ? t("providerFields.apiKeyMaskedPlaceholder")
+        : field.placeholder || "sk-...";
       return (
         <div key={field.key} className="grid gap-1">
           <label htmlFor={id} className="text-sm font-medium text-slate-800">

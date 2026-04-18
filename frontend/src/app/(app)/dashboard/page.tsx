@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import { Contact, Deal, Email } from "@/types/api";
 
 export default function DashboardPage() {
+  const { t } = useTranslation();
   const [emails, setEmails] = useState<Email[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -25,10 +27,10 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Dashboard</h1>
+      <h1 className="mb-4 text-2xl font-semibold">{t("dashboard.title")}</h1>
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
-          <h2 className="mb-2 font-semibold">Recent Emails</h2>
+          <h2 className="mb-2 font-semibold">{t("dashboard.recentEmails")}</h2>
           {emails.map((email) => (
             <p key={email.id} className="text-sm">
               {email.subject}
@@ -36,7 +38,7 @@ export default function DashboardPage() {
           ))}
         </Card>
         <Card>
-          <h2 className="mb-2 font-semibold">Active Deals</h2>
+          <h2 className="mb-2 font-semibold">{t("dashboard.activeDeals")}</h2>
           {deals.map((deal) => (
             <p key={deal.id} className="text-sm">
               {deal.title} ({deal.status})
@@ -44,7 +46,7 @@ export default function DashboardPage() {
           ))}
         </Card>
         <Card>
-          <h2 className="mb-2 font-semibold">Contacts ({contacts.length})</h2>
+          <h2 className="mb-2 font-semibold">{t("dashboard.contactsTitle", { count: contacts.length })}</h2>
           {contacts.slice(0, 8).map((contact) => (
             <p key={contact.id} className="text-sm">
               {contact.name}

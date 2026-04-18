@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { useTranslation } from "@/lib/i18n";
 import type { PendingProposal } from "@/types/api";
 
 function entityHref(entityType: string, id: number): string {
@@ -19,6 +22,7 @@ function entityHref(entityType: string, id: number): string {
 }
 
 export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
+  const { t } = useTranslation();
   const p = proposal.payload;
 
   const summaryLine = proposal.summary ? (
@@ -33,16 +37,16 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="mt-0 space-y-1">
           <div>
-            <span className="font-medium">Title:</span> {String(p.title ?? "")}
+            <span className="font-medium">{t("proposal.title")}</span> {String(p.title ?? "")}
           </div>
           <div>
-            <span className="font-medium">Contact:</span>{" "}
+            <span className="font-medium">{t("proposal.contact")}</span>{" "}
             <Link href={entityHref("contact", Number(p.contact_id))} className="text-blue-700 underline">
               #{String(p.contact_id)}
             </Link>
           </div>
           <div>
-            <span className="font-medium">Status:</span> {String(p.status ?? "new")}
+            <span className="font-medium">{t("proposal.status")}</span> {String(p.status ?? "new")}
           </div>
         </div>
       );
@@ -51,7 +55,7 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1">
           <div>
-            <span className="font-medium">Deal:</span>{" "}
+            <span className="font-medium">{t("proposal.deal")}</span>{" "}
             <Link href={entityHref("deal", Number(p.deal_id))} className="text-blue-700 underline">
               #{String(p.deal_id)}
             </Link>
@@ -64,11 +68,11 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1">
           <div>
-            <span className="font-medium">Name:</span> {String(p.name ?? "")}
+            <span className="font-medium">{t("proposal.name")}</span> {String(p.name ?? "")}
           </div>
           {p.email ? (
             <div>
-              <span className="font-medium">Email:</span> {String(p.email)}
+              <span className="font-medium">{t("proposal.email")}</span> {String(p.email)}
             </div>
           ) : null}
         </div>
@@ -78,7 +82,7 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1">
           <div>
-            <span className="font-medium">Contact:</span>{" "}
+            <span className="font-medium">{t("proposal.contact")}</span>{" "}
             <Link href={entityHref("contact", Number(p.contact_id))} className="text-blue-700 underline">
               #{String(p.contact_id)}
             </Link>
@@ -91,10 +95,10 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1">
           <div>
-            <span className="font-medium">Venue:</span> {String(p.venue_name ?? "")}
+            <span className="font-medium">{t("proposal.venue")}</span> {String(p.venue_name ?? "")}
           </div>
           <div>
-            <span className="font-medium">Date:</span> {String(p.event_date ?? "")}
+            <span className="font-medium">{t("proposal.date")}</span> {String(p.event_date ?? "")}
           </div>
         </div>
       );
@@ -103,7 +107,7 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1">
           <div>
-            <span className="font-medium">Event:</span>{" "}
+            <span className="font-medium">{t("proposal.event")}</span>{" "}
             <Link href={entityHref("event", Number(p.event_id))} className="text-blue-700 underline">
               #{String(p.event_id)}
             </Link>
@@ -116,13 +120,14 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1">
           <div>
-            <span className="font-medium">Connection:</span> #{String(p.connection_id ?? "")}
+            <span className="font-medium">{t("proposal.connection")}</span> #{String(p.connection_id ?? "")}
           </div>
           <div>
-            <span className="font-medium">To:</span> {Array.isArray(p.to) ? p.to.join(", ") : String(p.to ?? "")}
+            <span className="font-medium">{t("proposal.to")}</span>{" "}
+            {Array.isArray(p.to) ? p.to.join(", ") : String(p.to ?? "")}
           </div>
           <div>
-            <span className="font-medium">Subject:</span> {String(p.subject ?? "")}
+            <span className="font-medium">{t("proposal.subject")}</span> {String(p.subject ?? "")}
           </div>
           <div className="max-h-24 overflow-auto whitespace-pre-wrap text-xs text-slate-600">{String(p.body ?? "")}</div>
         </div>
@@ -132,16 +137,16 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1 text-xs">
           <div>
-            <span className="font-medium">Connection:</span> #{String(p.connection_id ?? "")}
+            <span className="font-medium">{t("proposal.connection")}</span> #{String(p.connection_id ?? "")}
           </div>
           <div>
-            <span className="font-medium">Summary:</span> {String(p.summary ?? "")}
+            <span className="font-medium">{t("proposal.summaryLabel")}</span> {String(p.summary ?? "")}
           </div>
           <div>
-            <span className="font-medium">Start:</span> {String(p.start_iso ?? "")}
+            <span className="font-medium">{t("proposal.start")}</span> {String(p.start_iso ?? "")}
           </div>
           <div>
-            <span className="font-medium">End:</span> {String(p.end_iso ?? "")}
+            <span className="font-medium">{t("proposal.end")}</span> {String(p.end_iso ?? "")}
           </div>
         </div>
       );
@@ -150,13 +155,13 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1 text-xs">
           <div>
-            <span className="font-medium">Connection:</span> #{String(p.connection_id ?? "")}
+            <span className="font-medium">{t("proposal.connection")}</span> #{String(p.connection_id ?? "")}
           </div>
           <div>
-            <span className="font-medium">Path:</span> {String(p.path ?? "")}
+            <span className="font-medium">{t("proposal.path")}</span> {String(p.path ?? "")}
           </div>
           <div>
-            <span className="font-medium">MIME:</span> {String(p.mime_type ?? "")}
+            <span className="font-medium">{t("proposal.mime")}</span> {String(p.mime_type ?? "")}
           </div>
         </div>
       );
@@ -165,13 +170,13 @@ export function ProposalPreview({ proposal }: { proposal: PendingProposal }) {
       body = (
         <div className="space-y-1 text-xs">
           <div>
-            <span className="font-medium">Connection:</span> #{String(p.connection_id ?? "")}
+            <span className="font-medium">{t("proposal.connection")}</span> #{String(p.connection_id ?? "")}
           </div>
           <div>
-            <span className="font-medium">Team:</span> {String(p.team_id ?? "")}
+            <span className="font-medium">{t("proposal.team")}</span> {String(p.team_id ?? "")}
           </div>
           <div>
-            <span className="font-medium">Channel:</span> {String(p.channel_id ?? "")}
+            <span className="font-medium">{t("proposal.channel")}</span> {String(p.channel_id ?? "")}
           </div>
           <div className="max-h-24 overflow-auto whitespace-pre-wrap text-slate-600">{String(p.body ?? "")}</div>
         </div>

@@ -7,12 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
+import { useTranslation } from "@/lib/i18n";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, "");
 
 export default function LoginPage() {
   const router = useRouter();
   const { setToken } = useAuth();
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError("Invalid credentials");
+        setError(t("login.invalidCredentials"));
         return;
       }
 
@@ -37,25 +39,25 @@ export default function LoginPage() {
       setToken(data.access_token);
       router.push("/dashboard");
     } catch {
-      setError("Could not reach the server. If you use Docker, run `docker compose up` and open the app on the same host/port as in your compose file.");
+      setError(t("login.networkError"));
     }
   };
 
   return (
     <main className="mx-auto mt-24 max-w-md px-4">
       <Card>
-        <h1 className="mb-4 text-xl font-semibold">Login</h1>
+        <h1 className="mb-4 text-xl font-semibold">{t("login.title")}</h1>
         <form className="space-y-3" onSubmit={onSubmit}>
-          <Input placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Input placeholder={t("login.email")} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input
-            placeholder="Password"
+            placeholder={t("login.password")}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <Button className="w-full" type="submit">
-            Sign In
+            {t("login.signIn")}
           </Button>
         </form>
       </Card>

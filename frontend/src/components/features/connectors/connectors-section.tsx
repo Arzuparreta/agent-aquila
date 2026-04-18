@@ -7,21 +7,24 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import type { ConnectorConnection } from "@/types/api";
 
-const PROVIDER_EXAMPLES = [
-  { id: "mock_email", label: "Mock email (dev)" },
-  { id: "mock_calendar", label: "Mock calendar (dev)" },
-  { id: "mock_files", label: "Mock files (dev)" },
-  { id: "mock_teams", label: "Mock Teams (dev)" },
-  { id: "smtp", label: "SMTP (host/port/user/password)" },
-  { id: "graph_mail", label: "Microsoft Graph — mail" },
-  { id: "google_gmail", label: "Google Gmail (manual token — prefer Connect Google)" },
-  { id: "graph_calendar", label: "Microsoft Graph — calendar" },
-  { id: "google_calendar", label: "Google Calendar (manual token — prefer Connect Google)" },
-  { id: "graph_onedrive", label: "Microsoft OneDrive / SharePoint" },
-  { id: "google_drive", label: "Google Drive (manual token — prefer Connect Google)" },
-  { id: "graph_teams", label: "Microsoft Teams (Graph)" }
+type ProviderExample = { id: string; labelKey: TranslationKey };
+
+const PROVIDER_EXAMPLES: ProviderExample[] = [
+  { id: "mock_email", labelKey: "connectors.provider.mock_email" },
+  { id: "mock_calendar", labelKey: "connectors.provider.mock_calendar" },
+  { id: "mock_files", labelKey: "connectors.provider.mock_files" },
+  { id: "mock_teams", labelKey: "connectors.provider.mock_teams" },
+  { id: "smtp", labelKey: "connectors.provider.smtp" },
+  { id: "graph_mail", labelKey: "connectors.provider.graph_mail" },
+  { id: "google_gmail", labelKey: "connectors.provider.google_gmail" },
+  { id: "graph_calendar", labelKey: "connectors.provider.graph_calendar" },
+  { id: "google_calendar", labelKey: "connectors.provider.google_calendar" },
+  { id: "graph_onedrive", labelKey: "connectors.provider.graph_onedrive" },
+  { id: "google_drive", labelKey: "connectors.provider.google_drive" },
+  { id: "graph_teams", labelKey: "connectors.provider.graph_teams" }
 ];
 
 type GoogleAppCredentials = {
@@ -59,7 +62,38 @@ type SyncStatus = {
   cursor: string | null;
 };
 
+/**
+ * Render a translation that contains lightweight inline markup. We support a
+ * small allow-list (<strong>, <code>, <mono>) so translators can keep the
+ * surrounding sentence intact in their language without juggling JSX.
+ */
+function RichText({ text }: { text: string }) {
+  const parts = text.split(/(<strong>.*?<\/strong>|<code>.*?<\/code>|<mono>.*?<\/mono>)/g);
+  return (
+    <>
+      {parts.map((part, idx) => {
+        if (part.startsWith("<strong>")) {
+          return (
+            <span key={idx} className="font-medium">
+              {part.replace(/<\/?strong>/g, "")}
+            </span>
+          );
+        }
+        if (part.startsWith("<code>") || part.startsWith("<mono>")) {
+          return (
+            <span key={idx} className="font-mono">
+              {part.replace(/<\/?(code|mono)>/g, "")}
+            </span>
+          );
+        }
+        return <span key={idx}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 export function ConnectorsSection() {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<ConnectorConnection[]>([]);
   const [syncRows, setSyncRows] = useState<Record<number, SyncStatus[]>>({});
   const [provider, setProvider] = useState("mock_email");
@@ -137,20 +171,28 @@ export function ConnectorsSection() {
       const account = params.get("account") || "";
       const prov = params.get("provider") || "Provider";
       const niceProv = prov === "microsoft" ? "Microsoft" : prov === "google" ? "Google" : prov;
-      setInfo(`${niceProv} connected${account ? ` as ${account}` : ""}. Initial sync scheduled.`);
+      setInfo(
+        account
+          ? t("connectors.oauth.successWithAccount", { provider: niceProv, account })
+          : t("connectors.oauth.success", { provider: niceProv })
+      );
       void load();
       void loadOAuthForms();
     } else if (status === "error") {
       const err = params.get("error") || "unknown";
       const detail = params.get("detail") || "";
-      setError(`Sign-in failed: ${err}${detail ? ` — ${detail}` : ""}`);
+      setError(
+        detail
+          ? t("connectors.oauth.errorWithDetail", { error: err, detail })
+          : t("connectors.oauth.error", { error: err })
+      );
     }
     const url = new URL(window.location.href);
     ["oauth", "provider", "account", "connection_ids", "scopes", "error", "detail"].forEach((k) =>
       url.searchParams.delete(k)
     );
     window.history.replaceState({}, "", url.toString());
-  }, [load, loadOAuthForms]);
+  }, [load, loadOAuthForms, t]);
 
   const startOAuth = async (vendor: "google" | "microsoft", intent: string) => {
     setError(null);
@@ -166,7 +208,7 @@ export function ConnectorsSection() {
         window.location.href = resp.authorize_url;
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : `Failed to start ${vendor} OAuth`);
+      setError(e instanceof Error ? e.message : t("connectors.errors.startOAuth", { vendor }));
     }
   };
   const connectGoogle = (intent: string) => startOAuth("google", intent);
@@ -189,13 +231,9 @@ export function ConnectorsSection() {
       setGoogleApp(updated);
       setGoogleFormSecret("");
       void loadOAuthForms();
-      setInfo(
-        updated.configured
-          ? "Google link saved. You can use Connect Google below, or update these fields any time."
-          : "Saved. Add the Client secret if Google still asks for it, then try Connect Google."
-      );
+      setInfo(updated.configured ? t("connectors.google.savedConfigured") : t("connectors.google.savedNotConfigured"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save Google settings");
+      setError(e instanceof Error ? e.message : t("connectors.google.savedError"));
     } finally {
       setGoogleSetupSaving(false);
     }
@@ -219,13 +257,9 @@ export function ConnectorsSection() {
       setMsApp(updated);
       setMsFormSecret("");
       void loadOAuthForms();
-      setInfo(
-        updated.configured
-          ? "Microsoft link saved. You can use Connect Microsoft below, or update these fields any time."
-          : "Saved. Add the Client secret if Azure still asks for it, then try Connect Microsoft."
-      );
+      setInfo(updated.configured ? t("connectors.ms.savedConfigured") : t("connectors.ms.savedNotConfigured"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save Microsoft settings");
+      setError(e instanceof Error ? e.message : t("connectors.ms.savedError"));
     } finally {
       setMsSetupSaving(false);
     }
@@ -236,10 +270,10 @@ export function ConnectorsSection() {
     setInfo(null);
     try {
       await apiFetch(`/connectors/${connectionId}/sync/${resource}`, { method: "POST" });
-      setInfo(`Queued ${resource} sync for connection #${connectionId}.`);
+      setInfo(t("connectors.saved.queuedSync", { resource, id: connectionId }));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to queue sync");
+      setError(e instanceof Error ? e.message : t("connectors.errors.queueFailed"));
     }
   };
 
@@ -250,11 +284,11 @@ export function ConnectorsSection() {
     try {
       credentials = JSON.parse(credentialsJson) as Record<string, unknown>;
     } catch {
-      setError("Credentials must be valid JSON.");
+      setError(t("connectors.errors.invalidJson"));
       return;
     }
     if (!label.trim()) {
-      setError("Label is required.");
+      setError(t("connectors.errors.labelRequired"));
       return;
     }
     setLoading(true);
@@ -270,7 +304,7 @@ export function ConnectorsSection() {
       setLabel("");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save connection");
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
     } finally {
       setLoading(false);
     }
@@ -283,20 +317,20 @@ export function ConnectorsSection() {
       await apiFetch(`/connectors/${id}`, { method: "DELETE" });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to delete");
+      setError(e instanceof Error ? e.message : t("connectors.errors.deleteFailed"));
     } finally {
       setLoading(false);
     }
   };
 
+  const publicBaseTrimmed = oauthPublicBase.replace(/\/$/, "") || t("connectors.oauth.publicUrlFallback");
+  const googleRedirect = `${publicBaseTrimmed}/api/v1/oauth/google/callback`;
+  const msRedirect = `${publicBaseTrimmed}/api/v1/oauth/microsoft/callback`;
+
   return (
     <Card className="mt-8 p-5">
-      <h2 className="text-lg font-semibold text-slate-900">External connectors</h2>
-      <p className="mt-1 text-sm text-slate-600">
-        Connect your accounts with a single click. Google Workspace (Gmail, Calendar, Drive) uses OAuth 2.0 and
-        tokens are refreshed automatically. Mirrored data lives in Postgres and is available to the agent for
-        search and drafting. Writes (send, create event, upload) remain human-gated.
-      </p>
+      <h2 className="text-lg font-semibold text-slate-900">{t("connectors.title")}</h2>
+      <p className="mt-1 text-sm text-slate-600">{t("connectors.intro")}</p>
       {error ? (
         <div className="mt-3">
           <AlertBanner variant="error" message={error} onDismiss={() => setError(null)} />
@@ -309,77 +343,73 @@ export function ConnectorsSection() {
       ) : null}
 
       <div className="mt-4 rounded-md border border-sky-200 bg-sky-50/60 p-4">
-        <h3 className="text-sm font-semibold text-slate-900">This app&apos;s web address</h3>
+        <h3 className="text-sm font-semibold text-slate-900">{t("connectors.publicUrlTitle")}</h3>
         <p className="mt-1 text-xs text-slate-600">
-          Use the same address people type to open this site (example: <span className="font-mono">http://localhost:3002</span>{" "}
-          at home, or your real domain in production). No trailing slash. Google and Microsoft both use it for secure
-          return links after sign-in.
+          <RichText text={t("connectors.publicUrlIntro")} />
         </p>
         <label className="mt-2 block text-xs font-medium text-slate-800">
-          Public URL
+          {t("connectors.publicUrlLabel")}
           <Input
             className="mt-1 font-mono text-xs"
             value={oauthPublicBase}
             onChange={(e) => setOauthPublicBase(e.target.value)}
-            placeholder="https://your-site.example"
+            placeholder={t("connectors.publicUrlPlaceholder")}
             autoComplete="off"
           />
         </label>
-        <p className="mt-2 text-xs text-slate-500">
-          This value is saved when you click &quot;Save Google link&quot; or &quot;Save Microsoft link&quot; below.
-        </p>
+        <p className="mt-2 text-xs text-slate-500">{t("connectors.publicUrlHelp")}</p>
       </div>
 
       <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
         <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-semibold text-slate-900">Google Workspace</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{t("connectors.google.title")}</h3>
           <p className="text-xs text-slate-600">
-            Link Google once here (any signed-in person can do it). Then use{" "}
-            <span className="font-medium">Connect Google</span> to choose which mailbox and calendars to use.
+            <RichText text={t("connectors.google.intro")} />
           </p>
         </div>
 
-        <form className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3" onSubmit={(e) => void saveGoogleAppSetup(e)}>
-          <p className="text-xs font-medium text-slate-800">Step 1 — Google Cloud (external site)</p>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3"
+          onSubmit={(e) => void saveGoogleAppSetup(e)}
+        >
+          <p className="text-xs font-medium text-slate-800">{t("connectors.google.step1")}</p>
           <ol className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
             <li>
-              Open{" "}
+              {t("connectors.google.step1.line1Pre")}
               <a
                 className="font-medium text-slate-900 underline underline-offset-2"
                 href="https://console.cloud.google.com/apis/credentials"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Google Cloud Console → Credentials
-              </a>{" "}
-              and create an <span className="font-medium">OAuth client ID</span> of type{" "}
-              <span className="font-medium">Web application</span>.
+                {t("connectors.google.step1.linkLabel")}
+              </a>
+              <RichText text={t("connectors.google.step1.line1Post")} />
             </li>
             <li>
-              Under <span className="font-medium">Authorized redirect URIs</span>, add this exact line (copy–paste):{" "}
+              <RichText text={t("connectors.google.step1.line2")} />
               <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
-                {`${oauthPublicBase.replace(/\/$/, "") || "(set Public URL above)"}/api/v1/oauth/google/callback`}
+                {googleRedirect}
               </code>
             </li>
             <li>
-              Turn on the <span className="font-medium">Gmail</span>, <span className="font-medium">Calendar</span>, and{" "}
-              <span className="font-medium">Drive</span> APIs for that project.
+              <RichText text={t("connectors.google.step1.line3")} />
             </li>
           </ol>
 
-          <p className="text-xs font-medium text-slate-800">Step 2 — Paste into this page</p>
+          <p className="text-xs font-medium text-slate-800">{t("connectors.google.step2")}</p>
           <label className="text-xs font-medium text-slate-800">
-            Client ID (from Google)
+            {t("connectors.google.clientId")}
             <Input
               className="mt-1 font-mono text-xs"
               value={googleFormClientId}
               onChange={(e) => setGoogleFormClientId(e.target.value)}
-              placeholder="….apps.googleusercontent.com"
+              placeholder={t("connectors.google.clientIdPlaceholder")}
               autoComplete="off"
             />
           </label>
           <label className="text-xs font-medium text-slate-800">
-            Client secret (from Google)
+            {t("connectors.google.clientSecret")}
             <Input
               className="mt-1 font-mono text-xs"
               type="password"
@@ -387,8 +417,8 @@ export function ConnectorsSection() {
               onChange={(e) => setGoogleFormSecret(e.target.value)}
               placeholder={
                 googleApp?.has_saved_secret
-                  ? "Leave blank to keep the saved secret, or paste a new one to replace it"
-                  : "Paste the secret from Google (stored encrypted on this server)"
+                  ? t("connectors.google.secretSavedPlaceholder")
+                  : t("connectors.google.secretEmptyPlaceholder")
               }
               autoComplete="off"
             />
@@ -398,7 +428,7 @@ export function ConnectorsSection() {
             className="w-fit bg-slate-900 text-white hover:bg-slate-800"
             disabled={googleSetupSaving}
           >
-            {googleSetupSaving ? "Saving…" : "Save Google link"}
+            {googleSetupSaving ? t("connectors.google.saving") : t("connectors.google.saveLink")}
           </Button>
         </form>
 
@@ -407,104 +437,101 @@ export function ConnectorsSection() {
             type="button"
             className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
             disabled={!googleApp?.configured}
-            title={
-              googleApp?.configured
-                ? undefined
-                : "Save the Client ID and secret above first, then these buttons open Google sign-in."
-            }
+            title={googleApp?.configured ? undefined : t("connectors.google.tooltipSaveFirst")}
             onClick={() => void connectGoogle("all")}
           >
-            Connect Google (Gmail + Calendar + Drive)
+            {t("connectors.google.connectAll")}
           </Button>
           <Button
             type="button"
             disabled={!googleApp?.configured}
-            title={googleApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
+            title={googleApp?.configured ? undefined : t("connectors.google.tooltipCompleteStep2")}
             onClick={() => void connectGoogle("gmail")}
           >
-            Gmail only
+            {t("connectors.google.gmailOnly")}
           </Button>
           <Button
             type="button"
             disabled={!googleApp?.configured}
-            title={googleApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
+            title={googleApp?.configured ? undefined : t("connectors.google.tooltipCompleteStep2")}
             onClick={() => void connectGoogle("calendar")}
           >
-            Calendar only
+            {t("connectors.google.calendarOnly")}
           </Button>
           <Button
             type="button"
             disabled={!googleApp?.configured}
-            title={googleApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
+            title={googleApp?.configured ? undefined : t("connectors.google.tooltipCompleteStep2")}
             onClick={() => void connectGoogle("drive")}
           >
-            Drive only
+            {t("connectors.google.driveOnly")}
           </Button>
         </div>
       </div>
 
       <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
         <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-semibold text-slate-900">Microsoft 365 (Graph)</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{t("connectors.ms.title")}</h3>
           <p className="text-xs text-slate-600">
-            Link Microsoft Entra (Azure AD) once here. Then use <span className="font-medium">Connect Microsoft</span>{" "}
-            to sign in with the account that should own mail, calendar, and OneDrive.
+            <RichText text={t("connectors.ms.intro")} />
           </p>
         </div>
 
-        <form className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3" onSubmit={(e) => void saveMicrosoftAppSetup(e)}>
-          <p className="text-xs font-medium text-slate-800">Step 1 — Azure / Entra (external site)</p>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3"
+          onSubmit={(e) => void saveMicrosoftAppSetup(e)}
+        >
+          <p className="text-xs font-medium text-slate-800">{t("connectors.ms.step1")}</p>
           <ol className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
             <li>
-              Open{" "}
+              {t("connectors.ms.step1.line1Pre")}
               <a
                 className="font-medium text-slate-900 underline underline-offset-2"
                 href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Azure Portal → App registrations
+                {t("connectors.ms.step1.linkLabel")}
               </a>
-              , create a registration, then <span className="font-medium">Add a platform → Web</span>.
+              <RichText text={t("connectors.ms.step1.line1Post")} />
             </li>
             <li>
-              Under <span className="font-medium">Redirect URIs</span>, add this exact line:{" "}
+              <RichText text={t("connectors.ms.step1.line2")} />
               <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
-                {`${oauthPublicBase.replace(/\/$/, "") || "(set Public URL above)"}/api/v1/oauth/microsoft/callback`}
+                {msRedirect}
               </code>
             </li>
             <li>
-              Create a <span className="font-medium">Client secret</span> under Certificates &amp; secrets, and note the{" "}
-              <span className="font-medium">Application (client) ID</span> from the Overview page.
+              <RichText text={t("connectors.ms.step1.line3")} />
             </li>
           </ol>
 
-          <p className="text-xs font-medium text-slate-800">Step 2 — Paste into this page</p>
+          <p className="text-xs font-medium text-slate-800">{t("connectors.ms.step2")}</p>
           <label className="text-xs font-medium text-slate-800">
-            Application (client) ID
+            {t("connectors.ms.clientId")}
             <Input
               className="mt-1 font-mono text-xs"
               value={msFormClientId}
               onChange={(e) => setMsFormClientId(e.target.value)}
-              placeholder="Azure Overview → Application (client) ID"
+              placeholder={t("connectors.ms.clientIdPlaceholder")}
               autoComplete="off"
             />
           </label>
           <label className="text-xs font-medium text-slate-800">
-            Directory (tenant) ID or <span className="font-mono">common</span>
+            <RichText text={t("connectors.ms.tenant")} />
             <Input
               className="mt-1 font-mono text-xs"
               value={msFormTenant}
               onChange={(e) => setMsFormTenant(e.target.value)}
-              placeholder="common"
+              placeholder={t("connectors.ms.tenantPlaceholder")}
               autoComplete="off"
             />
             <span className="mt-1 block font-normal text-slate-500">
-              Use <span className="font-mono">common</span> unless your IT team gave you a specific tenant ID.
+              <RichText text={t("connectors.ms.tenantHelp")} />
             </span>
           </label>
           <label className="text-xs font-medium text-slate-800">
-            Client secret (from Azure)
+            {t("connectors.ms.clientSecret")}
             <Input
               className="mt-1 font-mono text-xs"
               type="password"
@@ -512,8 +539,8 @@ export function ConnectorsSection() {
               onChange={(e) => setMsFormSecret(e.target.value)}
               placeholder={
                 msApp?.has_saved_secret
-                  ? "Leave blank to keep the saved secret, or paste a new one to replace it"
-                  : "Paste the secret (stored encrypted on this server)"
+                  ? t("connectors.ms.secretSavedPlaceholder")
+                  : t("connectors.ms.secretEmptyPlaceholder")
               }
               autoComplete="off"
             />
@@ -523,7 +550,7 @@ export function ConnectorsSection() {
             className="w-fit bg-slate-900 text-white hover:bg-slate-800"
             disabled={msSetupSaving}
           >
-            {msSetupSaving ? "Saving…" : "Save Microsoft link"}
+            {msSetupSaving ? t("connectors.google.saving") : t("connectors.ms.saveLink")}
           </Button>
         </form>
 
@@ -532,38 +559,34 @@ export function ConnectorsSection() {
             type="button"
             className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
             disabled={!msApp?.configured}
-            title={
-              msApp?.configured
-                ? undefined
-                : "Save the Application ID and secret above first, then these buttons open Microsoft sign-in."
-            }
+            title={msApp?.configured ? undefined : t("connectors.ms.tooltipSaveFirst")}
             onClick={() => void connectMicrosoft("all")}
           >
-            Connect Microsoft (Mail + Calendar + OneDrive)
+            {t("connectors.ms.connectAll")}
           </Button>
           <Button
             type="button"
             disabled={!msApp?.configured}
-            title={msApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
+            title={msApp?.configured ? undefined : t("connectors.ms.tooltipCompleteStep2")}
             onClick={() => void connectMicrosoft("mail")}
           >
-            Mail only
+            {t("connectors.ms.mailOnly")}
           </Button>
           <Button
             type="button"
             disabled={!msApp?.configured}
-            title={msApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
+            title={msApp?.configured ? undefined : t("connectors.ms.tooltipCompleteStep2")}
             onClick={() => void connectMicrosoft("calendar")}
           >
-            Calendar only
+            {t("connectors.ms.calendarOnly")}
           </Button>
           <Button
             type="button"
             disabled={!msApp?.configured}
-            title={msApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
+            title={msApp?.configured ? undefined : t("connectors.ms.tooltipCompleteStep2")}
             onClick={() => void connectMicrosoft("drive")}
           >
-            OneDrive only
+            {t("connectors.ms.driveOnly")}
           </Button>
         </div>
       </div>
@@ -574,14 +597,14 @@ export function ConnectorsSection() {
           className="text-xs font-medium text-slate-600 underline-offset-2 hover:underline"
           onClick={() => setShowAdvanced((v) => !v)}
         >
-          {showAdvanced ? "Hide advanced" : "Advanced: add SMTP / mock / paste-a-token"}
+          {showAdvanced ? t("connectors.advanced.hide") : t("connectors.advanced.show")}
         </button>
       </div>
 
       {showAdvanced ? (
         <form className="mt-4 grid gap-3" onSubmit={(e) => void addConnection(e)}>
           <label className="text-sm font-medium text-slate-800">
-            Provider
+            {t("connectors.advanced.provider")}
             <select
               className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
               value={provider}
@@ -589,17 +612,22 @@ export function ConnectorsSection() {
             >
               {PROVIDER_EXAMPLES.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.label}
+                  {t(p.labelKey)}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-sm font-medium text-slate-800">
-            Label
-            <Input className="mt-1" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Work Gmail" />
+            {t("connectors.advanced.label")}
+            <Input
+              className="mt-1"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder={t("connectors.advanced.labelPlaceholder")}
+            />
           </label>
           <label className="text-sm font-medium text-slate-800">
-            Credentials (JSON)
+            {t("connectors.advanced.credentials")}
             <textarea
               className="mt-1 min-h-[120px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs"
               value={credentialsJson}
@@ -608,15 +636,15 @@ export function ConnectorsSection() {
             />
           </label>
           <Button type="submit" className="w-fit bg-slate-900 text-white hover:bg-slate-800" disabled={loading}>
-            Add connection
+            {t("connectors.advanced.add")}
           </Button>
         </form>
       ) : null}
 
       <div className="mt-6 space-y-2">
-        <h3 className="text-sm font-medium text-slate-800">Saved connections</h3>
+        <h3 className="text-sm font-medium text-slate-800">{t("connectors.saved.title")}</h3>
         {rows.length === 0 ? (
-          <p className="text-sm text-slate-500">None yet. Connect Google or Microsoft above to get started.</p>
+          <p className="text-sm text-slate-500">{t("connectors.saved.empty")}</p>
         ) : (
           <ul className="space-y-2">
             {rows.map((r) => {
@@ -624,10 +652,7 @@ export function ConnectorsSection() {
                 typeof r.meta === "object" && r.meta !== null && (r.meta as Record<string, unknown>).status === "needs_reauth";
               const syncList = syncRows[r.id] || [];
               return (
-                <li
-                  key={r.id}
-                  className="flex flex-col gap-2 rounded border border-slate-100 px-3 py-2 text-sm"
-                >
+                <li key={r.id} className="flex flex-col gap-2 rounded border border-slate-100 px-3 py-2 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span>
                       <span className="font-medium">{r.label}</span>{" "}
@@ -636,24 +661,24 @@ export function ConnectorsSection() {
                       </span>
                       {needsReauth ? (
                         <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                          needs reconnect
+                          {t("connectors.saved.needsReauth")}
                         </span>
                       ) : null}
                     </span>
                     <div className="flex gap-2">
                       {r.provider === "google_gmail" ? (
                         <Button type="button" className="text-xs" onClick={() => void triggerSync(r.id, "gmail")}>
-                          Sync now
+                          {t("connectors.saved.syncNow")}
                         </Button>
                       ) : null}
                       {r.provider === "google_calendar" ? (
                         <Button type="button" className="text-xs" onClick={() => void triggerSync(r.id, "calendar")}>
-                          Sync now
+                          {t("connectors.saved.syncNow")}
                         </Button>
                       ) : null}
                       {r.provider === "google_drive" ? (
                         <Button type="button" className="text-xs" onClick={() => void triggerSync(r.id, "drive")}>
-                          Sync now
+                          {t("connectors.saved.syncNow")}
                         </Button>
                       ) : null}
                       {r.provider === "graph_mail" ? (
@@ -662,7 +687,7 @@ export function ConnectorsSection() {
                           className="text-xs"
                           onClick={() => void triggerSync(r.id, "graph_mail")}
                         >
-                          Sync now
+                          {t("connectors.saved.syncNow")}
                         </Button>
                       ) : null}
                       {r.provider === "graph_calendar" ? (
@@ -671,7 +696,7 @@ export function ConnectorsSection() {
                           className="text-xs"
                           onClick={() => void triggerSync(r.id, "graph_calendar")}
                         >
-                          Sync now
+                          {t("connectors.saved.syncNow")}
                         </Button>
                       ) : null}
                       {r.provider === "graph_onedrive" ? (
@@ -680,7 +705,7 @@ export function ConnectorsSection() {
                           className="text-xs"
                           onClick={() => void triggerSync(r.id, "graph_drive")}
                         >
-                          Sync now
+                          {t("connectors.saved.syncNow")}
                         </Button>
                       ) : null}
                       <Button
@@ -689,7 +714,7 @@ export function ConnectorsSection() {
                         disabled={loading}
                         onClick={() => void remove(r.id)}
                       >
-                        Remove
+                        {t("connectors.saved.remove")}
                       </Button>
                     </div>
                   </div>
@@ -698,8 +723,12 @@ export function ConnectorsSection() {
                       {syncList.map((s) => (
                         <div key={`${s.connection_id}-${s.resource}`} className="rounded bg-slate-50 px-2 py-1">
                           <span className="font-mono">{s.resource}</span> · {s.status}
-                          {s.last_delta_at ? ` · last ${new Date(s.last_delta_at).toLocaleString()}` : ""}
-                          {s.error_count > 0 ? ` · errors ${s.error_count}` : ""}
+                          {s.last_delta_at
+                            ? ` · ${t("connectors.saved.lastSync", { when: new Date(s.last_delta_at).toLocaleString() })}`
+                            : ""}
+                          {s.error_count > 0
+                            ? ` · ${t("connectors.saved.errorsCount", { count: s.error_count })}`
+                            : ""}
                         </div>
                       ))}
                     </div>

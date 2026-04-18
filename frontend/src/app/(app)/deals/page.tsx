@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { isNonEmpty } from "@/lib/validation";
 import { Contact, Deal } from "@/types/api";
@@ -18,18 +19,19 @@ import { Contact, Deal } from "@/types/api";
 type Banner = { variant: "error" | "success" | "info"; message: string };
 
 export default function DealsPage() {
+  const { t } = useTranslation();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [contactId, setContactId] = useState("");
   const [title, setTitle] = useState("");
-  const [createErrors, setCreateErrors] = useState<{ contactId?: string; title?: string }>({});
+  const [createErrors, setCreateErrors] = useState<{ contactId?: TranslationKey; title?: TranslationKey }>({});
   const [banner, setBanner] = useState<Banner | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editStatus, setEditStatus] = useState("");
-  const [editErrors, setEditErrors] = useState<{ title?: string }>({});
+  const [editErrors, setEditErrors] = useState<{ title?: TranslationKey }>({});
 
   const [deleteTarget, setDeleteTarget] = useState<Deal | null>(null);
 
@@ -47,12 +49,12 @@ export default function DealsPage() {
     } catch (e) {
       setBanner({
         variant: "error",
-        message: e instanceof Error ? e.message : "Could not load data"
+        message: e instanceof Error ? e.message : t("deals.errors.loadFailed")
       });
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -61,9 +63,9 @@ export default function DealsPage() {
   const createDeal = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBanner(null);
-    const errs: { contactId?: string; title?: string } = {};
-    if (!contactId) errs.contactId = "Select a contact";
-    if (!isNonEmpty(title)) errs.title = "Title is required";
+    const errs: { contactId?: TranslationKey; title?: TranslationKey } = {};
+    if (!contactId) errs.contactId = "deals.errors.contactRequired";
+    if (!isNonEmpty(title)) errs.title = "deals.errors.titleRequired";
     setCreateErrors(errs);
     if (Object.keys(errs).length) return;
 
@@ -80,7 +82,7 @@ export default function DealsPage() {
       setContactId("");
       setTitle("");
       setCreateErrors({});
-      setBanner({ variant: "success", message: "Deal created" });
+      setBanner({ variant: "success", message: t("deals.created") });
       await load();
     }
   };
@@ -99,8 +101,8 @@ export default function DealsPage() {
 
   const saveEdit = async () => {
     if (editingId === null) return;
-    const errs: { title?: string } = {};
-    if (!isNonEmpty(editTitle)) errs.title = "Title is required";
+    const errs: { title?: TranslationKey } = {};
+    if (!isNonEmpty(editTitle)) errs.title = "deals.errors.titleRequired";
     setEditErrors(errs);
     if (Object.keys(errs).length) return;
 
@@ -112,7 +114,7 @@ export default function DealsPage() {
     );
     if (result) {
       setEditingId(null);
-      setBanner({ variant: "success", message: "Deal updated" });
+      setBanner({ variant: "success", message: t("deals.updated") });
       await load();
     }
   };
@@ -123,7 +125,7 @@ export default function DealsPage() {
     const result = await asyncAction.run(() => apiFetch(`/deals/${id}`, { method: "DELETE" }));
     if (result !== undefined) {
       setDeleteTarget(null);
-      setBanner({ variant: "success", message: "Deal deleted" });
+      setBanner({ variant: "success", message: t("deals.deleted") });
       if (editingId === id) setEditingId(null);
       await load();
     }
@@ -133,7 +135,7 @@ export default function DealsPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Deals</h1>
+      <h1 className="mb-4 text-2xl font-semibold">{t("deals.title")}</h1>
 
       {banner ? (
         <div className="mb-4">
@@ -155,29 +157,29 @@ export default function DealsPage() {
               disabled={noContacts}
               aria-invalid={Boolean(createErrors.contactId)}
             >
-              <option value="">{noContacts ? "No contacts — add one first" : "Select contact"}</option>
+              <option value="">{noContacts ? t("deals.noContactsOption") : t("deals.selectContact")}</option>
               {contacts.map((c) => (
                 <option key={c.id} value={String(c.id)}>
                   {c.name} {c.email ? `(${c.email})` : ""}
                 </option>
               ))}
             </Select>
-            {createErrors.contactId ? <p className="mt-1 text-xs text-red-600">{createErrors.contactId}</p> : null}
+            {createErrors.contactId ? <p className="mt-1 text-xs text-red-600">{t(createErrors.contactId)}</p> : null}
             {noContacts ? (
               <p className="mt-1 text-sm text-slate-600">
                 <Link href="/contacts" className="text-slate-900 underline">
-                  Create a contact
+                  {t("deals.createContactCta")}
                 </Link>{" "}
-                before adding a deal.
+                {t("deals.beforeAdding")}
               </p>
             ) : null}
           </div>
           <div className="min-w-0 flex-1">
-            <Input placeholder="Deal title" value={title} onChange={(e) => setTitle(e.target.value)} aria-invalid={Boolean(createErrors.title)} />
-            {createErrors.title ? <p className="mt-1 text-xs text-red-600">{createErrors.title}</p> : null}
+            <Input placeholder={t("deals.dealTitlePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} aria-invalid={Boolean(createErrors.title)} />
+            {createErrors.title ? <p className="mt-1 text-xs text-red-600">{t(createErrors.title)}</p> : null}
           </div>
           <Button type="submit" disabled={asyncAction.pending || noContacts}>
-            Create
+            {t("common.create")}
           </Button>
         </form>
       </Card>
@@ -186,23 +188,23 @@ export default function DealsPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Title</TH>
-              <TH>Status</TH>
-              <TH>Contact</TH>
-              <TH className="w-[200px]">Actions</TH>
+              <TH>{t("deals.colTitle")}</TH>
+              <TH>{t("deals.colStatus")}</TH>
+              <TH>{t("deals.colContact")}</TH>
+              <TH className="w-[200px]">{t("common.actions")}</TH>
             </TR>
           </THead>
           <TBody>
             {listLoading ? (
               <TR>
                 <TD colSpan={4} className="text-slate-500">
-                  Loading…
+                  {t("common.loading")}
                 </TD>
               </TR>
             ) : deals.length === 0 ? (
               <TR>
                 <TD colSpan={4} className="text-slate-600">
-                  No deals yet. Create one above.
+                  {t("deals.empty")}
                 </TD>
               </TR>
             ) : (
@@ -214,19 +216,19 @@ export default function DealsPage() {
                       <>
                         <TD>
                           <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} aria-invalid={Boolean(editErrors.title)} />
-                          {editErrors.title ? <p className="mt-1 text-xs text-red-600">{editErrors.title}</p> : null}
+                          {editErrors.title ? <p className="mt-1 text-xs text-red-600">{t(editErrors.title)}</p> : null}
                         </TD>
                         <TD>
-                          <Input value={editStatus} onChange={(e) => setEditStatus(e.target.value)} placeholder="Status" />
+                          <Input value={editStatus} onChange={(e) => setEditStatus(e.target.value)} placeholder={t("deals.statusPlaceholder")} />
                         </TD>
                         <TD>{contact ? contact.name : deal.contact_id}</TD>
                         <TD>
                           <div className="flex flex-wrap gap-1">
                             <Button type="button" className="text-xs" onClick={() => void saveEdit()} disabled={asyncAction.pending}>
-                              Save
+                              {t("common.save")}
                             </Button>
                             <Button type="button" className="text-xs border-dashed" onClick={cancelEdit} disabled={asyncAction.pending}>
-                              Cancel
+                              {t("common.cancel")}
                             </Button>
                           </div>
                         </TD>
@@ -239,10 +241,10 @@ export default function DealsPage() {
                         <TD>
                           <div className="flex flex-wrap gap-1">
                             <Button type="button" className="text-xs" onClick={() => startEdit(deal)}>
-                              Edit
+                              {t("common.edit")}
                             </Button>
                             <Button type="button" className="text-xs text-red-700" onClick={() => setDeleteTarget(deal)}>
-                              Delete
+                              {t("common.delete")}
                             </Button>
                           </div>
                         </TD>
@@ -258,8 +260,8 @@ export default function DealsPage() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete deal?"
-        description={deleteTarget ? `Remove “${deleteTarget.title}”?` : undefined}
+        title={t("deals.deleteTitle")}
+        description={deleteTarget ? t("deals.deleteDescription", { title: deleteTarget.title }) : undefined}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDelete()}
         pending={asyncAction.pending}

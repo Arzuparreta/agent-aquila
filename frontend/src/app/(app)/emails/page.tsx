@@ -8,20 +8,23 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { isNonEmpty, isValidEmail } from "@/lib/validation";
 import { Email, EmailDraftResponse } from "@/types/api";
 
 type Banner = { variant: "error" | "success" | "info"; message: string };
+type FormErrors = { senderEmail?: TranslationKey; subject?: TranslationKey; body?: TranslationKey };
 
 export default function EmailsPage() {
+  const { t } = useTranslation();
   const [emails, setEmails] = useState<Email[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [senderEmail, setSenderEmail] = useState("");
   const [senderName, setSenderName] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [formErrors, setFormErrors] = useState<{ senderEmail?: string; subject?: string; body?: string }>({});
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [banner, setBanner] = useState<Banner | null>(null);
 
   const [draftFor, setDraftFor] = useState<number | null>(null);
@@ -37,22 +40,22 @@ export default function EmailsPage() {
     } catch (e) {
       setBanner({
         variant: "error",
-        message: e instanceof Error ? e.message : "Could not load emails"
+        message: e instanceof Error ? e.message : t("emails.errors.loadFailed")
       });
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const validateIngest = () => {
-    const errs: { senderEmail?: string; subject?: string; body?: string } = {};
-    if (!isValidEmail(senderEmail)) errs.senderEmail = "Enter a valid sender email";
-    if (!isNonEmpty(subject)) errs.subject = "Subject is required";
-    if (!isNonEmpty(body)) errs.body = "Body is required";
+  const validateIngest = (): FormErrors => {
+    const errs: FormErrors = {};
+    if (!isValidEmail(senderEmail)) errs.senderEmail = "emails.errors.invalidSender";
+    if (!isNonEmpty(subject)) errs.subject = "emails.errors.subjectRequired";
+    if (!isNonEmpty(body)) errs.body = "emails.errors.bodyRequired";
     return errs;
   };
 
@@ -80,7 +83,7 @@ export default function EmailsPage() {
       setSubject("");
       setBody("");
       setFormErrors({});
-      setBanner({ variant: "success", message: "Email ingested" });
+      setBanner({ variant: "success", message: t("emails.ingested") });
       await load();
     }
   };
@@ -97,7 +100,7 @@ export default function EmailsPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Emails</h1>
+      <h1 className="mb-4 text-2xl font-semibold">{t("emails.title")}</h1>
 
       {banner ? (
         <div className="mb-4">
@@ -113,20 +116,20 @@ export default function EmailsPage() {
       <Card className="mb-4">
         <form className="grid gap-2 md:grid-cols-2" onSubmit={createEmail}>
           <div>
-            <Input placeholder="Sender email" value={senderEmail} onChange={(e) => setSenderEmail(e.target.value)} aria-invalid={Boolean(formErrors.senderEmail)} />
-            {formErrors.senderEmail ? <p className="mt-1 text-xs text-red-600">{formErrors.senderEmail}</p> : null}
+            <Input placeholder={t("emails.senderEmailPlaceholder")} value={senderEmail} onChange={(e) => setSenderEmail(e.target.value)} aria-invalid={Boolean(formErrors.senderEmail)} />
+            {formErrors.senderEmail ? <p className="mt-1 text-xs text-red-600">{t(formErrors.senderEmail)}</p> : null}
           </div>
-          <Input placeholder="Sender name" value={senderName} onChange={(e) => setSenderName(e.target.value)} />
+          <Input placeholder={t("emails.senderNamePlaceholder")} value={senderName} onChange={(e) => setSenderName(e.target.value)} />
           <div className="md:col-span-2">
-            <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} aria-invalid={Boolean(formErrors.subject)} />
-            {formErrors.subject ? <p className="mt-1 text-xs text-red-600">{formErrors.subject}</p> : null}
+            <Input placeholder={t("emails.subjectPlaceholder")} value={subject} onChange={(e) => setSubject(e.target.value)} aria-invalid={Boolean(formErrors.subject)} />
+            {formErrors.subject ? <p className="mt-1 text-xs text-red-600">{t(formErrors.subject)}</p> : null}
           </div>
           <div className="md:col-span-2">
-            <Input placeholder="Body" value={body} onChange={(e) => setBody(e.target.value)} aria-invalid={Boolean(formErrors.body)} />
-            {formErrors.body ? <p className="mt-1 text-xs text-red-600">{formErrors.body}</p> : null}
+            <Input placeholder={t("emails.bodyPlaceholder")} value={body} onChange={(e) => setBody(e.target.value)} aria-invalid={Boolean(formErrors.body)} />
+            {formErrors.body ? <p className="mt-1 text-xs text-red-600">{t(formErrors.body)}</p> : null}
           </div>
           <Button className="md:col-span-2" type="submit" disabled={asyncAction.pending}>
-            Ingest Email
+            {t("emails.ingestButton")}
           </Button>
         </form>
       </Card>
@@ -134,7 +137,7 @@ export default function EmailsPage() {
       {draftFor ? (
         <Card className="mb-4">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-semibold">Draft for email #{draftFor}</h2>
+            <h2 className="font-semibold">{t("emails.draftFor", { id: draftFor })}</h2>
             <Button
               className="text-xs"
               onClick={() => {
@@ -143,7 +146,7 @@ export default function EmailsPage() {
                 asyncAction.reset();
               }}
             >
-              Close
+              {t("common.close")}
             </Button>
           </div>
           {asyncAction.error ? (
@@ -159,9 +162,9 @@ export default function EmailsPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Sender</TH>
-              <TH>Subject</TH>
-              <TH>Received</TH>
+              <TH>{t("emails.colSender")}</TH>
+              <TH>{t("emails.colSubject")}</TH>
+              <TH>{t("emails.colReceived")}</TH>
               <TH />
             </TR>
           </THead>
@@ -169,13 +172,13 @@ export default function EmailsPage() {
             {listLoading ? (
               <TR>
                 <TD colSpan={4} className="text-slate-500">
-                  Loading…
+                  {t("common.loading")}
                 </TD>
               </TR>
             ) : emails.length === 0 ? (
               <TR>
                 <TD colSpan={4} className="text-slate-600">
-                  No emails yet. Ingest one above.
+                  {t("emails.empty")}
                 </TD>
               </TR>
             ) : (
@@ -186,7 +189,7 @@ export default function EmailsPage() {
                   <TD>{new Date(email.received_at).toLocaleString()}</TD>
                   <TD>
                     <Button className="text-xs" type="button" onClick={() => void requestDraft(email.id)} disabled={asyncAction.pending}>
-                      Draft reply
+                      {t("emails.draftReply")}
                     </Button>
                   </TD>
                 </TR>

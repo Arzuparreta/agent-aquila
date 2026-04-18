@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import { AIProvider } from "@/types/api";
 
 /**
@@ -37,6 +38,7 @@ type RegistryState = {
 };
 
 export function useProviderRegistry(): RegistryState {
+  const { t } = useTranslation();
   const [state, setState] = useState<RegistryState>({
     providers: cachedValue ?? [],
     loading: cachedValue === null,
@@ -56,13 +58,13 @@ export function useProviderRegistry(): RegistryState {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : "Failed to load providers";
+        const message = error instanceof Error ? error.message : t("settings.failedLoadProviders");
         setState({ providers: [], loading: false, error: message });
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   return state;
 }

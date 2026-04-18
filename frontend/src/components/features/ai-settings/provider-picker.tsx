@@ -1,6 +1,7 @@
 "use client";
 
 import { Combobox, ComboboxOption } from "@/components/ui/combobox";
+import { useTranslation } from "@/lib/i18n";
 import { AIProvider } from "@/types/api";
 
 type ProviderPickerProps = {
@@ -11,6 +12,7 @@ type ProviderPickerProps = {
 };
 
 export function ProviderPicker({ providers, value, onChange, disabled }: ProviderPickerProps) {
+  const { t } = useTranslation();
   const options: ComboboxOption<string>[] = providers.map((provider) => ({
     value: provider.id,
     label: provider.label,
@@ -22,9 +24,9 @@ export function ProviderPicker({ providers, value, onChange, disabled }: Provide
       value={value}
       onChange={onChange}
       options={options}
-      placeholder="Choose a provider..."
+      placeholder={t("settings.providerPlaceholder")}
       disabled={disabled}
-      ariaLabel="AI provider"
+      ariaLabel={t("settings.providerAriaLabel")}
     />
   );
 }

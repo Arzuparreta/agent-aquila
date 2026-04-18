@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type AdvancedSectionProps = {
@@ -15,8 +16,10 @@ type AdvancedSectionProps = {
  * models, "disable AI", clear-key). Intentionally low-chrome so it fits
  * inside the main Card without competing with the primary form.
  */
-export function AdvancedSection({ children, defaultOpen = false, summary = "Advanced options" }: AdvancedSectionProps) {
+export function AdvancedSection({ children, defaultOpen = false, summary }: AdvancedSectionProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen);
+  const label = summary ?? t("advanced.summary");
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50/50">
       <button
@@ -28,7 +31,7 @@ export function AdvancedSection({ children, defaultOpen = false, summary = "Adva
           open && "border-b border-slate-200"
         )}
       >
-        <span>{summary}</span>
+        <span>{label}</span>
         <svg
           width="10"
           height="10"

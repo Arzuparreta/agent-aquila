@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import { ProposalPreview } from "@/components/features/cockpit/proposal-preview";
 import type { PendingOperationPreview, PendingProposal } from "@/types/api";
 
@@ -16,6 +17,7 @@ type Props = {
 };
 
 export function PendingOperationCard({ proposal, busy, onApprove, onReject }: Props) {
+  const { t } = useTranslation();
   const [structured, setStructured] = useState<PendingOperationPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -31,14 +33,14 @@ export function PendingOperationCard({ proposal, busy, onApprove, onReject }: Pr
       } catch (e) {
         if (!cancelled) {
           setStructured(null);
-          setPreviewError(e instanceof Error ? e.message : "Preview failed");
+          setPreviewError(e instanceof Error ? e.message : t("cockpit.previewFailed"));
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [proposal.id]);
+  }, [proposal.id, t]);
 
   return (
     <Card className="p-3 text-sm">
@@ -58,7 +60,7 @@ export function PendingOperationCard({ proposal, busy, onApprove, onReject }: Pr
       <ProposalPreview proposal={proposal} />
       {structured ? (
         <details className="mt-2 text-xs text-slate-600">
-          <summary className="cursor-pointer font-medium text-slate-800">Structured preview (API)</summary>
+          <summary className="cursor-pointer font-medium text-slate-800">{t("cockpit.structuredPreview")}</summary>
           <pre className="mt-1 max-h-40 overflow-auto rounded border border-slate-100 bg-slate-50 p-2 font-mono text-[11px]">
             {JSON.stringify(structured.preview, null, 2)}
           </pre>
@@ -72,10 +74,10 @@ export function PendingOperationCard({ proposal, busy, onApprove, onReject }: Pr
           disabled={busy}
           onClick={() => onApprove(proposal.id)}
         >
-          Approve
+          {t("cockpit.approve")}
         </Button>
         <Button type="button" className="border-dashed" disabled={busy} onClick={() => onReject(proposal.id)}>
-          Reject
+          {t("cockpit.reject")}
         </Button>
       </div>
     </Card>

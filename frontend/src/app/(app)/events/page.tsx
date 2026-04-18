@@ -11,13 +11,16 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { isNonEmpty, isValidISODate } from "@/lib/validation";
 import { CalendarEvent, Deal } from "@/types/api";
 
 type Banner = { variant: "error" | "success" | "info"; message: string };
+type DateErrors = { venue?: TranslationKey; eventDate?: TranslationKey };
 
 export default function EventsPage() {
+  const { t } = useTranslation();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -25,7 +28,7 @@ export default function EventsPage() {
   const [eventDate, setEventDate] = useState("");
   const [city, setCity] = useState("");
   const [dealId, setDealId] = useState("");
-  const [createErrors, setCreateErrors] = useState<{ venue?: string; eventDate?: string }>({});
+  const [createErrors, setCreateErrors] = useState<DateErrors>({});
   const [banner, setBanner] = useState<Banner | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -34,7 +37,7 @@ export default function EventsPage() {
   const [editCity, setEditCity] = useState("");
   const [editDealId, setEditDealId] = useState("");
   const [editStatus, setEditStatus] = useState("");
-  const [editErrors, setEditErrors] = useState<{ venue?: string; eventDate?: string }>({});
+  const [editErrors, setEditErrors] = useState<DateErrors>({});
 
   const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null);
 
@@ -49,22 +52,22 @@ export default function EventsPage() {
     } catch (e) {
       setBanner({
         variant: "error",
-        message: e instanceof Error ? e.message : "Could not load data"
+        message: e instanceof Error ? e.message : t("events.errors.loadFailed")
       });
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const validateEventFields = (venueVal: string, dateVal: string) => {
-    const errs: { venue?: string; eventDate?: string } = {};
-    if (!isNonEmpty(venueVal)) errs.venue = "Venue is required";
-    if (!dateVal.trim()) errs.eventDate = "Date is required";
-    else if (!isValidISODate(dateVal)) errs.eventDate = "Use a valid date";
+  const validateEventFields = (venueVal: string, dateVal: string): DateErrors => {
+    const errs: DateErrors = {};
+    if (!isNonEmpty(venueVal)) errs.venue = "events.errors.venueRequired";
+    if (!dateVal.trim()) errs.eventDate = "events.errors.dateRequired";
+    else if (!isValidISODate(dateVal)) errs.eventDate = "events.errors.dateInvalid";
     return errs;
   };
 
@@ -92,7 +95,7 @@ export default function EventsPage() {
       setCity("");
       setDealId("");
       setCreateErrors({});
-      setBanner({ variant: "success", message: "Event created" });
+      setBanner({ variant: "success", message: t("events.created") });
       await load();
     }
   };
@@ -132,7 +135,7 @@ export default function EventsPage() {
     );
     if (result) {
       setEditingId(null);
-      setBanner({ variant: "success", message: "Event updated" });
+      setBanner({ variant: "success", message: t("events.updated") });
       await load();
     }
   };
@@ -143,7 +146,7 @@ export default function EventsPage() {
     const result = await asyncAction.run(() => apiFetch(`/events/${id}`, { method: "DELETE" }));
     if (result !== undefined) {
       setDeleteTarget(null);
-      setBanner({ variant: "success", message: "Event deleted" });
+      setBanner({ variant: "success", message: t("events.deleted") });
       if (editingId === id) setEditingId(null);
       await load();
     }
@@ -153,7 +156,7 @@ export default function EventsPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Events</h1>
+      <h1 className="mb-4 text-2xl font-semibold">{t("events.title")}</h1>
 
       {banner ? (
         <div className="mb-4">
@@ -169,17 +172,17 @@ export default function EventsPage() {
       <Card className="mb-4">
         <form className="grid gap-2 md:grid-cols-2" onSubmit={createEvent}>
           <div>
-            <Input placeholder="Venue name" value={venue} onChange={(e) => setVenue(e.target.value)} aria-invalid={Boolean(createErrors.venue)} />
-            {createErrors.venue ? <p className="mt-1 text-xs text-red-600">{createErrors.venue}</p> : null}
+            <Input placeholder={t("events.venuePlaceholder")} value={venue} onChange={(e) => setVenue(e.target.value)} aria-invalid={Boolean(createErrors.venue)} />
+            {createErrors.venue ? <p className="mt-1 text-xs text-red-600">{t(createErrors.venue)}</p> : null}
           </div>
           <div>
             <Input type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} aria-invalid={Boolean(createErrors.eventDate)} />
-            {createErrors.eventDate ? <p className="mt-1 text-xs text-red-600">{createErrors.eventDate}</p> : null}
+            {createErrors.eventDate ? <p className="mt-1 text-xs text-red-600">{t(createErrors.eventDate)}</p> : null}
           </div>
-          <Input placeholder="City (optional)" value={city} onChange={(e) => setCity(e.target.value)} />
+          <Input placeholder={t("events.cityPlaceholder")} value={city} onChange={(e) => setCity(e.target.value)} />
           <div>
             <Select value={dealId} onChange={(e) => setDealId(e.target.value)}>
-              <option value="">— No deal —</option>
+              <option value="">{t("events.noDealOption")}</option>
               {deals.map((d) => (
                 <option key={d.id} value={String(d.id)}>
                   {d.title} (#{d.id})
@@ -188,16 +191,16 @@ export default function EventsPage() {
             </Select>
             {noDeals ? (
               <p className="mt-1 text-sm text-slate-600">
-                No deals yet.{" "}
+                {t("events.noDealsLine1")}{" "}
                 <Link href="/deals" className="text-slate-900 underline">
-                  Create a deal
+                  {t("events.createDealCta")}
                 </Link>{" "}
-                to link an event.
+                {t("events.toLinkEvent")}
               </p>
             ) : null}
           </div>
           <Button className="md:col-span-2" type="submit" disabled={asyncAction.pending}>
-            Create event
+            {t("events.createButton")}
           </Button>
         </form>
       </Card>
@@ -206,25 +209,25 @@ export default function EventsPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Venue</TH>
-              <TH>Date</TH>
-              <TH>City</TH>
-              <TH>Deal</TH>
-              <TH>Status</TH>
-              <TH className="w-[220px]">Actions</TH>
+              <TH>{t("events.colVenue")}</TH>
+              <TH>{t("events.colDate")}</TH>
+              <TH>{t("events.colCity")}</TH>
+              <TH>{t("events.colDeal")}</TH>
+              <TH>{t("events.colStatus")}</TH>
+              <TH className="w-[220px]">{t("common.actions")}</TH>
             </TR>
           </THead>
           <TBody>
             {listLoading ? (
               <TR>
                 <TD colSpan={6} className="text-slate-500">
-                  Loading…
+                  {t("common.loading")}
                 </TD>
               </TR>
             ) : events.length === 0 ? (
               <TR>
                 <TD colSpan={6} className="text-slate-600">
-                  No events yet. Create one above.
+                  {t("events.empty")}
                 </TD>
               </TR>
             ) : (
@@ -236,18 +239,18 @@ export default function EventsPage() {
                       <>
                         <TD>
                           <Input value={editVenue} onChange={(e) => setEditVenue(e.target.value)} aria-invalid={Boolean(editErrors.venue)} />
-                          {editErrors.venue ? <p className="mt-1 text-xs text-red-600">{editErrors.venue}</p> : null}
+                          {editErrors.venue ? <p className="mt-1 text-xs text-red-600">{t(editErrors.venue)}</p> : null}
                         </TD>
                         <TD>
                           <Input type="date" value={editEventDate} onChange={(e) => setEditEventDate(e.target.value)} aria-invalid={Boolean(editErrors.eventDate)} />
-                          {editErrors.eventDate ? <p className="mt-1 text-xs text-red-600">{editErrors.eventDate}</p> : null}
+                          {editErrors.eventDate ? <p className="mt-1 text-xs text-red-600">{t(editErrors.eventDate)}</p> : null}
                         </TD>
                         <TD>
-                          <Input value={editCity} onChange={(e) => setEditCity(e.target.value)} placeholder="City" />
+                          <Input value={editCity} onChange={(e) => setEditCity(e.target.value)} placeholder={t("events.cityShortPlaceholder")} />
                         </TD>
                         <TD>
                           <Select value={editDealId} onChange={(e) => setEditDealId(e.target.value)}>
-                            <option value="">— No deal —</option>
+                            <option value="">{t("events.noDealOption")}</option>
                             {deals.map((d) => (
                               <option key={d.id} value={String(d.id)}>
                                 {d.title}
@@ -256,15 +259,15 @@ export default function EventsPage() {
                           </Select>
                         </TD>
                         <TD>
-                          <Input value={editStatus} onChange={(e) => setEditStatus(e.target.value)} placeholder="Status" />
+                          <Input value={editStatus} onChange={(e) => setEditStatus(e.target.value)} placeholder={t("events.statusPlaceholder")} />
                         </TD>
                         <TD>
                           <div className="flex flex-wrap gap-1">
                             <Button type="button" className="text-xs" onClick={() => void saveEdit()} disabled={asyncAction.pending}>
-                              Save
+                              {t("common.save")}
                             </Button>
                             <Button type="button" className="text-xs border-dashed" onClick={cancelEdit} disabled={asyncAction.pending}>
-                              Cancel
+                              {t("common.cancel")}
                             </Button>
                           </div>
                         </TD>
@@ -279,10 +282,10 @@ export default function EventsPage() {
                         <TD>
                           <div className="flex flex-wrap gap-1">
                             <Button type="button" className="text-xs" onClick={() => startEdit(ev)}>
-                              Edit
+                              {t("common.edit")}
                             </Button>
                             <Button type="button" className="text-xs text-red-700" onClick={() => setDeleteTarget(ev)}>
-                              Delete
+                              {t("common.delete")}
                             </Button>
                           </div>
                         </TD>
@@ -298,8 +301,12 @@ export default function EventsPage() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete event?"
-        description={deleteTarget ? `Remove “${deleteTarget.venue_name}” on ${deleteTarget.event_date}?` : undefined}
+        title={t("events.deleteTitle")}
+        description={
+          deleteTarget
+            ? t("events.deleteDescription", { venue: deleteTarget.venue_name, date: deleteTarget.event_date })
+            : undefined
+        }
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDelete()}
         pending={asyncAction.pending}

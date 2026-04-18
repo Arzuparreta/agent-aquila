@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
 import { isExtraField } from "@/lib/ai-providers";
+import { useTranslation } from "@/lib/i18n";
 import {
   AIProvider,
   ListModelsResponse,
@@ -103,6 +104,7 @@ type UseSettingsFormOptions = {
 };
 
 export function useSettingsForm({ providers, providersLoading }: UseSettingsFormOptions): UseSettingsFormApi {
+  const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [settings, setSettings] = useState<UserAISettings | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
@@ -143,10 +145,10 @@ export function useSettingsForm({ providers, providersLoading }: UseSettingsForm
       });
       setLoadState("loaded");
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Could not load settings");
+      setLoadError(error instanceof Error ? error.message : t("settings.couldNotLoad"));
       setLoadState("error");
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();
@@ -254,14 +256,14 @@ export function useSettingsForm({ providers, providersLoading }: UseSettingsForm
     } catch (error) {
       setTested({
         ok: false,
-        message: error instanceof Error ? error.message : "Unexpected error",
+        message: error instanceof Error ? error.message : t("settings.test.unexpected"),
         code: "unknown"
       });
       setModels([]);
     } finally {
       setTesting(false);
     }
-  }, [buildRequestConfig, refreshModels]);
+  }, [buildRequestConfig, refreshModels, t]);
 
   const save = useCallback(async () => {
     if (!provider) return null;
@@ -284,11 +286,11 @@ export function useSettingsForm({ providers, providersLoading }: UseSettingsForm
       const data = await apiFetch<UserAISettings>("/ai/settings", { method: "PATCH", body: JSON.stringify(body) });
       setSettings(data);
       setForm((current) => ({ ...current, apiKey: "" }));
-      return { ok: true, message: "Settings saved." };
+      return { ok: true, message: t("settings.savedToast") };
     } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : "Could not save settings" };
+      return { ok: false, message: error instanceof Error ? error.message : t("settings.couldNotSave") };
     }
-  }, [form, provider]);
+  }, [form, provider, t]);
 
   const clearKey = useCallback(async () => {
     try {

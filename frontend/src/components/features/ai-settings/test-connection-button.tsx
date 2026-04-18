@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { TestConnectionResult } from "@/types/api";
 
@@ -12,6 +13,7 @@ type TestConnectionButtonProps = {
 };
 
 export function TestConnectionButton({ onTest, pending, result, disabled }: TestConnectionButtonProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button
@@ -25,12 +27,12 @@ export function TestConnectionButton({ onTest, pending, result, disabled }: Test
       >
         {pending ? (
           <span className="inline-flex items-center gap-2">
-            <Spinner /> Testing...
+            <Spinner /> {t("settings.test.testing")}
           </span>
         ) : result?.ok ? (
-          "Test again"
+          t("settings.test.again")
         ) : (
-          "Test connection"
+          t("settings.test.button")
         )}
       </Button>
       {result ? <StatusBadge result={result} /> : null}
@@ -39,6 +41,7 @@ export function TestConnectionButton({ onTest, pending, result, disabled }: Test
 }
 
 function StatusBadge({ result }: { result: TestConnectionResult }) {
+  const { t } = useTranslation();
   if (result.ok) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-800">
@@ -53,31 +56,31 @@ function StatusBadge({ result }: { result: TestConnectionResult }) {
     >
       <AlertIcon />
       <span>
-        <span className="font-semibold">{humanCode(result.code)}:</span> {result.message}
+        <span className="font-semibold">{t(humanCodeKey(result.code))}:</span> {result.message}
         {result.detail ? <span className="ml-1 text-red-600/70">({result.detail})</span> : null}
       </span>
     </span>
   );
 }
 
-function humanCode(code: string | null | undefined): string {
+function humanCodeKey(code: string | null | undefined): TranslationKey {
   switch (code) {
     case "invalid_api_key":
-      return "Invalid API key";
+      return "settings.test.code.invalid_api_key";
     case "unauthorized":
-      return "Unauthorized";
+      return "settings.test.code.unauthorized";
     case "not_found":
-      return "Not found";
+      return "settings.test.code.not_found";
     case "network":
-      return "Network error";
+      return "settings.test.code.network";
     case "timeout":
-      return "Timed out";
+      return "settings.test.code.timeout";
     case "missing_field":
-      return "Missing field";
+      return "settings.test.code.missing_field";
     case "bad_response":
-      return "Bad response";
+      return "settings.test.code.bad_response";
     default:
-      return "Failed";
+      return "settings.test.code.unknown";
   }
 }
 

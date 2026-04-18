@@ -9,31 +9,34 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { isNonEmpty, isValidEmail } from "@/lib/validation";
 import { Contact } from "@/types/api";
 
 type Banner = { variant: "error" | "success" | "info"; message: string };
+type FieldErrorKeys = { name?: TranslationKey; email?: TranslationKey };
 
-function validateContactFields(name: string, email: string) {
-  const errs: { name?: string; email?: string } = {};
-  if (!isNonEmpty(name)) errs.name = "Name is required";
-  if (email.trim() && !isValidEmail(email)) errs.email = "Enter a valid email or leave blank";
+function validateContactFields(name: string, email: string): FieldErrorKeys {
+  const errs: FieldErrorKeys = {};
+  if (!isNonEmpty(name)) errs.name = "contacts.errors.nameRequired";
+  if (email.trim() && !isValidEmail(email)) errs.email = "contacts.errors.invalidEmail";
   return errs;
 }
 
 export default function ContactsPage() {
+  const { t } = useTranslation();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [createErrors, setCreateErrors] = useState<{ name?: string; email?: string }>({});
+  const [createErrors, setCreateErrors] = useState<FieldErrorKeys>({});
   const [banner, setBanner] = useState<Banner | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
-  const [editErrors, setEditErrors] = useState<{ name?: string; email?: string }>({});
+  const [editErrors, setEditErrors] = useState<FieldErrorKeys>({});
 
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
 
@@ -47,12 +50,12 @@ export default function ContactsPage() {
     } catch (e) {
       setBanner({
         variant: "error",
-        message: e instanceof Error ? e.message : "Could not load contacts"
+        message: e instanceof Error ? e.message : t("contacts.errors.loadFailed")
       });
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -75,7 +78,7 @@ export default function ContactsPage() {
       setName("");
       setEmail("");
       setCreateErrors({});
-      setBanner({ variant: "success", message: "Contact created" });
+      setBanner({ variant: "success", message: t("contacts.created") });
       await load();
     }
   };
@@ -106,7 +109,7 @@ export default function ContactsPage() {
     );
     if (result) {
       setEditingId(null);
-      setBanner({ variant: "success", message: "Contact updated" });
+      setBanner({ variant: "success", message: t("contacts.updated") });
       await load();
     }
   };
@@ -117,7 +120,7 @@ export default function ContactsPage() {
     const result = await asyncAction.run(() => apiFetch(`/contacts/${id}`, { method: "DELETE" }));
     if (result !== undefined) {
       setDeleteTarget(null);
-      setBanner({ variant: "success", message: "Contact deleted" });
+      setBanner({ variant: "success", message: t("contacts.deleted") });
       if (editingId === id) setEditingId(null);
       await load();
     }
@@ -125,7 +128,7 @@ export default function ContactsPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Contacts</h1>
+      <h1 className="mb-4 text-2xl font-semibold">{t("contacts.title")}</h1>
 
       {banner ? (
         <div className="mb-4">
@@ -141,15 +144,15 @@ export default function ContactsPage() {
       <Card className="mb-4">
         <form className="flex flex-col gap-2 md:flex-row md:items-start" onSubmit={createContact}>
           <div className="min-w-0 flex-1">
-            <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={Boolean(createErrors.name)} />
-            {createErrors.name ? <p className="mt-1 text-xs text-red-600">{createErrors.name}</p> : null}
+            <Input placeholder={t("contacts.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} aria-invalid={Boolean(createErrors.name)} />
+            {createErrors.name ? <p className="mt-1 text-xs text-red-600">{t(createErrors.name)}</p> : null}
           </div>
           <div className="min-w-0 flex-1">
-            <Input placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={Boolean(createErrors.email)} />
-            {createErrors.email ? <p className="mt-1 text-xs text-red-600">{createErrors.email}</p> : null}
+            <Input placeholder={t("contacts.emailPlaceholder")} value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={Boolean(createErrors.email)} />
+            {createErrors.email ? <p className="mt-1 text-xs text-red-600">{t(createErrors.email)}</p> : null}
           </div>
           <Button type="submit" disabled={asyncAction.pending}>
-            Create
+            {t("common.create")}
           </Button>
         </form>
       </Card>
@@ -158,23 +161,23 @@ export default function ContactsPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Name</TH>
-              <TH>Email</TH>
-              <TH>Role</TH>
-              <TH className="w-[200px]">Actions</TH>
+              <TH>{t("contacts.colName")}</TH>
+              <TH>{t("contacts.colEmail")}</TH>
+              <TH>{t("contacts.colRole")}</TH>
+              <TH className="w-[200px]">{t("common.actions")}</TH>
             </TR>
           </THead>
           <TBody>
             {listLoading ? (
               <TR>
                 <TD colSpan={4} className="text-slate-500">
-                  Loading…
+                  {t("common.loading")}
                 </TD>
               </TR>
             ) : contacts.length === 0 ? (
               <TR>
                 <TD colSpan={4} className="text-slate-600">
-                  No contacts yet. Add one above.
+                  {t("contacts.empty")}
                 </TD>
               </TR>
             ) : (
@@ -184,20 +187,20 @@ export default function ContactsPage() {
                     <>
                       <TD>
                         <Input value={editName} onChange={(e) => setEditName(e.target.value)} aria-invalid={Boolean(editErrors.name)} />
-                        {editErrors.name ? <p className="mt-1 text-xs text-red-600">{editErrors.name}</p> : null}
+                        {editErrors.name ? <p className="mt-1 text-xs text-red-600">{t(editErrors.name)}</p> : null}
                       </TD>
                       <TD>
                         <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} aria-invalid={Boolean(editErrors.email)} />
-                        {editErrors.email ? <p className="mt-1 text-xs text-red-600">{editErrors.email}</p> : null}
+                        {editErrors.email ? <p className="mt-1 text-xs text-red-600">{t(editErrors.email)}</p> : null}
                       </TD>
                       <TD>{contact.role}</TD>
                       <TD>
                         <div className="flex flex-wrap gap-1">
                           <Button type="button" className="text-xs" onClick={() => void saveEdit()} disabled={asyncAction.pending}>
-                            Save
+                            {t("common.save")}
                           </Button>
                           <Button type="button" className="text-xs border-dashed" onClick={cancelEdit} disabled={asyncAction.pending}>
-                            Cancel
+                            {t("common.cancel")}
                           </Button>
                         </div>
                       </TD>
@@ -210,10 +213,10 @@ export default function ContactsPage() {
                       <TD>
                         <div className="flex flex-wrap gap-1">
                           <Button type="button" className="text-xs" onClick={() => startEdit(contact)}>
-                            Edit
+                            {t("common.edit")}
                           </Button>
                           <Button type="button" className="text-xs text-red-700" onClick={() => setDeleteTarget(contact)}>
-                            Delete
+                            {t("common.delete")}
                           </Button>
                         </div>
                       </TD>
@@ -228,8 +231,8 @@ export default function ContactsPage() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete contact?"
-        description={deleteTarget ? `Remove “${deleteTarget.name}” permanently?` : undefined}
+        title={t("contacts.deleteTitle")}
+        description={deleteTarget ? t("contacts.deleteDescription", { name: deleteTarget.name }) : undefined}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDelete()}
         pending={asyncAction.pending}
