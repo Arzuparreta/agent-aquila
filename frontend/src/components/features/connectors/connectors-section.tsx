@@ -221,15 +221,55 @@ export function ConnectorsSection() {
             <p className="text-xs text-slate-600">
               {googleStatus?.configured
                 ? `OAuth client configured. Redirect URI: ${googleStatus.redirect_uri}`
-                : "OAuth not configured on server. Set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET and restart."}
+                : "OAuth is not set up on this server yet. The connect buttons stay disabled until an administrator adds credentials (see below)."}
             </p>
           </div>
         </div>
+        {!googleStatus?.configured ? (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            <p className="font-medium">For whoever runs this deployment</p>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-amber-900">
+              <li>
+                In{" "}
+                <a
+                  className="font-medium underline underline-offset-2 hover:text-amber-950"
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Google Cloud Console → Credentials
+                </a>
+                , create an OAuth 2.0 Client ID (Web application).
+              </li>
+              <li>
+                Under Authorized redirect URIs, add exactly:{" "}
+                <code className="break-all rounded bg-white/80 px-1 py-0.5 text-[11px] text-slate-800">
+                  {googleStatus?.redirect_uri ?? "…load status to see URI…"}
+                </code>
+              </li>
+              <li>Enable Gmail API, Google Calendar API, and Google Drive API for the project.</li>
+              <li>
+                Set <code className="rounded bg-white/80 px-1">GOOGLE_OAUTH_CLIENT_ID</code> and{" "}
+                <code className="rounded bg-white/80 px-1">GOOGLE_OAUTH_CLIENT_SECRET</code> in the API server
+                environment, set <code className="rounded bg-white/80 px-1">GOOGLE_OAUTH_REDIRECT_BASE</code> to match
+                your API origin, then restart the backend.
+              </li>
+            </ol>
+            <p className="mt-2 text-amber-800">
+              After that, end users only click Connect and sign in with Google — no API keys to paste.
+            </p>
+          </div>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
             className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
             disabled={!googleStatus?.configured}
+            title={
+              googleStatus?.configured
+                ? undefined
+                : "Disabled until GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are set on the server."
+            }
             onClick={() => void connectGoogle("all")}
           >
             Connect Google (Gmail + Calendar + Drive)
@@ -237,6 +277,11 @@ export function ConnectorsSection() {
           <Button
             type="button"
             disabled={!googleStatus?.configured}
+            title={
+              googleStatus?.configured
+                ? undefined
+                : "Disabled until Google OAuth is configured on the server."
+            }
             onClick={() => void connectGoogle("gmail")}
           >
             Gmail only
@@ -244,6 +289,11 @@ export function ConnectorsSection() {
           <Button
             type="button"
             disabled={!googleStatus?.configured}
+            title={
+              googleStatus?.configured
+                ? undefined
+                : "Disabled until Google OAuth is configured on the server."
+            }
             onClick={() => void connectGoogle("calendar")}
           >
             Calendar only
@@ -251,6 +301,11 @@ export function ConnectorsSection() {
           <Button
             type="button"
             disabled={!googleStatus?.configured}
+            title={
+              googleStatus?.configured
+                ? undefined
+                : "Disabled until Google OAuth is configured on the server."
+            }
             onClick={() => void connectGoogle("drive")}
           >
             Drive only
