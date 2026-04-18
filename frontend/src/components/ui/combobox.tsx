@@ -74,11 +74,22 @@ export function Combobox<T extends string>({
     if (!trimmed || trimmed === (selectedOption?.label ?? "").toLowerCase()) {
       return options;
     }
+    // Value was typed or defaulted in from outside the option list (e.g. a
+    // stale registry default). Until the user edits the field, show every
+    // option instead of filtering them out with a query that matches nothing.
+    if (
+      allowCustom &&
+      !selectedOption &&
+      value &&
+      query.trim() === String(value).trim()
+    ) {
+      return options;
+    }
     return options.filter((option) => {
       const haystack = `${option.label} ${option.description ?? ""} ${option.value}`.toLowerCase();
       return haystack.includes(trimmed);
     });
-  }, [open, options, query, selectedOption]);
+  }, [allowCustom, open, options, query, selectedOption, value]);
 
   React.useEffect(() => {
     if (!open) return;
