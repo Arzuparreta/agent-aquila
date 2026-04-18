@@ -11,14 +11,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.models.connector_connection import ConnectorConnection
 from app.models.contact import Contact
 from app.models.deal import Deal
+from app.models.drive_file import DriveFile
 from app.models.email import Email
 from app.models.event import Event
 from app.models.user import User
 from app.services.agent_service import AgentService
 from app.services.embedding_client import EmbeddingClient
 from app.services.embedding_vector import pad_embedding
+from app.services.llm_client import LLMClient
 from app.services.user_ai_settings_service import UserAISettingsService
 
 
@@ -332,3 +335,808 @@ async def test_propose_connector_teams_message(db_session, crm_user: User, agent
         },
     )
     assert out["kind"] == "connector_teams_message"
+
+
+# ---------------------------------------------------------------------------
+# Drive tools — list & search are scoped to the user's own connector
+# connections so one user never sees another user's mirrored Drive metadata.
+# ---------------------------------------------------------------------------
+
+
+async def _make_drive_connection(db_session, user: User, *, provider: str = "google") -> ConnectorConnection:
+    conn = ConnectorConnection(
+        user_id=user.id,
+        provider=provider,
+        label=f"{provider} drive",
+        credentials_encrypted="x",
+        meta={"status": "active"},
+    )
+    db_session.add(conn)
+    await db_session.flush()
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_tool_list_drive_files_returns_user_files_only(db_session, crm_user: User) -> None:
+    """list_drive_files must return only the calling user's files (newest first)."""
+    mine = await _make_drive_connection(db_session, crm_user)
+    other_user = User(
+        email="someone-else@example.com",
+        hashed_password="x",
+        full_name="Other",
+    )
+    db_session.add(other_user)
+    await db_session.flush()
+    theirs = await _make_drive_connection(db_session, other_user)
+
+    db_session.add_all(
+        [
+            DriveFile(
+                connection_id=mine.id,
+                provider_file_id="f1",
+                name="My Rider 2026.pdf",
+                mime_type="application/pdf",
+                modified_time=datetime(2026, 4, 1, tzinfo=UTC),
+            ),
+            DriveFile(
+                connection_id=mine.id,
+                provider_file_id="f2",
+                name="Tour Notes.docx",
+                mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                modified_time=datetime(2026, 4, 17, tzinfo=UTC),
+            ),
+            DriveFile(
+                connection_id=theirs.id,
+                provider_file_id="x1",
+                name="LEAK should not appear.txt",
+                mime_type="text/plain",
+                modified_time=datetime(2026, 4, 18, tzinfo=UTC),
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    out = await AgentService._tool_list_drive_files(db_session, crm_user, {})
+    assert "files" in out, out
+    names = [f["name"] for f in out["files"]]
+    assert names == ["Tour Notes.docx", "My Rider 2026.pdf"]
+    assert out["count"] == 2
+    assert all("LEAK" not in n for n in names)
+
+
+@pytest.mark.asyncio
+async def test_tool_list_drive_files_distinguishes_no_connection_from_empty(
+    db_session, crm_user: User
+) -> None:
+    """When the user has no Drive connection, return a hint so the agent can
+    suggest connecting Drive instead of pretending it is empty."""
+    out = await AgentService._tool_list_drive_files(db_session, crm_user, {})
+    assert out["files"] == []
+    assert out["has_drive_connection"] is False
+    assert "connect" in out["hint"].lower()
+
+    await _make_drive_connection(db_session, crm_user)
+    out2 = await AgentService._tool_list_drive_files(db_session, crm_user, {})
+    assert out2["files"] == []
+    assert out2["has_drive_connection"] is True
+    assert "connected" in out2["hint"].lower()
+
+
+@pytest.mark.asyncio
+async def test_tool_search_drive_is_user_scoped(db_session, crm_user: User) -> None:
+    """search_drive must not leak files from other users' Drive connections."""
+    mine = await _make_drive_connection(db_session, crm_user)
+    other_user = User(email="leak@example.com", hashed_password="x", full_name="Other")
+    db_session.add(other_user)
+    await db_session.flush()
+    theirs = await _make_drive_connection(db_session, other_user)
+    db_session.add_all(
+        [
+            DriveFile(
+                connection_id=mine.id,
+                provider_file_id="m1",
+                name="rider final.pdf",
+                modified_time=datetime(2026, 4, 1, tzinfo=UTC),
+            ),
+            DriveFile(
+                connection_id=theirs.id,
+                provider_file_id="t1",
+                name="rider draft.pdf",
+                modified_time=datetime(2026, 4, 2, tzinfo=UTC),
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    out = await AgentService._tool_search_drive(db_session, crm_user, {"query": "rider"})
+    assert [f["name"] for f in out["hits"]] == ["rider final.pdf"]
+
+
+# ---------------------------------------------------------------------------
+# Tool-schema registry — every tool advertised to the model must be wired
+# to a concrete dispatcher branch, otherwise the model picks a tool we
+# silently can't run.
+# ---------------------------------------------------------------------------
+
+
+def test_agent_tool_schemas_are_dispatchable() -> None:
+    """Every entry in ``AGENT_TOOLS`` must be routable by ``_dispatch_tool``.
+
+    This is the single guard that prevents the "model picks a tool we don't
+    actually handle" class of bugs that produced the original ``invalid
+    phase`` error in chat.
+    """
+    from app.services.agent_tools import AGENT_TOOL_NAMES, FINAL_ANSWER_TOOL_NAME
+
+    # final_answer is the conversation-terminator tool: handled directly by
+    # the run loop (it sets run.assistant_reply), not by ``_dispatch_tool``.
+    advertised = AGENT_TOOL_NAMES - {FINAL_ANSWER_TOOL_NAME}
+
+    dispatchable = (
+        {
+            "hybrid_rag_search",
+            "get_entity",
+            "search_emails",
+            "get_thread",
+            "list_calendar_events",
+            "search_drive",
+            "list_drive_files",
+            "get_drive_file_text",
+            "list_connectors",
+            "list_automations",
+            "create_automation",
+            "update_automation",
+            "delete_automation",
+            "start_connector_setup",
+            "submit_connector_credentials",
+            "start_oauth_flow",
+        }
+        | set(AgentService._AUTO_APPLY_TOOL_KIND.keys())
+        | set(AgentService._PROPOSAL_TOOL_METHODS.keys())
+    )
+
+    # Hard guard: every tool advertised to the model MUST have a dispatcher.
+    # Otherwise the model will pick a tool we silently can't run.
+    missing = advertised - dispatchable
+    assert not missing, f"Tools advertised but not dispatched: {sorted(missing)}"
+
+    # Soft guard: dispatchers that aren't advertised are fine ONLY when
+    # they're explicitly marked as deprecated/back-compat. The current
+    # legacy back-compat list is the six CRM-write proposal methods that
+    # have been superseded by the ``apply_*`` auto-apply variants but are
+    # kept as no-op-callable for older clients. If you add a new dispatcher
+    # without advertising it to the model, add it here intentionally.
+    legacy_back_compat = {
+        "propose_create_contact",
+        "propose_update_contact",
+        "propose_create_deal",
+        "propose_update_deal",
+        "propose_create_event",
+        "propose_update_event",
+    }
+    extra = (dispatchable - AGENT_TOOL_NAMES) - legacy_back_compat
+    assert not extra, (
+        "Dispatchable tools missing from the advertised AGENT_TOOLS schema: "
+        f"{sorted(extra)}"
+    )
+
+
+def test_agent_tool_schemas_are_openai_function_format() -> None:
+    """Each schema must be a valid OpenAI function-tool definition."""
+    from app.services.agent_tools import AGENT_TOOLS
+
+    seen: set[str] = set()
+    for tool in AGENT_TOOLS:
+        assert tool["type"] == "function"
+        fn = tool["function"]
+        assert isinstance(fn["name"], str) and fn["name"]
+        assert fn["name"] not in seen, f"Duplicate tool name: {fn['name']}"
+        seen.add(fn["name"])
+        assert isinstance(fn["description"], str) and fn["description"]
+        params = fn["parameters"]
+        assert params["type"] == "object"
+        assert isinstance(params.get("properties", {}), dict)
+
+
+# ---------------------------------------------------------------------------
+# run_agent loop — uses native function/tool calling. The model picks tools
+# from the typed schema; the loop executes them and feeds results back as
+# ``role: "tool"`` messages until the model returns a plain answer.
+# ---------------------------------------------------------------------------
+
+
+def _assistant_tool_call_response(*calls: tuple[str, dict]):
+    """Build a fake ``ChatResponse`` requesting one or more tool calls."""
+    from app.services.llm_client import ChatResponse, ChatToolCall
+
+    import json as _json
+
+    parsed = []
+    raw = []
+    for idx, (name, arguments) in enumerate(calls):
+        raw_args = _json.dumps(arguments)
+        parsed.append(
+            ChatToolCall(
+                id=f"call_test_{idx + 1}",
+                name=name,
+                arguments=arguments,
+                raw_arguments=raw_args,
+            )
+        )
+        raw.append(
+            {
+                "id": f"call_test_{idx + 1}",
+                "type": "function",
+                "function": {"name": name, "arguments": raw_args},
+            }
+        )
+    return ChatResponse(
+        content="",
+        tool_calls=parsed,
+        raw_message={"role": "assistant", "content": None, "tool_calls": raw},
+    )
+
+
+def _final_answer(text: str, citations: list[str] | None = None):
+    """Shortcut: a single ``final_answer`` tool call (the terminator)."""
+    args: dict = {"text": text}
+    if citations is not None:
+        args["citations"] = citations
+    return _assistant_tool_call_response(("final_answer", args))
+
+
+def _assistant_text_response(text: str):  # noqa: D401 — kept for the rare lazy-text path
+    from app.services.llm_client import ChatResponse
+
+    return ChatResponse(content=text, tool_calls=[], raw_message={"role": "assistant", "content": text})
+
+
+@pytest.mark.asyncio
+async def test_run_agent_drive_listing_uses_native_tool_call(
+    db_session, crm_user: User
+) -> None:
+    """End-to-end golden path: 'qué archivos tengo?' must:
+
+    1. Issue a real ``list_drive_files`` tool call (via native function calling),
+    2. Receive the result and feed it back as a ``role:"tool"`` message,
+    3. Terminate via the ``final_answer`` tool call with grounded content.
+
+    This is the exact flow that was broken before — small local models
+    pattern-matched a poisoned chat history and emitted a free-form text
+    answer instead of calling the tool. The fix uses
+    ``tool_choice="required"`` + a ``final_answer`` terminator so emitting
+    free-form text is structurally impossible.
+    """
+    conn = await _make_drive_connection(db_session, crm_user)
+    db_session.add(
+        DriveFile(
+            connection_id=conn.id,
+            provider_file_id="r1",
+            name="Rider Festival 2026.pdf",
+            mime_type="application/pdf",
+            modified_time=datetime(2026, 4, 17, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    turns = iter(
+        [
+            _assistant_tool_call_response(("list_drive_files", {"limit": 20})),
+            _final_answer(
+                "Tienes 1 archivo en tu Drive: Rider Festival 2026.pdf",
+                citations=["drive_file:1"],
+            ),
+        ]
+    )
+
+    captured_messages: list[list[dict]] = []
+    captured_tools: list[list[dict]] = []
+    captured_choice: list = []
+
+    async def _fake_chat_with_tools(*_args, messages, tools, tool_choice, **_kwargs):
+        captured_messages.append([dict(m) for m in messages])
+        captured_tools.append(tools)
+        captured_choice.append(tool_choice)
+        return next(turns)
+
+    with patch.object(
+        LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake_chat_with_tools)
+    ):
+        run = await AgentService.run_agent(db_session, crm_user, "¿Qué archivos tengo?")
+
+    assert run.status == "completed", run.error
+    assert run.assistant_reply and "Rider Festival 2026.pdf" in run.assistant_reply
+    assert "drive_file:1" in run.assistant_reply  # citations rendered
+
+    # tool_choice must be "required" on every turn — this is the structural
+    # guard that prevents lazy text-only replies.
+    assert all(c == "required" for c in captured_choice), captured_choice
+
+    # Both the data tool and the final_answer terminator must be in the schema.
+    advertised = {t["function"]["name"] for t in captured_tools[0]}
+    assert "list_drive_files" in advertised
+    assert "final_answer" in advertised
+
+    # Tool result must be threaded back as role:"tool" before the model talks.
+    second_turn = captured_messages[1]
+    tool_msgs = [m for m in second_turn if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["name"] == "list_drive_files"
+    assert "Rider Festival 2026.pdf" in tool_msgs[0]["content"]
+
+    # Run history must record both the data call AND the final_answer call.
+    tool_steps = [s for s in run.steps if s.kind == "tool"]
+    assert [s.name for s in tool_steps] == ["list_drive_files", "final_answer"]
+    assert tool_steps[0].payload["result"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_agent_completes_via_final_answer_terminator(
+    db_session, crm_user: User
+) -> None:
+    """A simple 'Hola' should terminate via ``final_answer`` — no real data
+    tool needed — and the artist sees the model's text verbatim."""
+    text = "¡Hola! ¿En qué puedo ayudarte hoy?"
+    with patch.object(
+        LLMClient,
+        "chat_with_tools",
+        new=AsyncMock(return_value=_final_answer(text)),
+    ):
+        run = await AgentService.run_agent(db_session, crm_user, "Hola")
+    assert run.status == "completed"
+    assert run.assistant_reply == text
+
+
+@pytest.mark.asyncio
+async def test_run_agent_unknown_tool_call_returns_valid_names_for_recovery(
+    db_session, crm_user: User
+) -> None:
+    """If the model hallucinates a tool name that isn't in our alias map,
+    the dispatcher must feed back BOTH the error and the list of valid
+    tool names (including ``final_answer``) so the model can self-correct
+    on the next turn."""
+    turns = iter(
+        [
+            # Truly unknown name (not in the alias map).
+            _assistant_tool_call_response(("frobnicate_widgets", {})),
+            # After seeing valid_tool_names in the error, the model picks the
+            # right tool.
+            _assistant_tool_call_response(("list_drive_files", {})),
+            _final_answer("No tienes archivos en Drive todavía."),
+        ]
+    )
+
+    captured_messages: list[list[dict]] = []
+
+    async def _fake(*_args, messages, **_kwargs):
+        captured_messages.append([dict(m) for m in messages])
+        return next(turns)
+
+    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
+        run = await AgentService.run_agent(db_session, crm_user, "qué archivos tengo")
+
+    assert run.status == "completed"
+    tool_steps = [s for s in run.steps if s.kind == "tool"]
+    assert [s.name for s in tool_steps] == [
+        "frobnicate_widgets",
+        "list_drive_files",
+        "final_answer",
+    ]
+    err = tool_steps[0].payload["result"]
+    assert err["error"].startswith("unknown tool")
+    assert "list_drive_files" in err["valid_tool_names"]
+    # final_answer must be presented as a valid escape hatch so the model
+    # can always terminate gracefully.
+    assert "final_answer" in err["valid_tool_names"]
+
+    # The recovery turn must have seen the valid tool names in the tool result.
+    second_turn_tool_msgs = [m for m in captured_messages[1] if m.get("role") == "tool"]
+    assert second_turn_tool_msgs and "list_drive_files" in second_turn_tool_msgs[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_aliases_gemma_google_search_to_rag(
+    db_session, crm_user: User
+) -> None:
+    """Gemma 3/4 has a strong RLHF prior to emit ``google:search`` even when
+    we advertise our own tools. We alias that to ``hybrid_rag_search`` and
+    coerce the ``{"queries": [...]}`` arg shape so the call actually executes
+    instead of looping on 'unknown tool'."""
+    turns = iter(
+        [
+            _assistant_tool_call_response(("google:search", {"queries": ["riders festival"]})),
+            _final_answer("No encontré nada relevante."),
+        ]
+    )
+
+    async def _fake(*_args, **_kwargs):
+        return next(turns)
+
+    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
+        run = await AgentService.run_agent(db_session, crm_user, "qué tienes")
+
+    assert run.status == "completed"
+    tool_steps = [s for s in run.steps if s.kind == "tool"]
+    # Step name must be the canonical resolved name, not the hallucinated one.
+    assert tool_steps[0].name == "hybrid_rag_search"
+    # And the args were rewritten so the underlying handler actually ran.
+    assert tool_steps[0].payload["args"]["query"] == "riders festival"
+    # The result must NOT be an "unknown tool" error — the alias resolved
+    # successfully and the handler ran (it may still surface a runtime
+    # error like "no embedding backend" in CI; that's a different concern).
+    res = tool_steps[0].payload["result"]
+    assert "valid_tool_names" not in res, (
+        "google:search must NOT come back as 'unknown tool' — it should be "
+        f"aliased to hybrid_rag_search. Got: {res!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_breaker_fires_after_repeated_unknown_calls(
+    db_session, crm_user: User
+) -> None:
+    """If the model spends multiple turns in a row only emitting unknown
+    tool names (Gemma's failure mode where it ignores valid_tool_names and
+    keeps calling a hallucinated function), the loop-breaker must abort
+    with a graceful synthesized reply — NOT exhaust the step budget."""
+    # Two consecutive "google:search-but-not-aliasable" turns should trip the
+    # breaker. We use a name the alias map doesn't know about.
+    turns = iter(
+        [
+            _assistant_tool_call_response(("totally_made_up_tool_a", {})),
+            _assistant_tool_call_response(("totally_made_up_tool_b", {})),
+            # If the breaker doesn't fire this third turn would complete the
+            # run successfully; the assertion below proves it never runs.
+            _final_answer("should not reach here"),
+        ]
+    )
+
+    async def _fake(*_args, **_kwargs):
+        return next(turns)
+
+    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
+        run = await AgentService.run_agent(db_session, crm_user, "haz algo raro")
+
+    # Run completes (artist gets a reply) but the error field records why.
+    assert run.status == "completed"
+    assert run.error and "loop_breaker" in run.error
+    assert run.assistant_reply and "reformular" in run.assistant_reply.lower()
+
+
+def test_select_tool_palette_filters_to_drive_intent() -> None:
+    """The palette filter must cut a 30-tool schema down to a small,
+    intent-relevant subset so small local models can actually pick the
+    right tool instead of defaulting to ``google:search`` etc."""
+    from app.services.agent_service import _select_tool_palette
+
+    palette = _select_tool_palette("¿Qué archivos tengo en mi drive?")
+    names = {t["function"]["name"] for t in palette}
+    assert "list_drive_files" in names
+    assert "search_drive" in names
+    assert "final_answer" in names
+    # Calendar / email / connector tools must NOT pollute the palette for a
+    # pure file-listing intent.
+    assert "list_calendar_events" not in names
+    assert "search_emails" not in names
+    # And the palette must be substantially smaller than the full schema.
+    from app.services.agent_tools import AGENT_TOOLS
+    assert len(palette) < len(AGENT_TOOLS) // 2
+
+
+def test_select_tool_palette_falls_back_to_full_schema_when_unclear() -> None:
+    """Generic / chitchat messages must keep the full palette so we never
+    accidentally strip the model of a tool it might need."""
+    from app.services.agent_service import _select_tool_palette
+    from app.services.agent_tools import AGENT_TOOLS
+
+    palette = _select_tool_palette("hola, ¿cómo estás?")
+    assert len(palette) == len(AGENT_TOOLS)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_passes_intent_filtered_palette_for_drive_question(
+    db_session, crm_user: User
+) -> None:
+    """End-to-end: when the artist asks about Drive files, the actual
+    ``tools=`` array sent to the LLM must be the small drive-only subset."""
+    turns = iter(
+        [
+            _assistant_tool_call_response(("list_drive_files", {})),
+            _final_answer("Sin archivos."),
+        ]
+    )
+    captured_tools: list[list[dict]] = []
+
+    async def _fake(*_args, tools, **_kwargs):
+        captured_tools.append(tools)
+        return next(turns)
+
+    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
+        run = await AgentService.run_agent(
+            db_session, crm_user, "¿Qué archivos tengo en mi drive?"
+        )
+
+    assert run.status == "completed"
+    first_palette_names = {t["function"]["name"] for t in captured_tools[0]}
+    assert "list_drive_files" in first_palette_names
+    assert "search_emails" not in first_palette_names
+    assert "list_calendar_events" not in first_palette_names
+
+
+@pytest.mark.asyncio
+async def test_run_agent_shrinks_palette_to_force_final_answer_after_budget(
+    db_session, crm_user: User
+) -> None:
+    """If the model keeps calling data tools without ever wrapping up
+    (Gemma's infinite-search failure mode), once the data-call budget is
+    spent the loop must SHRINK the tools array to just ``final_answer``
+    so the model is structurally forced to terminate. This is the global
+    fix that protects every tool, not just Drive-specific ones."""
+    # The model loops forever on hybrid_rag_search (which is what aliasing
+    # google:search resolves to in production). Once the budget is spent
+    # the next call must be made with a single-tool palette = final_answer
+    # only — so the model has no other tool to pick.
+    rag_call = ("hybrid_rag_search", {"query": "anything"})
+    turns = iter(
+        [
+            _assistant_tool_call_response(rag_call),
+            _assistant_tool_call_response(rag_call),
+            _assistant_tool_call_response(rag_call),
+            _assistant_tool_call_response(rag_call),
+            # 5th turn: budget exhausted → palette shrunk → model must
+            # call final_answer.
+            _final_answer("Encontré algunas cosas pero nada concreto."),
+        ]
+    )
+
+    captured_tools: list[list[dict]] = []
+
+    async def _fake(*_args, tools, **_kwargs):
+        captured_tools.append(tools)
+        return next(turns)
+
+    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
+        run = await AgentService.run_agent(db_session, crm_user, "qué hay")
+
+    assert run.status == "completed"
+    assert run.assistant_reply and "Encontré" in run.assistant_reply
+
+    # The first 4 turns saw the full palette.
+    full_palette_size = len(captured_tools[0])
+    assert full_palette_size > 5, (
+        "expected a multi-tool palette on the first turn; "
+        f"got {full_palette_size}"
+    )
+    for i in range(4):
+        assert len(captured_tools[i]) == full_palette_size
+
+    # The 5th turn (budget spent) must have ONLY final_answer in the palette.
+    assert len(captured_tools[4]) == 1
+    assert captured_tools[4][0]["function"]["name"] == "final_answer"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_falls_back_to_text_when_provider_ignores_tool_choice(
+    db_session, crm_user: User
+) -> None:
+    """Some providers / older Ollama versions ignore ``tool_choice="required"``
+    and return text-only despite the tools array. We accept that as a final
+    answer rather than failing the run, so the artist still gets a reply."""
+    with patch.object(
+        LLMClient,
+        "chat_with_tools",
+        new=AsyncMock(return_value=_assistant_text_response("respuesta lazy")),
+    ):
+        run = await AgentService.run_agent(db_session, crm_user, "x")
+    assert run.status == "completed"
+    assert run.assistant_reply == "respuesta lazy"
+
+
+# ---------------------------------------------------------------------------
+# Connector sync-health surfacing
+# ---------------------------------------------------------------------------
+# The agent's read tools must include a sync_health field so the model can
+# warn the artist when the upstream sync is broken (e.g. Drive API disabled,
+# token revoked) — before the redesign there was NO way for the artist to
+# learn about silent worker failures. The sync_health summary is also written
+# in artist-friendly Spanish so the model can quote it directly.
+
+async def _seed_sync_state(
+    db_session,
+    connection: ConnectorConnection,
+    *,
+    resource: str,
+    status: str = "error",
+    last_error: str = "",
+    error_count: int = 1,
+):
+    from app.models.connection_sync_state import ConnectionSyncState
+
+    state = ConnectionSyncState(
+        connection_id=connection.id,
+        resource=resource,
+        status=status,
+        last_error=last_error,
+        error_count=error_count,
+    )
+    db_session.add(state)
+    await db_session.flush()
+    return state
+
+
+@pytest.mark.asyncio
+async def test_list_drive_files_surfaces_sync_health_when_api_disabled(
+    db_session, crm_user: User
+) -> None:
+    """When the Drive sync is failing because the GCP API is disabled, the
+    list_drive_files result must include a sync_health.ok=False payload with
+    a Spanish-language summary the model can echo to the artist verbatim.
+    Otherwise the artist sees 'no files' with no explanation of why."""
+    conn = await _make_drive_connection(db_session, crm_user, provider="google_drive")
+    await _seed_sync_state(
+        db_session,
+        conn,
+        resource="drive",
+        status="error",
+        last_error=(
+            'Drive API 403: { "error": { "code": 403, "message": '
+            '"Google Drive API has not been used in project 12345 before '
+            'or it is disabled. ..." } }'
+        ),
+        error_count=9,
+    )
+
+    out = await AgentService._tool_list_drive_files(db_session, crm_user, {})
+    assert "sync_health" in out
+    sh = out["sync_health"]
+    assert sh["ok"] is False
+    assert "Drive" in sh["summary"]
+    assert "API correspondiente está desactivado" in sh["summary"]
+    assert any(e["status"] == "error" for e in sh["errors"])
+
+
+@pytest.mark.asyncio
+async def test_list_drive_files_sync_health_ok_when_no_errors(
+    db_session, crm_user: User
+) -> None:
+    """Healthy connections must not pollute results with phantom warnings."""
+    conn = await _make_drive_connection(db_session, crm_user, provider="google_drive")
+    await _seed_sync_state(db_session, conn, resource="drive", status="idle")
+    db_session.add(
+        DriveFile(
+            connection_id=conn.id,
+            provider_file_id="ok1",
+            name="Healthy Doc.pdf",
+            mime_type="application/pdf",
+            modified_time=datetime(2026, 4, 18, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    out = await AgentService._tool_list_drive_files(db_session, crm_user, {})
+    assert out["sync_health"]["ok"] is True
+    assert len(out["files"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_calendar_events_surfaces_sync_health(
+    db_session, crm_user: User
+) -> None:
+    """Same surfacing must apply to calendar — when the upstream Calendar
+    sync errors out, list_calendar_events must include the warning so the
+    model can tell the artist why the agenda is empty/stale."""
+    conn = ConnectorConnection(
+        user_id=crm_user.id,
+        provider="google_calendar",
+        label="cal",
+        credentials_encrypted="x",
+    )
+    db_session.add(conn)
+    await db_session.flush()
+    await _seed_sync_state(
+        db_session,
+        conn,
+        resource="calendar",
+        status="error",
+        last_error="invalid_grant: token has been expired or revoked.",
+        error_count=3,
+    )
+
+    out = await AgentService._tool_list_calendar_events(db_session, crm_user, {})
+    assert out["sync_health"]["ok"] is False
+    assert "Calendario" in out["sync_health"]["summary"]
+    assert "re-autoriz" in out["sync_health"]["summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_search_emails_surfaces_sync_health_for_gmail(
+    db_session, crm_user: User
+) -> None:
+    """Emails read tool must surface Gmail sync errors (same pattern)."""
+    conn = ConnectorConnection(
+        user_id=crm_user.id,
+        provider="google_gmail",
+        label="gmail",
+        credentials_encrypted="x",
+    )
+    db_session.add(conn)
+    await db_session.flush()
+    await _seed_sync_state(
+        db_session,
+        conn,
+        resource="gmail",
+        status="error",
+        last_error="429 Too Many Requests: rate limit exceeded",
+        error_count=2,
+    )
+
+    out = await AgentService._tool_search_emails(db_session, crm_user, {})
+    assert out["sync_health"]["ok"] is False
+    assert "Correo" in out["sync_health"]["summary"]
+
+
+@pytest.mark.asyncio
+async def test_create_connection_auto_enqueues_initial_sync(
+    db_session, crm_user: User
+) -> None:
+    """Manually-created connections (e.g. via 'submit_connector_credentials')
+    must auto-enqueue the right *_initial_sync job so the artist sees their
+    data appear without waiting for the next 5-minute cron tick. This was
+    previously only happening via the OAuth path; non-OAuth connections sat
+    in the DB silently un-synced."""
+    from app.schemas.connector import ConnectorConnectionCreate
+    from app.services.connector_service import ConnectorService
+
+    enqueued: list[tuple[str, int, str | None]] = []
+
+    async def _capture(name, *args, job_id=None, **_kwargs):
+        enqueued.append((name, args[0] if args else None, job_id))
+        return "ok"
+
+    payload = ConnectorConnectionCreate(
+        provider="google_drive",
+        label="manual drive",
+        credentials={"refresh_token": "x"},
+    )
+
+    with patch("app.services.connector_service.enqueue_initial_sync_for_connection",
+               wraps=None):
+        # Patch at the inner enqueue_job import site instead.
+        pass
+
+    with patch("app.services.job_queue.enqueue", new=AsyncMock(side_effect=_capture)):
+        row = await ConnectorService.create_connection(db_session, crm_user, payload)
+
+    assert row.id is not None
+    assert enqueued, "create_connection must enqueue an initial sync job"
+    job_name, conn_id, job_id = enqueued[0]
+    assert job_name == "drive_initial_sync"
+    assert conn_id == row.id
+    assert job_id == f"drive-initial-{row.id}"
+
+
+@pytest.mark.asyncio
+async def test_create_connection_no_op_for_unknown_provider(
+    db_session, crm_user: User
+) -> None:
+    """Providers without an associated sync (e.g. teams-only adapters) must
+    NOT crash create_connection or enqueue a phantom job."""
+    from app.schemas.connector import ConnectorConnectionCreate
+    from app.services.connector_service import ConnectorService
+
+    enqueued: list = []
+
+    async def _capture(*args, **_kwargs):
+        enqueued.append(args)
+        return "ok"
+
+    payload = ConnectorConnectionCreate(
+        provider="microsoft_teams",
+        label="teams",
+        credentials={"k": "v"},
+    )
+    with patch("app.services.job_queue.enqueue", new=AsyncMock(side_effect=_capture)):
+        row = await ConnectorService.create_connection(db_session, crm_user, payload)
+
+    assert row.id is not None
+    assert enqueued == []  # no sync registered for this provider — no-op

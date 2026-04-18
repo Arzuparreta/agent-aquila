@@ -56,7 +56,10 @@ class EmailAttachment(Base):
     email_id: Mapped[int] = mapped_column(
         ForeignKey("emails.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    provider_attachment_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Gmail / Graph attachment ids are opaque base64 strings that routinely
+    # exceed 255 chars (we observed 700+ char ids in the wild). Use TEXT so
+    # the Gmail sync can never silently fail with StringDataRightTruncationError.
+    provider_attachment_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(nullable=True)

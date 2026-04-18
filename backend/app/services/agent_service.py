@@ -17,65 +17,340 @@ from app.models.event import Event
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import AgentRunRead, AgentStepRead, PendingProposalRead
+from app.services.agent_tools import (
+    AGENT_TOOL_NAMES,
+    AGENT_TOOLS,
+    EXECUTABLE_TOOL_NAMES,
+    FINAL_ANSWER_TOOL_NAME,
+)
 from app.services.ai_providers import provider_kind_requires_api_key
-from app.services.llm_client import LLMClient, parse_json_object
+from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
 from app.services.proposal_service import proposal_to_read
 from app.services.semantic_search_service import SemanticSearchService
 from app.services.user_ai_settings_service import UserAISettingsService
 
+# ---------------------------------------------------------------------------
+# Tool-name aliasing
+# ---------------------------------------------------------------------------
+# Small instruction-tuned models (notably Gemma 3/4 on Ollama) have heavy
+# RLHF priors that make them emit tool names from THEIR training (e.g.
+# ``google:search``) instead of the names we advertise. Rather than telling
+# the model "no, try again" and hoping it self-corrects (which Gemma in
+# particular doesn't reliably do — it just retries the same wrong name in
+# a tight loop), we accept a small set of well-known aliases and rewrite
+# them to the matching real tool name. This recovers gracefully for the
+# common confusions and is a no-op for everything else.
+TOOL_NAME_ALIASES: dict[str, str] = {
+    # Gemma's pretraining bias.
+    "google:search": "hybrid_rag_search",
+    "google_search": "hybrid_rag_search",
+    "websearch": "hybrid_rag_search",
+    "search": "hybrid_rag_search",
+    # Common abbreviations small models reach for.
+    "list_files": "list_drive_files",
+    "drive_list_files": "list_drive_files",
+    "list_drive": "list_drive_files",
+    "search_files": "search_drive",
+    "drive_search": "search_drive",
+    "get_file": "get_drive_file_text",
+    "read_file": "get_drive_file_text",
+    "list_emails": "search_emails",
+    "email_search": "search_emails",
+    "list_events": "list_calendar_events",
+    "calendar_list": "list_calendar_events",
+    # Final-answer aliases.
+    "answer": FINAL_ANSWER_TOOL_NAME,
+    "respond": FINAL_ANSWER_TOOL_NAME,
+    "reply": FINAL_ANSWER_TOOL_NAME,
+}
+
+
+def _resolve_tool_name(name: str | None) -> str | None:
+    """Map a possibly-aliased / case-mangled tool name to a real one, or
+    return ``None`` if no resolution is possible."""
+    if not name:
+        return None
+    if name in AGENT_TOOL_NAMES:
+        return name
+    lowered = name.lower().strip()
+    if lowered in AGENT_TOOL_NAMES:
+        return lowered
+    aliased = TOOL_NAME_ALIASES.get(lowered)
+    if aliased and aliased in AGENT_TOOL_NAMES:
+        return aliased
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Intent-based tool palette filtering
+# ---------------------------------------------------------------------------
+# Small local models (Gemma, Qwen 2.5 small, Llama 3.2 3B) struggle when given
+# 30 unrelated tool schemas — they routinely fall back to RLHF priors like
+# ``google:search`` instead of picking the right one. The fix is to look at
+# the artist's last user message and, when the intent is obvious, advertise
+# only the tools that are actually relevant. This dramatically lifts tool-
+# selection accuracy without needing a separate classifier model.
+#
+# Rules are intentionally conservative: when in doubt we fall back to the
+# full palette so the model never has access ripped away from it.
+
+_INTENT_TOOL_GROUPS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
+    # Drive / files / documents.
+    (
+        ("archivo", "archivos", "drive", "carpeta", "documento", "documentos",
+         "file", "files", "rider", "contrato", "pdf"),
+        ("list_drive_files", "search_drive", "get_drive_file_text",
+         "hybrid_rag_search"),
+    ),
+    # Email.
+    (
+        ("correo", "correos", "email", "emails", "mail", "mails",
+         "mensaje", "mensajes", "bandeja", "inbox"),
+        ("search_emails", "get_thread", "hybrid_rag_search"),
+    ),
+    # Calendar / agenda.
+    (
+        ("agenda", "calendario", "calendar", "evento", "eventos",
+         "cita", "citas", "agendado", "fecha", "fechas"),
+        ("list_calendar_events", "hybrid_rag_search"),
+    ),
+    # Connector / integration setup.
+    (
+        ("conectar", "conecta", "conexión", "conexion", "conectores",
+         "integración", "integracion", "google", "outlook", "spotify",
+         "instagram", "oauth"),
+        ("list_connectors", "start_connector_setup",
+         "submit_connector_credentials", "start_oauth_flow"),
+    ),
+    # Automations / preferences.
+    (
+        ("automatización", "automatizacion", "automatizaciones",
+         "regla", "reglas", "preferencia", "preferencias",
+         "siempre", "nunca", "no vuelvas", "recordar"),
+        ("create_automation", "list_automations", "update_automation",
+         "delete_automation"),
+    ),
+]
+
+
+def _select_tool_palette(
+    last_user_message: str,
+) -> list[dict[str, Any]]:
+    """Return the subset of AGENT_TOOLS that's relevant to the user's last
+    message. Always includes ``final_answer`` so the model can terminate.
+    Falls back to the full palette when no intent matches."""
+    if not last_user_message:
+        return AGENT_TOOLS
+    text = last_user_message.lower()
+
+    matched: set[str] = set()
+    for keywords, tools in _INTENT_TOOL_GROUPS:
+        if any(kw in text for kw in keywords):
+            matched.update(tools)
+
+    if not matched:
+        return AGENT_TOOLS
+
+    # Always include the terminator so we never strand the model.
+    matched.add(FINAL_ANSWER_TOOL_NAME)
+    return [t for t in AGENT_TOOLS if t["function"]["name"] in matched]
+
+
+def _normalize_tool_args(resolved_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Coerce common argument-shape variants to the canonical names each tool
+    expects. Pairs with ``_resolve_tool_name``: when we accept ``google:search``
+    as an alias for ``hybrid_rag_search``, we also need to accept its
+    ``{"queries": [...]}`` arg shape. Conservative: only rewrites keys that
+    are clearly synonymous, leaves everything else untouched."""
+    if not isinstance(args, dict):
+        return {}
+    out = dict(args)
+
+    if resolved_name == "hybrid_rag_search":
+        if "query" not in out:
+            if isinstance(out.get("queries"), list) and out["queries"]:
+                out["query"] = " ".join(str(q) for q in out["queries"])
+            elif isinstance(out.get("q"), str):
+                out["query"] = out.pop("q")
+            elif isinstance(out.get("text"), str):
+                out["query"] = out.pop("text")
+    elif resolved_name == "search_emails" or resolved_name == "search_drive":
+        if "q" not in out:
+            for k in ("query", "text", "search"):
+                if isinstance(out.get(k), str):
+                    out["q"] = out[k]
+                    break
+    elif resolved_name == FINAL_ANSWER_TOOL_NAME:
+        if "text" not in out:
+            for k in ("answer", "reply", "message", "content"):
+                if isinstance(out.get(k), str):
+                    out["text"] = out[k]
+                    break
+    return out
+
+# The agent uses the provider's NATIVE function/tool-calling API (see
+# ``LLMClient.chat_with_tools``), so the system prompt deliberately does NOT
+# enumerate tool schemas — those are passed as a typed ``tools=[]`` array,
+# which is dramatically more reliable than asking the model to author a
+# bespoke JSON envelope (especially for small local models like Gemma /
+# Qwen / Llama via Ollama). The prompt only carries persona + behavior
+# rules; the schemas live in ``agent_tools.AGENT_TOOLS``.
 AGENT_SYSTEM = """You are the artist's personal operations manager (live music: festivals, concerts, venues, promoters). The artist is NON-TECHNICAL — never mention APIs, OAuth, RAG, embeddings, JSON, model names, or any internal implementation. Speak like a friendly colleague.
 
 You operate inside a chat app. The artist may be talking to you about a specific contact, deal, event or email (the thread title indicates this). When proactive notifications arrive ("Nuevo correo entrante de X"), you continue the conversation in that same thread.
 
-Return ONLY valid JSON (no markdown, no code fences) with exactly this shape:
-{"phase":"tool"|"answer","tool":null|string,"args":{},"reply":null|string,"citations":[]}
+# How to respond — IMPORTANT
 
-Rules:
-- phase "tool" requires a non-null "tool" name and "args" object.
-- phase "answer" requires a non-null "reply" string and "citations" as an array of strings like "deal:12" or "email:3".
+Every assistant turn MUST end in a tool call. You have two kinds of tools:
 
-Read-only tools:
-  - hybrid_rag_search — args: {"query": string, "limit_per_type": optional number 1-8, default 5}
-  - get_entity — args: {"entity_type":"contact|email|deal|event|drive_file|attachment","entity_id": number}
-  - search_emails — args: {"query": optional, "direction": optional "inbound|outbound", "thread_id": optional, "connection_id": optional, "limit": optional 1-25}
-  - get_thread — args: {"thread_id": string, "connection_id": optional}
-  - list_calendar_events — args: {"start": optional ISO, "end": optional ISO, "connection_id": optional, "limit": optional 1-50}
-  - search_drive — args: {"query": string, "limit": optional 1-25}
-  - get_drive_file_text — args: {"file_id": number}  // triggers on-demand extraction if not yet cached
-  - list_automations — args: {} — returns the artist's silently-learned rules
-  - list_connectors — args: {} — returns Gmail/Outlook/Drive/Teams connection status
+1. Data/action tools — fetch information or perform actions on behalf of the artist (e.g. list_drive_files, search_emails, hybrid_rag_search, apply_create_contact, propose_connector_email_send, ...). Use these to GATHER data or DO things.
+2. final_answer — deliver the user-facing reply. Call this EXACTLY ONCE, when you are ready to talk to the artist. After final_answer the turn ends.
 
-Auto-apply tools (no approval needed; the action runs immediately and the artist sees an UNDO option in chat):
-  - apply_create_contact — {"name": string, optional email, phone, role default "other", notes}
-  - apply_update_contact — {"contact_id": number, optional name, email, phone, role, notes}
-  - apply_create_deal — {"contact_id": number, "title": string, optional status, amount, currency, notes}
-  - apply_update_deal — {"deal_id": number, optional title, status, amount, currency, notes}
-  - apply_create_event — {"venue_name": string, "event_date": YYYY-MM-DD, optional deal_id, city, status, notes}
-  - apply_update_event — {"event_id": number, optional venue_name, event_date, deal_id, city, status, notes}
-  - create_automation — {"name": string, "trigger": "email_received", "conditions": object, "instruction_natural_language": string} — silently learn a rule the artist just expressed in plain language ("nunca enviar correos a X", "siempre responder a venues con plantilla Y"). Do NOT ask permission; just record it and confirm verbally.
-  - update_automation — {"automation_id": number, optional name, conditions, instruction_natural_language, enabled}
-  - delete_automation — {"automation_id": number}
-  - start_connector_setup — {"provider": "google"|"microsoft"} — emits a step-by-step setup card the artist follows in chat to connect Gmail/Outlook/Drive
-  - submit_connector_credentials — {"setup_token": string, "client_id": string, "client_secret": string, optional "redirect_uri", optional "tenant"}
-  - start_oauth_flow — {"provider": "google"|"microsoft", "service": "gmail"|"calendar"|"drive"|"outlook"|"teams"} — returns a URL the artist taps to grant access
+You may call as many data/action tools as you need before calling final_answer. Never write a free-form text reply outside of final_answer — the artist will not see it.
 
-Approval-required tools (these create a PENDING approval card; the artist taps Approve in chat):
-  - propose_connector_email_send — {"connection_id": number, "to": string or string[], "subject": string, "body": string, optional "content_type": "text"|"html"}
-  - propose_connector_email_reply — {"connection_id": number, "thread_id": string, optional in_reply_to, to, subject, "body": string, optional content_type}
-  - propose_connector_calendar_create — {"connection_id": number, "summary": string, "start_iso": string, "end_iso": string, optional description, "timezone" default "UTC"}
-  - propose_connector_calendar_update — {"connection_id": number, "event_id": string, optional summary, description, start_iso, end_iso, timezone}
-  - propose_connector_calendar_delete — {"connection_id": number, "event_id": string}
-  - propose_connector_file_upload — {"connection_id": number, "path": string, "mime_type": string, optional "content_text" or "content_base64"}
-  - propose_connector_file_share — {"connection_id": number, "file_id": string, "email": string, optional "role": "reader"|"writer"}
-  - propose_connector_teams_message — {"connection_id": number, "team_id": string, "channel_id": string, "body": string}
+# Behavior rules
 
-Behavior rules:
-- Always reply in the same language the artist uses (default: Spanish).
-- When the artist expresses a preference ("don't email X", "always CC bookings@..."), call create_automation IMMEDIATELY without asking. Then confirm verbally ("Hecho — no volveré a escribir a X.").
-- Prefer hybrid_rag_search before answering factual questions. Cite ids in "citations".
+- Always pick a tool from the provided tools list. Do NOT invent tool names — use the exact names spelled in the schema.
+- Always reply in the same language the artist uses (default: Spanish), inside `final_answer.text`.
+- For ANY factual question about the artist's own data (their files, contacts, deals, events, emails, calendar), you MUST first call a data tool to ground the answer. Never guess, never paraphrase from memory, and never repeat what a previous assistant turn said about that data — re-check with a tool every time.
+  - "¿Qué archivos tengo?" / "qué tengo en mi drive" → call list_drive_files (NOT list_files; the tool is named list_drive_files).
+  - "Busca el rider de X" / "encuéntrame el contrato" → call search_drive or hybrid_rag_search.
+  - "¿Qué correos tengo de X?" → call search_emails.
+  - "¿Qué tengo agendado?" → call list_calendar_events.
+  - General "¿qué sabes de X?" → call hybrid_rag_search.
+- After tools return, summarize the actual result in `final_answer.text`. If a tool result is empty, say so honestly ("No encontré archivos en tu Drive todavía, ¿quieres que conectemos Drive?"). Never invent files, names, or numbers that did not come from a tool result.
+- When the artist expresses a preference ("don't email X", "always CC bookings@..."), call create_automation IMMEDIATELY without asking, then call final_answer to confirm verbally ("Hecho — no volveré a escribir a X.").
 - Be concise. The artist is busy.
-- Optional on any tool: "idempotency_key" (string, max 128 chars).
+- Cite bare ids inline in `final_answer.text` (e.g. "(drive_file:7)") and/or in `final_answer.citations`.
+- If a data tool result includes a `sync_health` field with `ok: false`, the underlying connector is failing to sync. Tell the artist what's broken in plain language (using the `summary` field) and that the data they're seeing may be stale or incomplete. Example: "Tu Drive está conectado pero la sincronización está fallando — necesito que reactives el acceso. Mientras tanto te muestro lo último que tengo guardado."
 """
+
+
+# ---------------------------------------------------------------------------
+# Connector sync-health surfacing
+# ---------------------------------------------------------------------------
+# The agent's read tools (list_drive_files, search_emails, list_calendar_events)
+# all read from the local mirror tables. When the upstream sync is broken
+# (API disabled, token revoked, scope missing, rate limit), those tables are
+# stale or empty — and previously the agent had no way to know that. The
+# helper below reads `connection_sync_state` for the relevant
+# (provider, resource) and returns a small structured payload that we attach
+# to every read-tool result so the model can warn the artist instead of
+# silently reporting "you have no files".
+
+# Map a logical "domain" → (connector_connections.provider values, sync resource label)
+_SYNC_HEALTH_DOMAINS: dict[str, tuple[tuple[str, ...], str]] = {
+    "drive": (
+        ("google_drive", "google", "microsoft", "graph_onedrive", "onedrive"),
+        "drive",
+    ),
+    "email": (
+        ("google_gmail", "google", "microsoft", "graph_mail"),
+        "gmail",  # gmail_sync_service writes resource="gmail"
+    ),
+    "calendar": (
+        ("google_calendar", "google", "microsoft", "graph_calendar"),
+        "calendar",
+    ),
+}
+
+
+async def _get_sync_health(
+    db: AsyncSession, user: User, domain: str
+) -> dict[str, Any]:
+    """Return a small dict describing the sync-health for the connectors of a
+    given ``domain`` ("drive" / "email" / "calendar") for ``user``. Always
+    safe to call (returns ``{"ok": True, ...}`` when nothing is wrong or when
+    the user has no relevant connectors). The shape is stable so the system
+    prompt can teach the model how to interpret it.
+    """
+    from app.models.connection_sync_state import ConnectionSyncState
+    from app.models.connector_connection import ConnectorConnection
+
+    providers, resource = _SYNC_HEALTH_DOMAINS.get(domain, ((), ""))
+    if not providers:
+        return {"ok": True, "checked": False}
+
+    stmt = (
+        select(ConnectionSyncState, ConnectorConnection)
+        .join(
+            ConnectorConnection,
+            ConnectorConnection.id == ConnectionSyncState.connection_id,
+        )
+        .where(
+            ConnectorConnection.user_id == user.id,
+            ConnectorConnection.provider.in_(providers),
+            ConnectionSyncState.resource == resource,
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        # No sync-state row at all: connector may be brand-new or never
+        # synced. Not necessarily broken — just unknown.
+        return {"ok": True, "checked": True, "states": []}
+
+    errors: list[dict[str, Any]] = []
+    healthy: list[dict[str, Any]] = []
+    for state, conn in rows:
+        entry = {
+            "connection_id": conn.id,
+            "provider": conn.provider,
+            "label": conn.label,
+            "status": state.status,
+            "last_full_sync_at": (
+                state.last_full_sync_at.isoformat() if state.last_full_sync_at else None
+            ),
+            "last_delta_at": (
+                state.last_delta_at.isoformat() if state.last_delta_at else None
+            ),
+            "error_count": state.error_count,
+        }
+        if state.status == "error" and state.last_error:
+            entry["last_error"] = (state.last_error or "")[:600]
+            errors.append(entry)
+        else:
+            healthy.append(entry)
+
+    if errors:
+        # Synthesize a short, artist-friendly summary the model can echo.
+        first = errors[0]
+        provider_friendly = (
+            "Drive" if domain == "drive"
+            else "Calendario" if domain == "calendar"
+            else "Correo"
+        )
+        # Try to extract the human-readable bit from the upstream error.
+        raw = first.get("last_error", "") or ""
+        if "API has not been used" in raw or "is disabled" in raw:
+            cause = "el API correspondiente está desactivado en el proyecto de Google Cloud"
+        elif "invalid_grant" in raw or "unauthorized" in raw.lower() or "401" in raw:
+            cause = "el acceso caducó y necesita re-autorizarse"
+        elif "403" in raw or "permission" in raw.lower():
+            cause = "faltan permisos en la cuenta conectada"
+        elif "rate" in raw.lower() and "limit" in raw.lower():
+            cause = "el proveedor está limitando el ritmo de sincronización"
+        else:
+            cause = "hay un error de sincronización con el proveedor"
+        summary = (
+            f"La conexión de {provider_friendly} ({first['provider']}) está fallando: "
+            f"{cause}. Lo que ves puede estar incompleto o desactualizado."
+        )
+        return {"ok": False, "checked": True, "summary": summary, "errors": errors, "healthy": healthy}
+
+    return {"ok": True, "checked": True, "healthy": healthy}
+
+
+def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
+    """Re-encode an assistant ``ChatResponse`` into a chat-completions message.
+
+    We deliberately rebuild the dict (rather than reusing ``raw_message``) so
+    the conversation history we feed back to the next call is exactly the
+    OpenAI tool-calling shape, regardless of provider-specific extras.
+    """
+    msg: dict[str, Any] = {"role": "assistant", "content": response.content or None}
+    if response.tool_calls:
+        msg["tool_calls"] = [tc.to_message_dict() for tc in response.tool_calls]
+    return msg
 
 class AgentService:
     @staticmethod
@@ -224,7 +499,8 @@ class AgentService:
                     "citation": f"email:{e.id}",
                 }
             )
-        return {"hits": hits}
+        sync_health = await _get_sync_health(db, user, "email")
+        return {"hits": hits, "sync_health": sync_health}
 
     @staticmethod
     async def _tool_get_thread(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
@@ -287,11 +563,28 @@ class AgentService:
                     "citation": f"event:{ev.id}",
                 }
             )
-        return {"events": out}
+        sync_health = await _get_sync_health(db, user, "calendar")
+        return {"events": out, "sync_health": sync_health}
+
+    @staticmethod
+    def _serialize_drive_file(f: DriveFile) -> dict[str, Any]:
+        return {
+            "id": f.id,
+            "connection_id": f.connection_id,
+            "name": f.name,
+            "mime_type": f.mime_type,
+            "size_bytes": f.size_bytes,
+            "web_view_link": f.web_view_link,
+            "modified_time": f.modified_time.isoformat() if f.modified_time else None,
+            "has_text": bool(f.content_text),
+            "citation": f"drive_file:{f.id}",
+        }
 
     @staticmethod
     async def _tool_search_drive(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
         from sqlalchemy import or_
+
+        from app.models.connector_connection import ConnectorConnection
 
         q = str(args.get("query") or "").strip()
         if not q:
@@ -300,26 +593,71 @@ class AgentService:
         like = f"%{q}%"
         stmt = (
             select(DriveFile)
-            .where(or_(DriveFile.name.ilike(like), DriveFile.content_text.ilike(like)))
+            .join(ConnectorConnection, ConnectorConnection.id == DriveFile.connection_id)
+            .where(
+                ConnectorConnection.user_id == user.id,
+                DriveFile.is_trashed.is_(False),
+                or_(DriveFile.name.ilike(like), DriveFile.content_text.ilike(like)),
+            )
             .order_by(DriveFile.modified_time.desc().nulls_last())
             .limit(limit)
         )
         r = await db.execute(stmt)
-        out = []
-        for f in r.scalars().all():
-            out.append(
-                {
-                    "id": f.id,
-                    "name": f.name,
-                    "mime_type": f.mime_type,
-                    "size_bytes": f.size_bytes,
-                    "web_view_link": f.web_view_link,
-                    "modified_time": f.modified_time.isoformat() if f.modified_time else None,
-                    "has_text": bool(f.content_text),
-                    "citation": f"drive_file:{f.id}",
-                }
+        sync_health = await _get_sync_health(db, user, "drive")
+        return {
+            "hits": [AgentService._serialize_drive_file(f) for f in r.scalars().all()],
+            "sync_health": sync_health,
+        }
+
+    @staticmethod
+    async def _tool_list_drive_files(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Enumerate the user's Drive/OneDrive files. Use when the artist asks
+        an open-ended "what files do I have?" question with no search term."""
+        from app.models.connector_connection import ConnectorConnection
+
+        limit = max(1, min(50, int(args.get("limit") or 20)))
+        stmt = (
+            select(DriveFile)
+            .join(ConnectorConnection, ConnectorConnection.id == DriveFile.connection_id)
+            .where(
+                ConnectorConnection.user_id == user.id,
+                DriveFile.is_trashed.is_(False),
             )
-        return {"hits": out}
+            .order_by(DriveFile.modified_time.desc().nulls_last(), DriveFile.id.desc())
+            .limit(limit)
+        )
+        if args.get("connection_id") is not None:
+            stmt = stmt.where(DriveFile.connection_id == int(args["connection_id"]))
+        if args.get("mime_type"):
+            stmt = stmt.where(DriveFile.mime_type == str(args["mime_type"]))
+        r = await db.execute(stmt)
+        files = [AgentService._serialize_drive_file(f) for f in r.scalars().all()]
+        sync_health = await _get_sync_health(db, user, "drive")
+        if not files:
+            # Distinguish "no Drive connected" from "connected but empty mirror"
+            # so the model can guide the artist toward connecting Drive instead
+            # of claiming the drive is empty.
+            conn_r = await db.execute(
+                select(ConnectorConnection.id).where(
+                    ConnectorConnection.user_id == user.id,
+                    ConnectorConnection.provider.in_(("google", "google_drive", "microsoft", "onedrive")),
+                )
+            )
+            has_drive_connection = conn_r.first() is not None
+            return {
+                "files": [],
+                "has_drive_connection": has_drive_connection,
+                "sync_health": sync_health,
+                "hint": (
+                    "No drive files have been mirrored yet. The artist may need to connect Drive "
+                    "via start_connector_setup / start_oauth_flow."
+                    if not has_drive_connection
+                    else "Drive is connected but no files have been synced yet."
+                ),
+            }
+        return {"files": files, "count": len(files), "sync_health": sync_health}
 
     @staticmethod
     async def _tool_get_drive_file_text(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
@@ -916,6 +1254,108 @@ class AgentService:
             )
         return {"connectors": out}
 
+    # ------------------------------------------------------------------
+    # Tool dispatch (single source of truth for routing a model-issued
+    # tool call to the matching internal handler). Used by ``run_agent``.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _dispatch_tool(
+        db: AsyncSession,
+        user: User,
+        run_id: int,
+        thread_id: int | None,
+        call: ChatToolCall,
+    ) -> tuple[dict[str, Any], PendingProposal | None]:
+        """Execute one model-issued tool call.
+
+        Returns ``(result_dict, pending_proposal_or_None)``. The result dict
+        is what we feed back to the model (and persist as the tool step).
+        ``pending_proposal_or_None`` is set when the call created a row in
+        ``pending_proposals`` so the caller can include it in the response.
+        """
+        original_name = call.name
+        raw_args = call.arguments if isinstance(call.arguments, dict) else {}
+
+        tool_name = _resolve_tool_name(original_name)
+        if tool_name is None:
+            # We couldn't even fuzzy-match the name. Feed back a hard error
+            # with the full list of valid names + the final_answer escape
+            # hatch so the model has the information needed to recover.
+            return (
+                {
+                    "error": f"unknown tool {original_name!r} — call rejected.",
+                    "valid_tool_names": sorted(
+                        EXECUTABLE_TOOL_NAMES | {FINAL_ANSWER_TOOL_NAME}
+                    ),
+                    "hint": (
+                        "Your next tool call MUST use one of valid_tool_names "
+                        "spelled EXACTLY. If no listed tool fits the artist's "
+                        f"request, call {FINAL_ANSWER_TOOL_NAME!r} with a "
+                        "natural-language reply explaining what you can do."
+                    ),
+                },
+                None,
+            )
+
+        # The caller (run_agent) already records the canonical name and
+        # normalized args in the agent step / role:"tool" message; here we
+        # just need the normalized args to actually invoke the handler.
+        args = _normalize_tool_args(tool_name, raw_args)
+
+        try:
+            if tool_name == "hybrid_rag_search":
+                return (await AgentService._tool_rag(db, user, args), None)
+            if tool_name == "get_entity":
+                return (await AgentService._tool_get_entity(db, args), None)
+            if tool_name == "search_emails":
+                return (await AgentService._tool_search_emails(db, user, args), None)
+            if tool_name == "get_thread":
+                return (await AgentService._tool_get_thread(db, user, args), None)
+            if tool_name == "list_calendar_events":
+                return (await AgentService._tool_list_calendar_events(db, user, args), None)
+            if tool_name == "search_drive":
+                return (await AgentService._tool_search_drive(db, user, args), None)
+            if tool_name == "list_drive_files":
+                return (await AgentService._tool_list_drive_files(db, user, args), None)
+            if tool_name == "get_drive_file_text":
+                return (await AgentService._tool_get_drive_file_text(db, user, args), None)
+            if tool_name == "list_connectors":
+                return (await AgentService._tool_list_connectors(db, user, args), None)
+            if tool_name == "list_automations":
+                return (await AgentService._tool_list_automations(db, user, args), None)
+            if tool_name == "create_automation":
+                return (await AgentService._tool_create_automation(db, user, args), None)
+            if tool_name == "update_automation":
+                return (await AgentService._tool_update_automation(db, user, args), None)
+            if tool_name == "delete_automation":
+                return (await AgentService._tool_delete_automation(db, user, args), None)
+            if tool_name == "start_connector_setup":
+                return (await AgentService._tool_start_connector_setup(db, user, args), None)
+            if tool_name == "submit_connector_credentials":
+                return (await AgentService._tool_submit_connector_credentials(db, user, args), None)
+            if tool_name == "start_oauth_flow":
+                return (await AgentService._tool_start_oauth_flow(db, user, args), None)
+            if tool_name in AgentService._AUTO_APPLY_TOOL_KIND:
+                result = await AgentService._tool_auto_apply(
+                    db, user, run_id, thread_id, tool_name, args
+                )
+                return (result, None)
+            if tool_name in AgentService._PROPOSAL_TOOL_METHODS:
+                method_name = AgentService._PROPOSAL_TOOL_METHODS[tool_name]
+                handler = getattr(AgentService, method_name)
+                result = await handler(db, user, run_id, args)
+                prop_id = result.get("proposal_id") if isinstance(result, dict) else None
+                if prop_id:
+                    prop = await db.get(PendingProposal, int(prop_id))
+                    return (result, prop)
+                return (result, None)
+        except Exception as exc:  # noqa: BLE001 — surface tool errors to the model
+            return ({"error": str(exc)[:500]}, None)
+
+        # Defensive: AGENT_TOOL_NAMES says it's known but no branch handled it.
+        return ({"error": f"unhandled tool: {tool_name}"}, None)
+
     @staticmethod
     async def run_agent(
         db: AsyncSession,
@@ -996,13 +1436,69 @@ class AgentService:
             )
 
         try:
+            final_answer_text: str | None = None
+            consecutive_unknown_turns = 0
+            MAX_UNKNOWN_TURNS = 2
+            # Soft budget for data-gathering tool calls before we FORCE the
+            # model to terminate via final_answer. Small local models (Gemma
+            # in particular) tend to keep issuing search queries forever
+            # rather than recognising they have enough information; once we
+            # exceed this many real tool calls without a final_answer, we
+            # switch ``tool_choice`` to specifically require ``final_answer``
+            # so the model is structurally forced to wrap up.
+            data_tool_calls_made = 0
+            DATA_TOOL_CALL_BUDGET = 4
             for _ in range(settings.agent_max_tool_steps):
-                raw = await LLMClient.chat_completion(
+                # Tool-palette strategy:
+                #  - default: an INTENT-FILTERED palette derived from the
+                #    artist's last message + tool_choice="required" so every
+                #    turn ends in a tool call (data tool or final_answer).
+                #    Filtering down the schema is critical for small models
+                #    (Gemma, Qwen 2.5 small) which otherwise default to
+                #    RLHF-baked-in names like ``google:search`` even when we
+                #    advertise the right tool.
+                #  - over-budget: SHRINK to ONLY final_answer so the model is
+                #    structurally forced to terminate. We can't rely on
+                #    OpenAI's specific-function tool_choice because Ollama
+                #    silently ignores it for Gemma; restricting the tools
+                #    array works on every provider we support.
+                turn_tools = _select_tool_palette(message)
+                turn_tool_choice: Any = "required"
+                if data_tool_calls_made >= DATA_TOOL_CALL_BUDGET:
+                    turn_tools = [
+                        t
+                        for t in turn_tools
+                        if t["function"]["name"] == FINAL_ANSWER_TOOL_NAME
+                    ] or [
+                        t
+                        for t in AGENT_TOOLS
+                        if t["function"]["name"] == FINAL_ANSWER_TOOL_NAME
+                    ]
+                    # Also append a brief instruction so the model knows
+                    # WHY the palette shrank and what it should do.
+                    last_msg = conversation[-1] if conversation else {}
+                    if last_msg.get("role") != "user" or "wrap up now" not in str(
+                        last_msg.get("content", "")
+                    ):
+                        conversation.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "You have gathered enough information. "
+                                    "Wrap up now: call final_answer with your "
+                                    "natural-language reply to the artist, in "
+                                    "Spanish. Do not call any other tool."
+                                ),
+                            }
+                        )
+
+                response = await LLMClient.chat_with_tools(
                     api_key or "",
                     settings_row,
                     messages=conversation,
+                    tools=turn_tools,
+                    tool_choice=turn_tool_choice,
                     temperature=0.15,
-                    response_format_json=True,
                 )
                 step_idx += 1
                 db.add(
@@ -1011,97 +1507,136 @@ class AgentService:
                         step_index=step_idx,
                         kind="llm",
                         name="turn",
-                        payload={"raw": raw[:8000]},
+                        payload={
+                            "content": (response.content or "")[:4000],
+                            "tool_calls": [
+                                {"name": tc.name, "arguments": tc.arguments}
+                                for tc in response.tool_calls
+                            ],
+                        },
                     )
                 )
 
-                decision = parse_json_object(raw) or {}
-                phase = str(decision.get("phase") or "").lower()
-
-                if phase == "answer":
-                    reply = str(decision.get("reply") or "").strip()
-                    citations = decision.get("citations") or []
-                    if citations:
-                        cite_txt = ", ".join(str(c) for c in citations)
-                        run.assistant_reply = f"{reply}\n\n— Sources: {cite_txt}"
+                # tool_choice="required" should make this branch impossible,
+                # but some providers (or models without tool-call support)
+                # may still return text-only. Treat that as a "lazy text"
+                # answer and complete the run with the content so the artist
+                # at least sees something useful.
+                if not response.has_tool_calls:
+                    fallback = (response.content or "").strip()
+                    if fallback:
+                        run.assistant_reply = fallback
+                        run.status = "completed"
                     else:
-                        run.assistant_reply = reply
+                        # Empty content AND no tool call — nudge once.
+                        conversation.append(_assistant_message_from(response))
+                        conversation.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "You returned an empty reply with no tool call. "
+                                    "Call a tool from the provided list — at minimum, "
+                                    "call final_answer with your reply text."
+                                ),
+                            }
+                        )
+                        continue
+                    break
+
+                conversation.append(_assistant_message_from(response))
+
+                # Execute every tool call in order. If we hit final_answer
+                # at any point in this batch, that becomes the run's reply
+                # and we terminate (after still recording any sibling tool
+                # results so the run history is complete).
+                turn_had_real_call = False
+                turn_had_unknown_call = False
+                for call in response.tool_calls:
+                    # Resolve aliases up front so both the final_answer branch
+                    # and the dispatcher see the canonical name. ChatToolCall
+                    # is frozen, so we track the canonical name/args alongside
+                    # the original ``call`` instead of mutating it.
+                    resolved = _resolve_tool_name(call.name)
+                    canonical_name = resolved or (call.name or "unknown")
+                    canonical_args = _normalize_tool_args(
+                        resolved or "", call.arguments or {}
+                    )
+                    if resolved == FINAL_ANSWER_TOOL_NAME:
+                        text = str(canonical_args.get("text") or "").strip()
+                        citations = canonical_args.get("citations") or []
+                        if not text:
+                            tool_result: dict[str, Any] = {
+                                "error": "final_answer requires a non-empty 'text' field"
+                            }
+                            turn_had_unknown_call = True
+                        else:
+                            if isinstance(citations, list) and citations:
+                                cite_txt = ", ".join(str(c) for c in citations)
+                                final_answer_text = f"{text}\n\n— {cite_txt}"
+                            else:
+                                final_answer_text = text
+                            tool_result = {"ok": True}
+                            turn_had_real_call = True
+                        result, prop = tool_result, None
+                    else:
+                        result, prop = await AgentService._dispatch_tool(
+                            db, user, run.id, thread_id, call
+                        )
+                        if (
+                            isinstance(result, dict)
+                            and "valid_tool_names" in result
+                            and "error" in result
+                        ):
+                            turn_had_unknown_call = True
+                        else:
+                            turn_had_real_call = True
+                            data_tool_calls_made += 1
+                    if prop is not None:
+                        proposals_created.append(prop)
+                    step_idx += 1
+                    db.add(
+                        AgentRunStep(
+                            run_id=run.id,
+                            step_index=step_idx,
+                            kind="tool",
+                            name=canonical_name,
+                            payload={"args": canonical_args, "result": result},
+                        )
+                    )
+                    conversation.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "name": canonical_name,
+                            "content": json.dumps(result, ensure_ascii=False)[:12000],
+                        }
+                    )
+
+                if final_answer_text is not None:
+                    run.assistant_reply = final_answer_text
                     run.status = "completed"
                     break
 
-                if phase != "tool":
-                    run.status = "failed"
-                    run.error = "Model returned an invalid phase"
-                    break
-
-                tool = decision.get("tool")
-                args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
-                tool_name = str(tool or "")
-
-                if tool_name == "hybrid_rag_search":
-                    result = await AgentService._tool_rag(db, user, args)
-                elif tool_name == "get_entity":
-                    result = await AgentService._tool_get_entity(db, args)
-                elif tool_name == "search_emails":
-                    result = await AgentService._tool_search_emails(db, user, args)
-                elif tool_name == "get_thread":
-                    result = await AgentService._tool_get_thread(db, user, args)
-                elif tool_name == "list_calendar_events":
-                    result = await AgentService._tool_list_calendar_events(db, user, args)
-                elif tool_name == "search_drive":
-                    result = await AgentService._tool_search_drive(db, user, args)
-                elif tool_name == "get_drive_file_text":
-                    result = await AgentService._tool_get_drive_file_text(db, user, args)
-                elif tool_name == "list_connectors":
-                    result = await AgentService._tool_list_connectors(db, user, args)
-                elif tool_name == "list_automations":
-                    result = await AgentService._tool_list_automations(db, user, args)
-                elif tool_name == "create_automation":
-                    result = await AgentService._tool_create_automation(db, user, args)
-                elif tool_name == "update_automation":
-                    result = await AgentService._tool_update_automation(db, user, args)
-                elif tool_name == "delete_automation":
-                    result = await AgentService._tool_delete_automation(db, user, args)
-                elif tool_name == "start_connector_setup":
-                    result = await AgentService._tool_start_connector_setup(db, user, args)
-                elif tool_name == "submit_connector_credentials":
-                    result = await AgentService._tool_submit_connector_credentials(db, user, args)
-                elif tool_name == "start_oauth_flow":
-                    result = await AgentService._tool_start_oauth_flow(db, user, args)
-                elif tool_name in AgentService._AUTO_APPLY_TOOL_KIND:
-                    result = await AgentService._tool_auto_apply(
-                        db, user, run.id, thread_id, tool_name, args
-                    )
-                elif tool_name in AgentService._PROPOSAL_TOOL_METHODS:
-                    method_name = AgentService._PROPOSAL_TOOL_METHODS[tool_name]
-                    handler = getattr(AgentService, method_name)
-                    result = await handler(db, user, run.id, args)
-                    prop_id = result.get("proposal_id") if isinstance(result, dict) else None
-                    if prop_id:
-                        prop = await db.get(PendingProposal, int(prop_id))
-                        if prop:
-                            proposals_created.append(prop)
+                # Loop-breaker: if the model burns multiple consecutive turns
+                # only producing unknown/invalid tool calls, abort gracefully
+                # with a helpful synthesized reply rather than letting the
+                # step budget exhaust silently. This was observed in the wild
+                # with Gemma 3/4 on Ollama, which has a strong RLHF prior to
+                # emit ``google:search`` and won't self-correct from the error.
+                if turn_had_unknown_call and not turn_had_real_call:
+                    consecutive_unknown_turns += 1
                 else:
-                    result = {"error": f"unknown tool: {tool_name}"}
-
-                step_idx += 1
-                db.add(
-                    AgentRunStep(
-                        run_id=run.id,
-                        step_index=step_idx,
-                        kind="tool",
-                        name=tool_name or "unknown",
-                        payload={"args": args, "result": result},
+                    consecutive_unknown_turns = 0
+                if consecutive_unknown_turns >= MAX_UNKNOWN_TURNS:
+                    run.assistant_reply = (
+                        "Lo siento, no logré entender bien qué necesitas. "
+                        "¿Puedes reformular la pregunta o ser un poco más específico? "
+                        "Por ejemplo: \"qué archivos tengo en Drive\", \"búscame el "
+                        "rider de X\", \"qué correos tengo de Y\"."
                     )
-                )
-
-                conversation.append({"role": "assistant", "content": json.dumps(decision, ensure_ascii=False)})
-                conversation.append(
-                    {
-                        "role": "user",
-                        "content": f"Tool {tool_name} result:\n{json.dumps(result, ensure_ascii=False)[:12000]}",
-                    }
-                )
+                    run.status = "completed"
+                    run.error = "loop_breaker: model failed to call a valid tool"
+                    break
 
             else:
                 run.status = "failed"
