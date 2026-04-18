@@ -182,6 +182,13 @@ class GraphMirrorService:
             except Exception:
                 logger.exception("graph automation dispatch failed for email %s", email.id)
 
+            try:
+                from app.services.proactive_service import notify_email_received
+
+                await notify_email_received(db, user, email)
+            except Exception:
+                logger.exception("graph proactive notification failed for email %s", email.id)
+
         return email
 
     @staticmethod
@@ -275,6 +282,12 @@ class GraphMirrorService:
             await EmbeddingService.sync_event(db, user.id, row.id)
         except Exception:
             logger.exception("graph event embedding failed for %s", row.id)
+        try:
+            from app.services.proactive_service import notify_calendar_event
+
+            await notify_calendar_event(db, user, row, action="created")
+        except Exception:
+            logger.exception("graph proactive notification failed for event %s", row.id)
         return row
 
     @staticmethod

@@ -9,7 +9,19 @@ from app.core.config import settings
 RiskTier = Literal["read", "sync", "crm_write", "external_write"]
 
 # Agent tool names that never mutate external systems or CRM without a pending row.
-READ_ONLY_AGENT_TOOLS: frozenset[str] = frozenset({"hybrid_rag_search", "get_entity"})
+READ_ONLY_AGENT_TOOLS: frozenset[str] = frozenset(
+    {
+        "hybrid_rag_search",
+        "get_entity",
+        "search_emails",
+        "get_thread",
+        "list_calendar_events",
+        "search_drive",
+        "get_drive_file_text",
+        "list_automations",
+        "list_connectors",
+    }
+)
 
 # Proposal / pending-operation kinds grouped by tier (used for UI labels and future auto-rules).
 KIND_RISK: dict[str, RiskTier] = {
@@ -21,13 +33,33 @@ KIND_RISK: dict[str, RiskTier] = {
     "update_event": "crm_write",
     "connector_email_send": "external_write",
     "connector_calendar_create": "external_write",
+    "connector_calendar_update": "external_write",
+    "connector_calendar_delete": "external_write",
     "connector_file_upload": "external_write",
+    "connector_file_share": "external_write",
     "connector_teams_message": "external_write",
 }
+
+# Capability auto-apply policy. Internal CRM writes run instantly with UNDO; external
+# actions still require approval. Anything not listed defaults to approval-required.
+AUTO_APPLY_KINDS: frozenset[str] = frozenset(
+    {
+        "create_contact",
+        "update_contact",
+        "create_deal",
+        "update_deal",
+        "create_event",
+        "update_event",
+    }
+)
 
 
 def risk_tier_for_kind(kind: str) -> RiskTier:
     return KIND_RISK.get(kind, "crm_write")
+
+
+def kind_is_auto_apply(kind: str) -> bool:
+    return kind in AUTO_APPLY_KINDS
 
 
 def allow_automatic_execution(tier: RiskTier) -> bool:

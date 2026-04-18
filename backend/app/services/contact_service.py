@@ -66,9 +66,14 @@ class ContactService:
         return contact
 
     @staticmethod
-    async def delete_contact(db: AsyncSession, contact_id: int, user_id: int | None = None) -> None:
+    async def delete_contact(
+        db: AsyncSession, contact_id: int, user_id: int | None = None, *, commit: bool = True
+    ) -> None:
         contact = await ContactService.get_contact(db, contact_id)
         await create_audit_log(db, "contact", contact.id, "deleted", None, user_id)
         await RagIndexService.delete_contact_subtree(db, contact_id)
         await db.delete(contact)
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()

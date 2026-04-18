@@ -23,40 +23,58 @@ from app.services.proposal_service import proposal_to_read
 from app.services.semantic_search_service import SemanticSearchService
 from app.services.user_ai_settings_service import UserAISettingsService
 
-AGENT_SYSTEM = """You are an operations copilot for a live music and artist booking business (festivals, concerts, venues, promoters).
-You help principals research the CRM and propose next actions. Never claim anything was created, sent, or changed unless a human approved it in the system.
+AGENT_SYSTEM = """You are the artist's personal operations manager (live music: festivals, concerts, venues, promoters). The artist is NON-TECHNICAL — never mention APIs, OAuth, RAG, embeddings, JSON, model names, or any internal implementation. Speak like a friendly colleague.
+
+You operate inside a chat app. The artist may be talking to you about a specific contact, deal, event or email (the thread title indicates this). When proactive notifications arrive ("Nuevo correo entrante de X"), you continue the conversation in that same thread.
+
 Return ONLY valid JSON (no markdown, no code fences) with exactly this shape:
 {"phase":"tool"|"answer","tool":null|string,"args":{},"reply":null|string,"citations":[]}
 
 Rules:
 - phase "tool" requires a non-null "tool" name and "args" object.
 - phase "answer" requires a non-null "reply" string and "citations" as an array of strings like "deal:12" or "email:3".
-- Read-only tools:
+
+Read-only tools:
   - hybrid_rag_search — args: {"query": string, "limit_per_type": optional number 1-8, default 5}
-  - get_entity — args: {"entity_type":"contact|email|deal|event|drive_file","entity_id": number}
+  - get_entity — args: {"entity_type":"contact|email|deal|event|drive_file|attachment","entity_id": number}
   - search_emails — args: {"query": optional, "direction": optional "inbound|outbound", "thread_id": optional, "connection_id": optional, "limit": optional 1-25}
   - get_thread — args: {"thread_id": string, "connection_id": optional}
   - list_calendar_events — args: {"start": optional ISO, "end": optional ISO, "connection_id": optional, "limit": optional 1-50}
   - search_drive — args: {"query": string, "limit": optional 1-25}
   - get_drive_file_text — args: {"file_id": number}  // triggers on-demand extraction if not yet cached
-- Proposal tools (each creates a PENDING human approval only; nothing applies until approved):
-  - propose_create_deal — {"contact_id": number, "title": string, "status": optional (new|contacted|negotiating|won|lost), "notes": optional, "amount": optional, "currency": optional}
-  - propose_update_deal — {"deal_id": number, optional: title, status, amount, currency, notes}
-  - propose_create_contact — {"name": string, optional: email, phone, role default "other", notes}
-  - propose_update_contact — {"contact_id": number, optional: name, email, phone, role, notes}
-  - propose_create_event — {"venue_name": string, "event_date": string ISO date YYYY-MM-DD, optional: deal_id, city, status default "confirmed", notes}
-  - propose_update_event — {"event_id": number, optional: venue_name, event_date, deal_id, city, status, notes}
+  - list_automations — args: {} — returns the artist's silently-learned rules
+  - list_connectors — args: {} — returns Gmail/Outlook/Drive/Teams connection status
+
+Auto-apply tools (no approval needed; the action runs immediately and the artist sees an UNDO option in chat):
+  - apply_create_contact — {"name": string, optional email, phone, role default "other", notes}
+  - apply_update_contact — {"contact_id": number, optional name, email, phone, role, notes}
+  - apply_create_deal — {"contact_id": number, "title": string, optional status, amount, currency, notes}
+  - apply_update_deal — {"deal_id": number, optional title, status, amount, currency, notes}
+  - apply_create_event — {"venue_name": string, "event_date": YYYY-MM-DD, optional deal_id, city, status, notes}
+  - apply_update_event — {"event_id": number, optional venue_name, event_date, deal_id, city, status, notes}
+  - create_automation — {"name": string, "trigger": "email_received", "conditions": object, "instruction_natural_language": string} — silently learn a rule the artist just expressed in plain language ("nunca enviar correos a X", "siempre responder a venues con plantilla Y"). Do NOT ask permission; just record it and confirm verbally.
+  - update_automation — {"automation_id": number, optional name, conditions, instruction_natural_language, enabled}
+  - delete_automation — {"automation_id": number}
+  - start_connector_setup — {"provider": "google"|"microsoft"} — emits a step-by-step setup card the artist follows in chat to connect Gmail/Outlook/Drive
+  - submit_connector_credentials — {"setup_token": string, "client_id": string, "client_secret": string, optional "redirect_uri", optional "tenant"}
+  - start_oauth_flow — {"provider": "google"|"microsoft", "service": "gmail"|"calendar"|"drive"|"outlook"|"teams"} — returns a URL the artist taps to grant access
+
+Approval-required tools (these create a PENDING approval card; the artist taps Approve in chat):
   - propose_connector_email_send — {"connection_id": number, "to": string or string[], "subject": string, "body": string, optional "content_type": "text"|"html"}
-  - propose_connector_calendar_create — {"connection_id": number, "summary": string, "start_iso": string, "end_iso": string, optional "description", "timezone" default "UTC"}
-  - propose_connector_file_upload — {"connection_id": number, "path": string, "mime_type": string, optional "content_text" or "content_base64"}
-  - propose_connector_teams_message — {"connection_id": number, "team_id": string, "channel_id": string, "body": string}
-  - propose_connector_email_reply — {"connection_id": number, "thread_id": string, "in_reply_to": optional, "to": optional string[], "subject": optional, "body": string, "content_type": optional "text"|"html"}
-  - propose_connector_calendar_update — {"connection_id": number, "event_id": string, optional: summary, description, start_iso, end_iso, timezone}
+  - propose_connector_email_reply — {"connection_id": number, "thread_id": string, optional in_reply_to, to, subject, "body": string, optional content_type}
+  - propose_connector_calendar_create — {"connection_id": number, "summary": string, "start_iso": string, "end_iso": string, optional description, "timezone" default "UTC"}
+  - propose_connector_calendar_update — {"connection_id": number, "event_id": string, optional summary, description, start_iso, end_iso, timezone}
   - propose_connector_calendar_delete — {"connection_id": number, "event_id": string}
-  - propose_connector_file_share — {"connection_id": number, "file_id": string, "email": string, "role": optional "reader"|"writer" default reader}
-- Optional on any proposal tool: "idempotency_key" (string, max 128 chars). Reuses an existing PENDING row with the same key instead of creating a duplicate.
-- Prefer hybrid_rag_search before answering factual questions about the business.
-- Be concise; operators are busy. Use the same language as the user when possible.
+  - propose_connector_file_upload — {"connection_id": number, "path": string, "mime_type": string, optional "content_text" or "content_base64"}
+  - propose_connector_file_share — {"connection_id": number, "file_id": string, "email": string, optional "role": "reader"|"writer"}
+  - propose_connector_teams_message — {"connection_id": number, "team_id": string, "channel_id": string, "body": string}
+
+Behavior rules:
+- Always reply in the same language the artist uses (default: Spanish).
+- When the artist expresses a preference ("don't email X", "always CC bookings@..."), call create_automation IMMEDIATELY without asking. Then confirm verbally ("Hecho — no volveré a escribir a X.").
+- Prefer hybrid_rag_search before answering factual questions. Cite ids in "citations".
+- Be concise. The artist is busy.
+- Optional on any tool: "idempotency_key" (string, max 128 chars).
 """
 
 class AgentService:
@@ -654,12 +672,15 @@ class AgentService:
         )
 
     _PROPOSAL_TOOL_METHODS: dict[str, str] = {
+        # Internal-CRM proposals (legacy: create a pending row even though we now also
+        # support an auto-apply variant). Kept for back-compat with prior agent prompts.
         "propose_create_deal": "_tool_propose_create_deal",
         "propose_update_deal": "_tool_propose_update_deal",
         "propose_create_contact": "_tool_propose_create_contact",
         "propose_update_contact": "_tool_propose_update_contact",
         "propose_create_event": "_tool_propose_create_event",
         "propose_update_event": "_tool_propose_update_event",
+        # External-write proposals (always require approval).
         "propose_connector_email_send": "_tool_propose_connector_email_send",
         "propose_connector_calendar_create": "_tool_propose_connector_calendar_create",
         "propose_connector_file_upload": "_tool_propose_connector_file_upload",
@@ -670,8 +691,250 @@ class AgentService:
         "propose_connector_file_share": "_tool_propose_connector_file_share",
     }
 
+    # Auto-apply CRM tools — execute immediately (with UNDO) instead of creating a pending row.
+    _AUTO_APPLY_TOOL_KIND: dict[str, str] = {
+        "apply_create_contact": "create_contact",
+        "apply_update_contact": "update_contact",
+        "apply_create_deal": "create_deal",
+        "apply_update_deal": "update_deal",
+        "apply_create_event": "create_event",
+        "apply_update_event": "update_event",
+    }
+
     @staticmethod
-    async def run_agent(db: AsyncSession, user: User, message: str) -> AgentRunRead:
+    def _build_auto_apply_payload(kind: str, args: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        """Mirrors the payload normalization the proposal tools do, then returns (payload, summary)."""
+        if kind == "create_contact":
+            payload = {
+                "name": str(args["name"])[:255],
+                "email": args.get("email"),
+                "phone": args.get("phone"),
+                "role": str(args.get("role") or "other"),
+                "notes": args.get("notes"),
+            }
+            return payload, f"Crear contacto: {payload['name']}"
+        if kind == "update_contact":
+            payload = {"contact_id": int(args["contact_id"])}
+            for k in ("name", "email", "phone", "role", "notes"):
+                if args.get(k) is not None:
+                    payload[k] = args[k]
+            return payload, f"Actualizar contacto #{payload['contact_id']}"
+        if kind == "create_deal":
+            payload = {
+                "contact_id": int(args["contact_id"]),
+                "title": str(args["title"])[:255],
+                "status": str(args.get("status") or "new"),
+                "notes": args.get("notes"),
+                "amount": args.get("amount"),
+                "currency": args.get("currency"),
+            }
+            if payload["status"] not in ("new", "contacted", "negotiating", "won", "lost"):
+                payload["status"] = "new"
+            return payload, f"Crear trato: {payload['title']}"
+        if kind == "update_deal":
+            payload = {"deal_id": int(args["deal_id"])}
+            for k in ("title", "status", "amount", "currency", "notes"):
+                if args.get(k) is not None:
+                    payload[k] = args[k]
+            return payload, f"Actualizar trato #{payload['deal_id']}"
+        if kind == "create_event":
+            payload = {
+                "venue_name": str(args["venue_name"])[:255],
+                "event_date": str(args["event_date"]),
+                "status": str(args.get("status") or "confirmed"),
+            }
+            if args.get("deal_id") is not None:
+                payload["deal_id"] = int(args["deal_id"])
+            if args.get("city") is not None:
+                payload["city"] = str(args["city"])[:255]
+            if args.get("notes") is not None:
+                payload["notes"] = args.get("notes")
+            return payload, f"Crear evento: {payload['venue_name']} ({payload['event_date']})"
+        if kind == "update_event":
+            payload = {"event_id": int(args["event_id"])}
+            for k in ("venue_name", "event_date", "deal_id", "city", "status", "notes"):
+                if args.get(k) is not None:
+                    payload[k] = args[k]
+            return payload, f"Actualizar evento #{payload['event_id']}"
+        return {}, kind
+
+    @staticmethod
+    async def _tool_auto_apply(
+        db: AsyncSession,
+        user: User,
+        run_id: int,
+        thread_id: int | None,
+        agent_tool_name: str,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        from app.services.auto_apply_service import auto_apply
+
+        kind = AgentService._AUTO_APPLY_TOOL_KIND[agent_tool_name]
+        payload, summary = AgentService._build_auto_apply_payload(kind, args)
+        try:
+            action = await auto_apply(
+                db, user,
+                kind=kind,
+                payload=payload,
+                summary=summary,
+                run_id=run_id,
+                thread_id=thread_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc)[:300]}
+        return {
+            "executed_action_id": action.id,
+            "kind": action.kind,
+            "summary": action.summary,
+            "entity_id": (action.result or {}).get("entity_id"),
+            "reversible_until": action.reversible_until.isoformat() if action.reversible_until else None,
+            "auto_applied": True,
+        }
+
+    @staticmethod
+    async def _tool_list_automations(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        from app.services.automation_lifecycle_service import automation_to_summary, list_automations
+
+        rows = await list_automations(db, user)
+        return {"automations": [automation_to_summary(r) for r in rows]}
+
+    @staticmethod
+    async def _tool_create_automation(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.automation_lifecycle_service import (
+            automation_to_summary,
+            create_automation,
+        )
+
+        nl = str(args.get("instruction_natural_language") or "").strip()
+        if not nl:
+            return {"error": "instruction_natural_language is required"}
+        rule = await create_automation(
+            db, user,
+            name=str(args.get("name") or nl)[:255],
+            instruction_natural_language=nl,
+            trigger=args.get("trigger"),
+            conditions=args.get("conditions") if isinstance(args.get("conditions"), dict) else None,
+            enabled=bool(args.get("enabled", True)),
+            source="agent",
+        )
+        return {"ok": True, "automation": automation_to_summary(rule)}
+
+    @staticmethod
+    async def _tool_update_automation(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.automation_lifecycle_service import (
+            automation_to_summary,
+            update_automation,
+        )
+
+        aid = args.get("automation_id")
+        if aid is None:
+            return {"error": "automation_id required"}
+        rule = await update_automation(
+            db, user,
+            automation_id=int(aid),
+            name=args.get("name"),
+            instruction_natural_language=args.get("instruction_natural_language"),
+            conditions=args.get("conditions") if isinstance(args.get("conditions"), dict) else None,
+            enabled=args.get("enabled"),
+        )
+        if not rule:
+            return {"error": "automation not found"}
+        return {"ok": True, "automation": automation_to_summary(rule)}
+
+    @staticmethod
+    async def _tool_delete_automation(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.automation_lifecycle_service import delete_automation
+
+        aid = args.get("automation_id")
+        if aid is None:
+            return {"error": "automation_id required"}
+        ok = await delete_automation(db, user, int(aid))
+        return {"ok": ok}
+
+    @staticmethod
+    async def _tool_start_connector_setup(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.connector_setup_service import start_setup
+
+        return await start_setup(db, user, str(args.get("provider") or ""))
+
+    @staticmethod
+    async def _tool_submit_connector_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.connector_setup_service import submit_credentials
+
+        token = str(args.get("setup_token") or "").strip()
+        cid = str(args.get("client_id") or "").strip()
+        secret = str(args.get("client_secret") or "").strip()
+        if not (token and cid and secret):
+            return {"error": "setup_token, client_id and client_secret are required"}
+        return await submit_credentials(
+            db, user,
+            setup_token=token,
+            client_id=cid,
+            client_secret=secret,
+            redirect_uri=args.get("redirect_uri"),
+            tenant=args.get("tenant"),
+        )
+
+    @staticmethod
+    async def _tool_start_oauth_flow(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.connector_setup_service import start_oauth
+
+        return await start_oauth(
+            db, user,
+            provider=str(args.get("provider") or ""),
+            service=str(args.get("service") or "all"),
+        )
+
+    @staticmethod
+    async def _tool_list_connectors(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        from app.models.connector_connection import ConnectorConnection
+
+        r = await db.execute(
+            select(ConnectorConnection).where(ConnectorConnection.user_id == user.id)
+        )
+        out = []
+        for c in r.scalars().all():
+            out.append(
+                {
+                    "id": c.id,
+                    "provider": c.provider,
+                    "label": c.label,
+                    "status": (c.meta or {}).get("status"),
+                }
+            )
+        return {"connectors": out}
+
+    @staticmethod
+    async def run_agent(
+        db: AsyncSession,
+        user: User,
+        message: str,
+        *,
+        prior_messages: list[dict[str, str]] | None = None,
+        thread_id: int | None = None,
+        thread_context_hint: str | None = None,
+    ) -> AgentRunRead:
+        """Run one agent turn.
+
+        ``prior_messages``: optional ``[{role, content}, ...]`` of previous user/assistant
+          turns from the same chat thread (so multi-turn conversations are coherent).
+        ``thread_id``: persisted on AgentRun so executed actions / proposals can route
+          their inline cards back into the right chat thread.
+        ``thread_context_hint``: a short system-injected context blurb such as
+          ``"Conversación sobre Contacto #42 (Maria Lopez)"``.
+        """
         settings_row = await UserAISettingsService.get_or_create(db, user)
         if settings_row.ai_disabled:
             run = AgentRun(
@@ -702,13 +965,35 @@ class AgentService:
         db.add(run)
         await db.flush()
 
-        conversation: list[dict[str, str]] = [
-            {"role": "system", "content": AGENT_SYSTEM},
-            {"role": "user", "content": message},
-        ]
+        system_prompt = AGENT_SYSTEM
+        if thread_context_hint:
+            system_prompt = f"{AGENT_SYSTEM}\n\nThread context: {thread_context_hint.strip()}"
+
+        conversation: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if prior_messages:
+            conversation.extend(
+                [
+                    {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+                    for m in prior_messages
+                    if m.get("content")
+                ]
+            )
+        conversation.append({"role": "user", "content": message})
 
         step_idx = 0
         proposals_created: list[PendingProposal] = []
+        # Carry the bound thread id on AgentRun for downstream surfaces (executed actions,
+        # proactive notifications) without growing the AgentRun schema. Stored as a step.
+        if thread_id is not None:
+            db.add(
+                AgentRunStep(
+                    run_id=run.id,
+                    step_index=0,
+                    kind="meta",
+                    name="thread",
+                    payload={"thread_id": int(thread_id)},
+                )
+            )
 
         try:
             for _ in range(settings.agent_max_tool_steps):
@@ -767,6 +1052,26 @@ class AgentService:
                     result = await AgentService._tool_search_drive(db, user, args)
                 elif tool_name == "get_drive_file_text":
                     result = await AgentService._tool_get_drive_file_text(db, user, args)
+                elif tool_name == "list_connectors":
+                    result = await AgentService._tool_list_connectors(db, user, args)
+                elif tool_name == "list_automations":
+                    result = await AgentService._tool_list_automations(db, user, args)
+                elif tool_name == "create_automation":
+                    result = await AgentService._tool_create_automation(db, user, args)
+                elif tool_name == "update_automation":
+                    result = await AgentService._tool_update_automation(db, user, args)
+                elif tool_name == "delete_automation":
+                    result = await AgentService._tool_delete_automation(db, user, args)
+                elif tool_name == "start_connector_setup":
+                    result = await AgentService._tool_start_connector_setup(db, user, args)
+                elif tool_name == "submit_connector_credentials":
+                    result = await AgentService._tool_submit_connector_credentials(db, user, args)
+                elif tool_name == "start_oauth_flow":
+                    result = await AgentService._tool_start_oauth_flow(db, user, args)
+                elif tool_name in AgentService._AUTO_APPLY_TOOL_KIND:
+                    result = await AgentService._tool_auto_apply(
+                        db, user, run.id, thread_id, tool_name, args
+                    )
                 elif tool_name in AgentService._PROPOSAL_TOOL_METHODS:
                     method_name = AgentService._PROPOSAL_TOOL_METHODS[tool_name]
                     handler = getattr(AgentService, method_name)
@@ -815,7 +1120,8 @@ class AgentService:
             await db.refresh(p)
         prop_reads = [proposal_to_read(p) for p in proposals_created]
         steps = await AgentService._load_steps(db, run.id)
-        return AgentService._to_read(run, steps, prop_reads)
+        actions = await AgentService._load_executed_actions(db, run.id)
+        return AgentService._to_read(run, steps, prop_reads, actions)
 
     @staticmethod
     async def _load_steps(db: AsyncSession, run_id: int) -> list[AgentStepRead]:
@@ -826,7 +1132,37 @@ class AgentService:
         return [AgentStepRead(step_index=s.step_index, kind=s.kind, name=s.name, payload=s.payload) for s in rows]
 
     @staticmethod
-    def _to_read(run: AgentRun, steps: list[AgentStepRead], proposals: list[PendingProposalRead]) -> AgentRunRead:
+    async def _load_executed_actions(db: AsyncSession, run_id: int):
+        from app.models.executed_action import ExecutedAction
+        from app.schemas.agent import ExecutedActionRead
+
+        r = await db.execute(
+            select(ExecutedAction).where(ExecutedAction.run_id == run_id).order_by(ExecutedAction.id)
+        )
+        out: list[ExecutedActionRead] = []
+        for a in r.scalars().all():
+            out.append(
+                ExecutedActionRead(
+                    id=a.id,
+                    kind=a.kind,
+                    summary=a.summary,
+                    status=a.status,
+                    payload=dict(a.payload),
+                    result=dict(a.result) if a.result else None,
+                    reversible_until=a.reversible_until,
+                    reversed_at=a.reversed_at,
+                    created_at=a.created_at,
+                )
+            )
+        return out
+
+    @staticmethod
+    def _to_read(
+        run: AgentRun,
+        steps: list[AgentStepRead],
+        proposals: list[PendingProposalRead],
+        executed_actions: list | None = None,
+    ) -> AgentRunRead:
         return AgentRunRead(
             id=run.id,
             status=run.status,
@@ -835,6 +1171,7 @@ class AgentService:
             error=run.error,
             steps=steps,
             pending_proposals=proposals,
+            executed_actions=executed_actions or [],
         )
 
     @staticmethod
@@ -847,4 +1184,5 @@ class AgentService:
             select(PendingProposal).where(PendingProposal.run_id == run_id, PendingProposal.user_id == user.id)
         )
         props = [proposal_to_read(p) for p in pr.scalars().all()]
-        return AgentService._to_read(run, steps, props)
+        actions = await AgentService._load_executed_actions(db, run.id)
+        return AgentService._to_read(run, steps, props, actions)

@@ -41,6 +41,8 @@ async def create_automation(
         trigger=payload.trigger,
         conditions=payload.conditions or {},
         prompt_template=payload.prompt_template.strip(),
+        instruction_natural_language=(payload.instruction_natural_language or None),
+        source="user",
         default_connection_id=payload.default_connection_id,
         auto_approve=bool(payload.auto_approve),
         enabled=bool(payload.enabled),

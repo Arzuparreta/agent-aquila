@@ -44,7 +44,7 @@ function detectInitialLocale(): Locale {
     // localStorage may be unavailable (e.g. Safari in private mode); fall back to navigator.
   }
   const nav = window.navigator?.language?.toLowerCase() ?? "";
-  if (nav.startsWith("es")) return "es";
+  if (nav.startsWith("en")) return "en";
   return DEFAULT_LOCALE;
 }
 

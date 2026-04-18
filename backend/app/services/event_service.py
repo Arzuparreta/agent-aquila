@@ -66,9 +66,14 @@ class EventService:
         return event
 
     @staticmethod
-    async def delete_event(db: AsyncSession, event_id: int, user_id: int | None = None) -> None:
+    async def delete_event(
+        db: AsyncSession, event_id: int, user_id: int | None = None, *, commit: bool = True
+    ) -> None:
         event = await EventService.get_event(db, event_id)
         await create_audit_log(db, "event", event.id, "deleted", None, user_id)
         await RagIndexService.delete_entity_chunks(db, "event", event_id)
         await db.delete(event)
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()

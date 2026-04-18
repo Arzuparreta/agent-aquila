@@ -184,3 +184,115 @@ export type EmailDraftResponse = {
   draft: string;
   model: string;
 };
+
+export type ChatThreadKind = "general" | "entity";
+export type ChatEntityType =
+  | "contact"
+  | "deal"
+  | "event"
+  | "email"
+  | "drive_file"
+  | "attachment";
+export type ChatMessageRole = "user" | "assistant" | "system" | "event";
+
+export type EntityRef = {
+  type: ChatEntityType;
+  id: number;
+  label?: string | null;
+};
+
+export type ChatThread = {
+  id: number;
+  kind: ChatThreadKind;
+  entity_type: ChatEntityType | null;
+  entity_id: number | null;
+  title: string;
+  pinned: boolean;
+  archived: boolean;
+  last_message_at: string | null;
+  created_at: string;
+  updated_at: string;
+  unread: number;
+};
+
+/**
+ * Inline cards live inside `ChatMessage.attachments`. Each card is rendered specially
+ * by the chat view (approval / undo / connector setup / oauth).
+ */
+export type ChatCard =
+  | {
+      card_kind: "approval";
+      proposal_id: number;
+      kind: string;
+      summary: string | null;
+      risk_tier: string;
+      preview: Record<string, unknown>;
+    }
+  | {
+      card_kind: "undo";
+      action_id: number;
+      kind: string;
+      summary: string | null;
+      status: string;
+      reversible_until: string | null;
+      result: Record<string, unknown> | null;
+    }
+  | {
+      card_kind: "connector_setup";
+      provider: string;
+      step: string;
+      title: string;
+      body: string;
+      cta?: { label: string; url?: string } | null;
+      setup_token?: string | null;
+    }
+  | {
+      card_kind: "oauth_authorize";
+      provider: string;
+      authorize_url: string;
+      label?: string | null;
+    }
+  | {
+      card_kind: "rule_learned";
+      automation_id: number;
+      title: string;
+      instruction_natural_language: string;
+    }
+  | {
+      card_kind: string;
+      [key: string]: unknown;
+    };
+
+export type ChatMessage = {
+  id: number;
+  thread_id: number;
+  role: ChatMessageRole;
+  content: string;
+  attachments: ChatCard[] | null;
+  agent_run_id: number | null;
+  created_at: string;
+};
+
+export type ChatMessageCreate = {
+  content: string;
+  references?: EntityRef[];
+  attachment_ids?: number[];
+};
+
+export type ChatSendResult = {
+  thread: ChatThread;
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+  error: string | null;
+};
+
+export type AttachmentMeta = {
+  id: number;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  thread_id: number | null;
+  created_at: string;
+  embedded: boolean;
+  has_text: boolean;
+};

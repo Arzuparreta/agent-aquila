@@ -23,6 +23,7 @@ class AutomationCreate(BaseModel):
     trigger: Literal["email_received"] = "email_received"
     conditions: dict[str, Any] = Field(default_factory=dict)
     prompt_template: str = Field(..., min_length=1, max_length=8000)
+    instruction_natural_language: str | None = Field(default=None, max_length=2000)
     default_connection_id: int | None = None
     auto_approve: bool = False
     enabled: bool = True
@@ -32,6 +33,7 @@ class AutomationPatch(BaseModel):
     name: str | None = None
     conditions: dict[str, Any] | None = None
     prompt_template: str | None = None
+    instruction_natural_language: str | None = Field(default=None, max_length=2000)
     default_connection_id: int | None = None
     auto_approve: bool | None = None
     enabled: bool | None = None
@@ -43,6 +45,8 @@ class AutomationRead(BaseModel):
     trigger: str
     conditions: dict[str, Any]
     prompt_template: str
+    instruction_natural_language: str | None = None
+    source: str | None = None
     default_connection_id: int | None
     auto_approve: bool
     enabled: bool

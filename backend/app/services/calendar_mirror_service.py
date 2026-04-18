@@ -172,6 +172,12 @@ class CalendarMirrorService:
             await EmbeddingService.sync_event(db, user.id, event.id)
         except Exception:
             logger.exception("embedding sync failed for event %s", event.id)
+        try:
+            from app.services.proactive_service import notify_calendar_event
+
+            await notify_calendar_event(db, user, event, action="created")
+        except Exception:
+            logger.exception("proactive notification failed for event %s", event.id)
         return event
 
     @staticmethod

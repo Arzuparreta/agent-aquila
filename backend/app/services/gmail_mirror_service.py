@@ -304,6 +304,13 @@ class GmailMirrorService:
             except Exception:
                 logger.exception("automation dispatch failed for email %s", email.id)
 
+            try:
+                from app.services.proactive_service import notify_email_received
+
+                await notify_email_received(db, user, email)
+            except Exception:
+                logger.exception("proactive notification failed for email %s", email.id)
+
         return email
 
     @staticmethod

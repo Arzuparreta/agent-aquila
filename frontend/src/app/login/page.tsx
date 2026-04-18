@@ -37,7 +37,7 @@ export default function LoginPage() {
 
       const data: { access_token: string } = await response.json();
       setToken(data.access_token);
-      router.push("/dashboard");
+      router.push("/");
     } catch {
       setError(t("login.networkError"));
     }

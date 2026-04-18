@@ -34,6 +34,12 @@ class Automation(Base):
     )
     auto_approve: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    # Plain-language description used by the hidden Automations panel and shown verbatim to
+    # the artist ("Nunca enviar correos a mark@example.com"). The agent maintains this in sync
+    # with `prompt_template` whenever it learns or edits a rule.
+    instruction_natural_language: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Where the rule originated: "user" (user-typed in the legacy UI) or "agent" (auto-learned).
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     run_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(

@@ -73,9 +73,14 @@ class DealService:
         return deal
 
     @staticmethod
-    async def delete_deal(db: AsyncSession, deal_id: int, user_id: int | None = None) -> None:
+    async def delete_deal(
+        db: AsyncSession, deal_id: int, user_id: int | None = None, *, commit: bool = True
+    ) -> None:
         deal = await DealService.get_deal(db, deal_id)
         await create_audit_log(db, "deal", deal.id, "deleted", None, user_id)
         await RagIndexService.delete_deal_subtree(db, deal_id)
         await db.delete(deal)
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()

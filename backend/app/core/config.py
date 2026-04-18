@@ -64,6 +64,21 @@ class Settings(BaseSettings):
     )
     drive_delta_poll_seconds: int = Field(default=300, ge=60, le=3600, validation_alias="DRIVE_DELTA_POLL_SECONDS")
 
+    # Web Push (VAPID). Generate via `vapid --gen` (web-push CLI) or any standard generator.
+    # Both private and public keys are required to send notifications. The public key is also
+    # exposed via /push/public-key so the FE can subscribe.
+    vapid_public_key: str = Field(default="", validation_alias="VAPID_PUBLIC_KEY")
+    vapid_private_key: str = Field(default="", validation_alias="VAPID_PRIVATE_KEY")
+    vapid_contact_email: str = Field(
+        default="mailto:admin@example.com", validation_alias="VAPID_CONTACT_EMAIL"
+    )
+
+    # Local file storage root for artist-uploaded Archivos. Created on first write.
+    upload_dir: str = Field(default="./uploads", validation_alias="UPLOAD_DIR")
+    max_upload_bytes: int = Field(
+        default=25 * 1024 * 1024, ge=1024, le=200 * 1024 * 1024, validation_alias="MAX_UPLOAD_BYTES"
+    )
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")

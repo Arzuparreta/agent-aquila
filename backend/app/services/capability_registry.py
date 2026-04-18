@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from app.services.capability_policy import RiskTier, risk_tier_for_kind
+from app.services.capability_policy import RiskTier, kind_is_auto_apply, risk_tier_for_kind
 
 
 class ProposalKindMeta(TypedDict):
@@ -10,6 +10,7 @@ class ProposalKindMeta(TypedDict):
 
     description: str
     risk_tier: RiskTier
+    auto_apply: bool
 
 
 def proposal_kind_registry() -> dict[str, ProposalKindMeta]:
@@ -22,16 +23,24 @@ def proposal_kind_registry() -> dict[str, ProposalKindMeta]:
         "update_event",
         "connector_email_send",
         "connector_calendar_create",
+        "connector_calendar_update",
+        "connector_calendar_delete",
         "connector_file_upload",
+        "connector_file_share",
         "connector_teams_message",
     ]
-    return {
-        k: {
-            "description": f"Pending operation kind `{k}` (executed only after human approval).",
+    out: dict[str, ProposalKindMeta] = {}
+    for k in kinds:
+        is_auto = kind_is_auto_apply(k)
+        out[k] = {
+            "description": (
+                f"Operation `{k}` — "
+                + ("auto-applied with UNDO." if is_auto else "executed after human approval.")
+            ),
             "risk_tier": risk_tier_for_kind(k),
+            "auto_apply": is_auto,
         }
-        for k in kinds
-    }
+    return out
 
 
 def describe_capabilities() -> dict[str, Any]:

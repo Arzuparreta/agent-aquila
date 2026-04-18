@@ -1,5 +1,12 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { ProtectedPage } from "@/components/features/protected-page";
+import { ChatHome } from "@/components/features/chat/chat-home";
 
 export default function HomePage() {
-  redirect("/cockpit");
+  return (
+    <ProtectedPage>
+      <ChatHome />
+    </ProtectedPage>
+  );
 }

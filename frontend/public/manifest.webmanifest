@@ -1,0 +1,15 @@
+{
+  "name": "Mánager",
+  "short_name": "Mánager",
+  "description": "Tu mánager personal en una sola conversación.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "es",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
