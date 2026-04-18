@@ -37,7 +37,12 @@ export default function LoginPage() {
 
       const data: { access_token: string } = await response.json();
       setToken(data.access_token);
-      router.push("/");
+      const params = new URLSearchParams(window.location.search);
+      let dest = params.get("next") || "/";
+      if (!dest.startsWith("/") || dest.startsWith("//")) {
+        dest = "/";
+      }
+      router.push(dest);
     } catch {
       setError(t("login.networkError"));
     }

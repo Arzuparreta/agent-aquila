@@ -8,14 +8,18 @@ import { useTranslation } from "@/lib/i18n";
 
 export function ProtectedPage({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authHydrated } = useAuth();
   const { t } = useTranslation();
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.replace("/login");
-    }
-  }, [isAuthenticated, router]);
+    if (!authHydrated || isAuthenticated) return;
+    const next = `${window.location.pathname}${window.location.search}`;
+    router.replace(`/login?next=${encodeURIComponent(next)}`);
+  }, [authHydrated, isAuthenticated, router]);
+
+  if (!authHydrated) {
+    return <div className="p-6">{t("auth.loadingSession")}</div>;
+  }
 
   if (!isAuthenticated) {
     return <div className="p-6">{t("auth.redirecting")}</div>;

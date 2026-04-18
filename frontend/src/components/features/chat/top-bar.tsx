@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { useAuth } from "@/lib/auth";
@@ -48,20 +49,20 @@ export function ChatTopBar({
             className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-lg border border-white/10 bg-slate-900 py-1 text-sm shadow-xl"
             onMouseLeave={() => setMenuOpen(false)}
           >
-            <a
+            <Link
               href="/settings"
               className="block px-3 py-2 hover:bg-white/5"
               onClick={() => setMenuOpen(false)}
             >
               Ajustes técnicos (avanzado)
-            </a>
-            <a
+            </Link>
+            <Link
               href="/automations"
               className="block px-3 py-2 hover:bg-white/5"
               onClick={() => setMenuOpen(false)}
             >
               Reglas aprendidas
-            </a>
+            </Link>
             <button
               onClick={() => {
                 setMenuOpen(false);

@@ -64,6 +64,7 @@ const en = {
   "login.networkError":
     "Could not reach the server. If you use Docker, run `docker compose up` and open the app on the same host/port as in your compose file.",
   "auth.redirecting": "Redirecting...",
+  "auth.loadingSession": "Loading session...",
 
   // ── Dashboard ────────────────────────────────────────────────────────────
   "dashboard.title": "Dashboard",
@@ -492,6 +493,7 @@ const es: Record<keyof typeof en, string> = {
   "login.networkError":
     "No se pudo contactar con el servidor. Si usas Docker, ejecuta `docker compose up` y abre la app en el mismo host y puerto que en tu archivo compose.",
   "auth.redirecting": "Redirigiendo...",
+  "auth.loadingSession": "Cargando sesión...",
 
   // ── Dashboard ────────────────────────────────────────────────────────────
   "dashboard.title": "Panel",
