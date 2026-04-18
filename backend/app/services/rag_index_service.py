@@ -14,6 +14,7 @@ from app.models.event import Event
 from app.models.rag_chunk import RagChunk
 from app.models.user import User
 from app.services.chunking import split_into_chunks
+from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.embedding_client import EmbeddingClient
 from app.services.embedding_vector import pad_embedding
 from app.services.user_ai_settings_service import UserAISettingsService
@@ -172,7 +173,7 @@ class RagIndexService:
             await RagIndexService.delete_entity_chunks(db, "contact", contact_id)
             return None
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             await RagIndexService.delete_entity_chunks(db, "contact", contact_id)
             return None
         result = await db.execute(select(Contact).where(Contact.id == contact_id))
@@ -185,7 +186,7 @@ class RagIndexService:
             entity_type="contact",
             entity_id=contact_id,
             document=doc,
-            api_key=api_key,
+            api_key=api_key or "",
             settings_row=settings_row,
             metadata_base={"name": contact.name, "role": contact.role},
         )
@@ -200,7 +201,7 @@ class RagIndexService:
             await RagIndexService.delete_entity_chunks(db, "email", email_id)
             return None
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             await RagIndexService.delete_entity_chunks(db, "email", email_id)
             return None
         result = await db.execute(select(Email).where(Email.id == email_id))
@@ -213,7 +214,7 @@ class RagIndexService:
             entity_type="email",
             entity_id=email_id,
             document=doc,
-            api_key=api_key,
+            api_key=api_key or "",
             settings_row=settings_row,
             metadata_base={"subject": email.subject},
         )
@@ -228,7 +229,7 @@ class RagIndexService:
             await RagIndexService.delete_entity_chunks(db, "deal", deal_id)
             return None
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             await RagIndexService.delete_entity_chunks(db, "deal", deal_id)
             return None
         result = await db.execute(select(Deal).where(Deal.id == deal_id))
@@ -245,7 +246,7 @@ class RagIndexService:
             entity_type="deal",
             entity_id=deal_id,
             document=doc,
-            api_key=api_key,
+            api_key=api_key or "",
             settings_row=settings_row,
             metadata_base={"title": deal.title, "status": deal.status},
         )
@@ -260,7 +261,7 @@ class RagIndexService:
             await RagIndexService.delete_entity_chunks(db, "event", event_id)
             return None
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             await RagIndexService.delete_entity_chunks(db, "event", event_id)
             return None
         result = await db.execute(select(Event).where(Event.id == event_id))
@@ -273,7 +274,7 @@ class RagIndexService:
             entity_type="event",
             entity_id=event_id,
             document=doc,
-            api_key=api_key,
+            api_key=api_key or "",
             settings_row=settings_row,
             metadata_base={"venue": event.venue_name, "event_date": event.event_date.isoformat()},
         )

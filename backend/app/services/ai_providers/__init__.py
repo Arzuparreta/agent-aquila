@@ -16,6 +16,7 @@ from app.services.ai_providers.registry import (
     get_provider,
     list_providers,
     normalize_provider_id,
+    provider_kind_requires_api_key,
     resolve_known_provider_id,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "get_provider",
     "list_providers",
     "normalize_provider_id",
+    "provider_kind_requires_api_key",
     "resolve_known_provider_id",
 ]

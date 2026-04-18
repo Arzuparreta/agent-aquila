@@ -258,6 +258,19 @@ def get_provider(provider_id: str) -> ProviderDefinition | None:
     return _BY_ID.get(normalized)
 
 
+def provider_kind_requires_api_key(provider_kind: str | None) -> bool:
+    """True when the provider expects a stored API key (or equivalent secret).
+
+    Local providers such as Ollama use ``auth_kind="none"`` and must not be
+    blocked when ``api_key_encrypted`` is empty.
+    """
+
+    definition = get_provider(normalize_provider_id(provider_kind))
+    if definition is None:
+        return True
+    return definition.auth_kind != "none"
+
+
 def normalize_provider_id(provider_id: str | None) -> str:
     """Return a known provider id, falling back to ``openai_compatible``.
 

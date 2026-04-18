@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.llm_client import LLMClient, parse_json_object
 from app.services.user_ai_settings_service import UserAISettingsService
 
@@ -36,7 +37,7 @@ class TriageService:
         if settings_row.ai_disabled:
             return fallback
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             return fallback
         model = settings_row.classify_model or settings_row.chat_model
         system = (
@@ -48,7 +49,7 @@ class TriageService:
         user_msg = f"Subject: {subject}\n\nBody:\n{body[:4000]}"
         try:
             raw = await LLMClient.chat_completion(
-                api_key,
+                api_key or "",
                 settings_row,
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
                 model=model,

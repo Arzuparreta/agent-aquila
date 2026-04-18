@@ -12,14 +12,20 @@ def _api_root(settings_row: UserAISettings) -> str:
     """Resolve the OpenAI-compatible base URL for this user's provider.
 
     The registry owns provider-default URLs; ``base_url`` on the row always
-    wins when non-empty.
+    wins when non-empty. Ollama exposes the OpenAI-compatible API under
+    ``/v1`` while model listing uses the root URL; append ``/v1`` when missing so ``/chat/completions`` and ``/embeddings`` resolve correctly.
     """
     if settings_row.base_url:
-        return settings_row.base_url.rstrip("/")
-    definition = get_provider(normalize_provider_id(settings_row.provider_kind))
-    if definition and definition.default_base_url:
-        return definition.default_base_url.rstrip("/")
-    return "https://api.openai.com/v1"
+        base = settings_row.base_url.rstrip("/")
+    else:
+        definition = get_provider(normalize_provider_id(settings_row.provider_kind))
+        if definition and definition.default_base_url:
+            base = definition.default_base_url.rstrip("/")
+        else:
+            base = "https://api.openai.com/v1"
+    if normalize_provider_id(settings_row.provider_kind) == "ollama" and not base.endswith("/v1"):
+        return f"{base}/v1"
+    return base
 
 
 def _extra_headers(settings_row: UserAISettings) -> dict[str, str]:

@@ -13,6 +13,7 @@ from app.models.event import Event
 from app.models.rag_chunk import RagChunk
 from app.models.user import User
 from app.schemas.ai import SemanticSearchHit
+from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.embedding_client import EmbeddingClient
 from app.services.embedding_vector import pad_embedding
 from app.services.user_ai_settings_service import UserAISettingsService
@@ -164,9 +165,9 @@ class SemanticSearchService:
         if settings_row.ai_disabled:
             return []
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             return []
-        q_raw = (await EmbeddingClient.embed_texts(api_key, settings_row, [query]))[0]
+        q_raw = (await EmbeddingClient.embed_texts(api_key or "", settings_row, [query]))[0]
         qvec = pad_embedding(q_raw)
 
         chunk_cnt = await db.scalar(select(func.count()).select_from(RagChunk)) or 0

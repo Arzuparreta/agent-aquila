@@ -10,6 +10,7 @@ from app.models.email import Email
 from app.models.user import User
 from app.schemas.ai import EmailDraftResponse
 from app.schemas.email import EmailCreate
+from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.audit_service import create_audit_log
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_client import LLMClient
@@ -122,7 +123,7 @@ class EmailService:
         if settings_row.ai_disabled:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="AI is disabled for this user")
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="API key not configured")
 
         history_lines: list[str] = []
@@ -147,7 +148,7 @@ class EmailService:
             f"{email.body}\n\nRecent thread (newest first):\n{history}"
         )
         draft = await LLMClient.chat_completion(
-            api_key,
+            api_key or "",
             settings_row,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_msg}],
             temperature=0.4,

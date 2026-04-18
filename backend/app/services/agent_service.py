@@ -15,6 +15,7 @@ from app.models.event import Event
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import AgentRunRead, AgentStepRead, PendingProposalRead
+from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.llm_client import LLMClient, parse_json_object
 from app.services.proposal_service import proposal_to_read
 from app.services.semantic_search_service import SemanticSearchService
@@ -178,7 +179,7 @@ class AgentService:
             return AgentService._to_read(run, [], [])
 
         api_key = await UserAISettingsService.get_api_key(db, user)
-        if not api_key:
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
             run = AgentRun(
                 user_id=user.id,
                 status="failed",
@@ -205,7 +206,7 @@ class AgentService:
         try:
             for _ in range(MAX_AGENT_STEPS):
                 raw = await LLMClient.chat_completion(
-                    api_key,
+                    api_key or "",
                     settings_row,
                     messages=conversation,
                     temperature=0.15,
