@@ -48,13 +48,24 @@ def _address_from_graph(field: dict[str, Any] | None) -> tuple[str | None, str |
 class GraphMirrorService:
     # ------------------------- Mail -------------------------
     @staticmethod
-    async def _upsert_contact(db: AsyncSession, name: str | None, addr: str | None) -> Contact | None:
+    async def _upsert_contact(
+        db: AsyncSession,
+        name: str | None,
+        addr: str | None,
+        *,
+        skip_create_if_noise: bool = True,
+    ) -> Contact | None:
         if not addr:
             return None
         r = await db.execute(select(Contact).where(Contact.email == addr))
         contact = r.scalar_one_or_none()
         if contact:
             return contact
+        if skip_create_if_noise:
+            from app.services.inbound_filter_service import heuristic_sender_is_noise
+
+            if heuristic_sender_is_noise(addr, None):
+                return None
         contact = Contact(name=name or addr, email=addr, role="other")
         db.add(contact)
         await db.flush()
@@ -104,7 +115,9 @@ class GraphMirrorService:
         link_name, link_addr = sender_name, sender_email
         if direction == "outbound" and to_recipients:
             link_name, link_addr = _address_from_graph(to_recipients[0])
-        contact = await GraphMirrorService._upsert_contact(db, link_name, link_addr)
+        contact = await GraphMirrorService._upsert_contact(
+            db, link_name, link_addr, skip_create_if_noise=(direction == "inbound")
+        )
 
         existing_res = await db.execute(
             select(Email).where(
@@ -183,11 +196,28 @@ class GraphMirrorService:
                 logger.exception("graph automation dispatch failed for email %s", email.id)
 
             try:
-                from app.services.proactive_service import notify_email_received
+                from app.services.inbound_filter_service import (
+                    CATEGORY_ACTIONABLE,
+                    InboundFilterService,
+                )
 
-                await notify_email_received(db, user, email)
+                verdict = await InboundFilterService.classify_email(db, user, email)
+                InboundFilterService.apply_verdict_to_email(email, verdict)
+                await db.flush()
+                if verdict.category == CATEGORY_ACTIONABLE:
+                    from app.services.proactive_service import notify_email_received
+
+                    await notify_email_received(db, user, email)
+                else:
+                    logger.info(
+                        "silenced inbound graph email %s (%s/%s): %s",
+                        email.id,
+                        verdict.category,
+                        verdict.source,
+                        verdict.reason,
+                    )
             except Exception:
-                logger.exception("graph proactive notification failed for email %s", email.id)
+                logger.exception("graph inbound filter / proactive notification failed for email %s", email.id)
 
         return email
 
@@ -283,11 +313,28 @@ class GraphMirrorService:
         except Exception:
             logger.exception("graph event embedding failed for %s", row.id)
         try:
-            from app.services.proactive_service import notify_calendar_event
+            from app.services.inbound_filter_service import (
+                CATEGORY_ACTIONABLE,
+                InboundFilterService,
+            )
 
-            await notify_calendar_event(db, user, row, action="created")
+            verdict = await InboundFilterService.classify_event(db, user, row, payload=event)
+            InboundFilterService.apply_verdict_to_event(row, verdict)
+            await db.flush()
+            if verdict.category == CATEGORY_ACTIONABLE:
+                from app.services.proactive_service import notify_calendar_event
+
+                await notify_calendar_event(db, user, row, action="created")
+            else:
+                logger.info(
+                    "silenced graph event %s (%s/%s): %s",
+                    row.id,
+                    verdict.category,
+                    verdict.source,
+                    verdict.reason,
+                )
         except Exception:
-            logger.exception("graph proactive notification failed for event %s", row.id)
+            logger.exception("graph inbound filter / proactive notification failed for event %s", row.id)
         return row
 
     @staticmethod

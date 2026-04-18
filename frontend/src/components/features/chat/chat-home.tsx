@@ -27,24 +27,34 @@ export function ChatHome() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const push = usePushNotifications();
 
-  const refreshThreads = useCallback(async () => {
-    try {
-      const rows = await apiFetch<ChatThread[]>("/threads");
-      setThreads(rows);
-      setActiveId((prev) => prev ?? rows[0]?.id ?? null);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cargar la lista.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const refreshThreads = useCallback(
+    async (includeArchived = showArchived) => {
+      try {
+        const qs = includeArchived ? "?include_archived=true" : "";
+        const rows = await apiFetch<ChatThread[]>(`/threads${qs}`);
+        setThreads(rows);
+        setActiveId((prev) => prev ?? rows.find((r) => !r.archived)?.id ?? rows[0]?.id ?? null);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "No se pudo cargar la lista.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [showArchived]
+  );
 
   useEffect(() => {
     void refreshThreads();
   }, [refreshThreads]);
+
+  const visibleThreads = useMemo(
+    () => threads.filter((t) => (showArchived ? t.archived : !t.archived)),
+    [threads, showArchived]
+  );
 
   // Honor `?thread=NN` deep-links from push notifications.
   useEffect(() => {
@@ -99,9 +109,17 @@ export function ChatHome() {
       ) : null}
       <div className="flex min-h-0 flex-1">
         {/* Permanent rail on desktop */}
-        <aside className="hidden w-72 shrink-0 border-r border-white/5 bg-slate-900 md:block">
+        <aside className="hidden w-72 shrink-0 border-r border-white/5 bg-slate-900 md:flex md:flex-col">
+          <ArchiveTabs
+            showArchived={showArchived}
+            onChange={(next) => {
+              setShowArchived(next);
+              setActiveId(null);
+              void refreshThreads(next);
+            }}
+          />
           <ChatThreadList
-            threads={threads}
+            threads={visibleThreads}
             activeId={activeId}
             loading={loading}
             error={error}
@@ -114,9 +132,17 @@ export function ChatHome() {
         {/* Mobile drawer */}
         {drawerOpen ? (
           <div className="absolute inset-0 z-30 flex md:hidden">
-            <div className="w-72 max-w-[80vw] bg-slate-900 shadow-xl">
+            <div className="flex w-72 max-w-[80vw] flex-col bg-slate-900 shadow-xl">
+              <ArchiveTabs
+                showArchived={showArchived}
+                onChange={(next) => {
+                  setShowArchived(next);
+                  setActiveId(null);
+                  void refreshThreads(next);
+                }}
+              />
               <ChatThreadList
-                threads={threads}
+                threads={visibleThreads}
                 activeId={activeId}
                 loading={loading}
                 error={error}
@@ -159,4 +185,27 @@ function threadSortFn(a: ChatThread, b: ChatThread): number {
   const ta = a.last_message_at ?? a.created_at;
   const tb = b.last_message_at ?? b.created_at;
   return tb.localeCompare(ta);
+}
+
+function ArchiveTabs({
+  showArchived,
+  onChange,
+}: {
+  showArchived: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const tabClass = (active: boolean) =>
+    `flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+      active ? "border-b-2 border-indigo-500 text-white" : "text-slate-400 hover:text-slate-200"
+    }`;
+  return (
+    <div className="flex border-b border-white/5">
+      <button onClick={() => onChange(false)} className={tabClass(!showArchived)}>
+        Activas
+      </button>
+      <button onClick={() => onChange(true)} className={tabClass(showArchived)}>
+        Archivadas
+      </button>
+    </div>
+  );
 }

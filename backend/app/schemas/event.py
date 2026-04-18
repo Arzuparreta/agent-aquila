@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -33,3 +33,7 @@ class EventRead(TimestampSchema):
     city: str | None = None
     status: str
     notes: str | None = None
+    triage_category: str | None = None
+    triage_reason: str | None = None
+    triage_source: str | None = None
+    triage_at: datetime | None = None

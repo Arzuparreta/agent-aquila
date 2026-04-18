@@ -120,7 +120,12 @@ def _html_to_text(html: str) -> str:
 class GmailMirrorService:
     @staticmethod
     async def _upsert_contact_from_address(
-        db: AsyncSession, name: str | None, email_addr: str | None
+        db: AsyncSession,
+        name: str | None,
+        email_addr: str | None,
+        *,
+        raw_headers: dict | None = None,
+        skip_create_if_noise: bool = True,
     ) -> Contact | None:
         if not email_addr:
             return None
@@ -128,6 +133,13 @@ class GmailMirrorService:
         contact = r.scalar_one_or_none()
         if contact:
             return contact
+        # Don't pollute Contactos with newsletter / no-reply senders. The mail
+        # row still keeps ``sender_email`` so the artist can promote later.
+        if skip_create_if_noise:
+            from app.services.inbound_filter_service import heuristic_sender_is_noise
+
+            if heuristic_sender_is_noise(email_addr, raw_headers):
+                return None
         contact = Contact(name=name or email_addr, email=email_addr, role="other")
         db.add(contact)
         await db.flush()
@@ -216,7 +228,15 @@ class GmailMirrorService:
             ln, la = _parse_address(to_hdr)
             if la:
                 link_name, link_addr = ln, la
-        contact = await GmailMirrorService._upsert_contact_from_address(db, link_name, link_addr)
+        # For outbound mail (we sent it) always create the recipient as a contact
+        # — that's not noise. For inbound, the helper applies the noise gate.
+        contact = await GmailMirrorService._upsert_contact_from_address(
+            db,
+            link_name,
+            link_addr,
+            raw_headers={"gmail_headers": headers},
+            skip_create_if_noise=(direction == "inbound"),
+        )
 
         if existing:
             existing.labels = label_ids
@@ -305,11 +325,28 @@ class GmailMirrorService:
                 logger.exception("automation dispatch failed for email %s", email.id)
 
             try:
-                from app.services.proactive_service import notify_email_received
+                from app.services.inbound_filter_service import (
+                    CATEGORY_ACTIONABLE,
+                    InboundFilterService,
+                )
 
-                await notify_email_received(db, user, email)
+                verdict = await InboundFilterService.classify_email(db, user, email)
+                InboundFilterService.apply_verdict_to_email(email, verdict)
+                await db.flush()
+                if verdict.category == CATEGORY_ACTIONABLE:
+                    from app.services.proactive_service import notify_email_received
+
+                    await notify_email_received(db, user, email)
+                else:
+                    logger.info(
+                        "silenced inbound email %s (%s/%s): %s",
+                        email.id,
+                        verdict.category,
+                        verdict.source,
+                        verdict.reason,
+                    )
             except Exception:
-                logger.exception("proactive notification failed for email %s", email.id)
+                logger.exception("inbound filter / proactive notification failed for email %s", email.id)
 
         return email
 

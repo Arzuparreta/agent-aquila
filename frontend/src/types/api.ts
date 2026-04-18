@@ -9,6 +9,9 @@ export type Contact = {
   updated_at: string;
 };
 
+export type TriageCategory = "actionable" | "informational" | "noise" | "unknown";
+export type TriageSource = "heuristic" | "llm" | "known_contact" | "manual";
+
 export type Email = {
   id: number;
   contact_id: number | null;
@@ -18,6 +21,10 @@ export type Email = {
   body: string;
   received_at: string;
   created_at: string;
+  triage_category?: TriageCategory | null;
+  triage_reason?: string | null;
+  triage_source?: TriageSource | null;
+  triage_at?: string | null;
 };
 
 export type Deal = {
@@ -42,6 +49,10 @@ export type CalendarEvent = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  triage_category?: TriageCategory | null;
+  triage_reason?: string | null;
+  triage_source?: TriageSource | null;
+  triage_at?: string | null;
 };
 
 export type UserAISettings = {

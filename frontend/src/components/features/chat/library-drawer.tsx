@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import type {
@@ -10,12 +10,14 @@ import type {
   Contact,
   Deal,
   Email,
-  EntityRef
+  EntityRef,
+  TriageCategory
 } from "@/types/api";
 
 import { useChatReferences } from "./reference-context";
 
 type Tab = "contacts" | "deals" | "events" | "emails" | "files";
+type EmailFilter = "all" | "actionable" | "informational" | "noise";
 
 const TAB_LABELS: Record<Tab, string> = {
   contacts: "Contactos",
@@ -31,6 +33,13 @@ const TAB_ENTITY: Record<Tab, ChatEntityType> = {
   events: "event",
   emails: "email",
   files: "attachment"
+};
+
+const TRIAGE_BADGE: Record<TriageCategory, { label: string; className: string }> = {
+  actionable: { label: "Accionable", className: "bg-emerald-600/30 text-emerald-200" },
+  informational: { label: "Info", className: "bg-slate-600/40 text-slate-200" },
+  noise: { label: "Silenciado", className: "bg-rose-700/30 text-rose-200" },
+  unknown: { label: "Sin clasificar", className: "bg-slate-700/40 text-slate-300" }
 };
 
 type RowsByTab = {
@@ -67,24 +76,56 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<RowsByTab>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailFilter, setEmailFilter] = useState<EmailFilter>("actionable");
   const refs = useChatReferences();
 
-  const fetchTab = useCallback(async (t: Tab) => {
-    setLoading(true);
-    try {
-      const rows = await apiFetch<unknown[]>(ENDPOINTS[t]);
-      setData((prev) => ({ ...prev, [t]: rows as never }));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Error al cargar.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchTab = useCallback(
+    async (t: Tab, filter: EmailFilter = emailFilter) => {
+      setLoading(true);
+      try {
+        let url = ENDPOINTS[t];
+        if (t === "emails" && filter !== "all") {
+          url = `${url}?triage=${filter}`;
+        }
+        const rows = await apiFetch<unknown[]>(url);
+        setData((prev) => ({ ...prev, [t]: rows as never }));
+        setError(null);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Error al cargar.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [emailFilter]
+  );
 
   useEffect(() => {
     void fetchTab(tab);
   }, [tab, fetchTab]);
+
+  const promoteEmail = useCallback(
+    async (id: number) => {
+      try {
+        await apiFetch(`/emails/${id}/promote`, { method: "POST" });
+        await fetchTab("emails");
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "No se pudo promover.");
+      }
+    },
+    [fetchTab]
+  );
+
+  const suppressEmail = useCallback(
+    async (id: number) => {
+      try {
+        await apiFetch(`/emails/${id}/suppress`, { method: "POST" });
+        await fetchTab("emails");
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "No se pudo silenciar.");
+      }
+    },
+    [fetchTab]
+  );
 
   const reference = (entity_type: ChatEntityType, id: number, label: string) => {
     const ref: EntityRef = { type: entity_type, id, label };
@@ -149,10 +190,34 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </nav>
+        {tab === "emails" ? (
+          <div className="flex gap-1 overflow-x-auto border-b border-white/5 bg-slate-900/60 px-2 py-1 text-xs">
+            {(["actionable", "informational", "noise", "all"] as EmailFilter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => {
+                  setEmailFilter(f);
+                  void fetchTab("emails", f);
+                }}
+                className={`shrink-0 rounded-full px-2 py-1 ${
+                  emailFilter === f ? "bg-indigo-500/30 text-white" : "text-slate-400 hover:bg-white/5"
+                }`}
+              >
+                {f === "all" ? "Todos" : TRIAGE_BADGE[f as TriageCategory].label}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="scroll-stealth min-h-0 flex-1 overflow-y-auto p-2">
           {loading ? <div className="p-3 text-sm text-slate-400">Cargando…</div> : null}
           {error ? <div className="p-3 text-sm text-rose-300">{error}</div> : null}
-          <LibraryRows tab={tab} data={data} onPick={reference} />
+          <LibraryRows
+            tab={tab}
+            data={data}
+            onPick={reference}
+            onPromoteEmail={promoteEmail}
+            onSuppressEmail={suppressEmail}
+          />
         </div>
         <footer className="pb-safe border-t border-white/5 px-3 py-2 text-center text-[11px] text-slate-500">
           Toca un elemento para mencionarlo en la conversación.
@@ -170,13 +235,77 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
 function LibraryRows({
   tab,
   data,
-  onPick
+  onPick,
+  onPromoteEmail,
+  onSuppressEmail
 }: {
   tab: Tab;
   data: RowsByTab;
   onPick: (entity_type: ChatEntityType, id: number, label: string) => void;
+  onPromoteEmail: (id: number) => Promise<void> | void;
+  onSuppressEmail: (id: number) => Promise<void> | void;
 }) {
-  const rows = useMemo(() => {
+  const entity_type = TAB_ENTITY[tab];
+
+  if (tab === "emails") {
+    if (data.emails.length === 0) {
+      return (
+        <div className="p-4 text-center text-sm text-slate-500">No hay nada todavía aquí.</div>
+      );
+    }
+    return (
+      <ul className="flex flex-col gap-1">
+        {data.emails.map((e) => {
+          const cat: TriageCategory = (e.triage_category ?? "unknown") as TriageCategory;
+          const badge = TRIAGE_BADGE[cat] ?? TRIAGE_BADGE.unknown;
+          const isNoise = cat === "noise" || cat === "informational";
+          return (
+            <li key={`emails-${e.id}`} className="rounded-md bg-slate-900">
+              <button
+                onClick={() => onPick(entity_type, e.id, e.subject || "(sin asunto)")}
+                className="flex w-full flex-col items-start gap-0.5 rounded-t-md px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800"
+              >
+                <span className="flex w-full items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {e.subject || "(sin asunto)"}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${badge.className}`}
+                    title={e.triage_reason ?? undefined}
+                  >
+                    {badge.label}
+                  </span>
+                </span>
+                <span className="truncate text-xs text-slate-400">
+                  {e.sender_name || e.sender_email}
+                </span>
+              </button>
+              <div className="flex gap-2 border-t border-white/5 px-3 py-1 text-xs">
+                {isNoise ? (
+                  <button
+                    onClick={() => void onPromoteEmail(e.id)}
+                    className="rounded-full bg-emerald-700/40 px-2 py-0.5 text-emerald-200 hover:bg-emerald-700/60"
+                  >
+                    Promover a accionable
+                  </button>
+                ) : null}
+                {cat !== "noise" ? (
+                  <button
+                    onClick={() => void onSuppressEmail(e.id)}
+                    className="rounded-full bg-slate-700/40 px-2 py-0.5 text-slate-200 hover:bg-slate-700/60"
+                  >
+                    Silenciar
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  const rows = (() => {
     switch (tab) {
       case "contacts":
         return data.contacts.map((c) => ({
@@ -196,27 +325,22 @@ function LibraryRows({
           label: e.venue_name,
           sub: `${e.event_date}${e.city ? ` · ${e.city}` : ""}`
         }));
-      case "emails":
-        return data.emails.map((e) => ({
-          id: e.id,
-          label: e.subject || "(sin asunto)",
-          sub: e.sender_name || e.sender_email
-        }));
       case "files":
         return data.files.map((f) => ({
           id: f.id,
           label: f.filename,
           sub: `${(f.size_bytes / 1024).toFixed(1)} KB · ${f.mime_type}`
         }));
+      default:
+        return [];
     }
-  }, [tab, data]);
+  })();
 
   if (rows.length === 0) {
     return (
       <div className="p-4 text-center text-sm text-slate-500">No hay nada todavía aquí.</div>
     );
   }
-  const entity_type = TAB_ENTITY[tab];
   return (
     <ul className="flex flex-col gap-1">
       {rows.map((r) => (

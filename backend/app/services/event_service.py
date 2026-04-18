@@ -13,8 +13,14 @@ from app.services.rag_index_service import RagIndexService
 
 class EventService:
     @staticmethod
-    async def list_events(db: AsyncSession) -> list[Event]:
-        result = await db.execute(select(Event).order_by(Event.event_date.desc()))
+    async def list_events(
+        db: AsyncSession, *, triage: str | None = None
+    ) -> list[Event]:
+        stmt = select(Event)
+        if triage:
+            stmt = stmt.where(Event.triage_category == triage)
+        stmt = stmt.order_by(Event.event_date.desc())
+        result = await db.execute(stmt)
         return list(result.scalars().all())
 
     @staticmethod

@@ -82,6 +82,14 @@ async def notify_email_received(db: AsyncSession, user: User, email: Email) -> N
 
     Best-effort: returns silently on any error so the mirror sync never crashes.
     """
+    from app.services.agent_rate_limit_service import AgentRateLimitService
+
+    if not AgentRateLimitService.try_consume_proactive(user.id):
+        logger.warning(
+            "proactive burst limit reached for user %s; skipping email %s",
+            user.id, email.id,
+        )
+        return
     try:
         # Bind the thread to the linked Contact when we have one (so all messages from
         # this person live in one thread). Fall back to the email row itself otherwise.
@@ -160,6 +168,14 @@ async def notify_email_received(db: AsyncSession, user: User, email: Email) -> N
 
 async def notify_calendar_event(db: AsyncSession, user: User, event: Event, *, action: str) -> None:
     """Lightweight proactive ping for calendar events. ``action`` ∈ {"created","updated","deleted"}."""
+    from app.services.agent_rate_limit_service import AgentRateLimitService
+
+    if not AgentRateLimitService.try_consume_proactive(user.id):
+        logger.warning(
+            "proactive burst limit reached for user %s; skipping event %s",
+            user.id, event.id,
+        )
+        return
     try:
         thread = await get_or_create_entity_thread(
             db, user, entity_type="event", entity_id=event.id, title=_event_thread_title(event)

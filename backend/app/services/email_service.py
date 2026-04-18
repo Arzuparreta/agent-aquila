@@ -21,8 +21,14 @@ from app.services.user_ai_settings_service import UserAISettingsService
 
 class EmailService:
     @staticmethod
-    async def list_emails(db: AsyncSession) -> list[Email]:
-        result = await db.execute(select(Email).order_by(Email.received_at.desc()))
+    async def list_emails(
+        db: AsyncSession, *, triage: str | None = None
+    ) -> list[Email]:
+        stmt = select(Email)
+        if triage:
+            stmt = stmt.where(Email.triage_category == triage)
+        stmt = stmt.order_by(Email.received_at.desc())
+        result = await db.execute(stmt)
         return list(result.scalars().all())
 
     @staticmethod

@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     # When false, email ingest never auto-creates deals from triage/rules (aligns with human-gated agent policy).
     email_ingest_auto_create_deals: bool = Field(default=True, validation_alias="EMAIL_INGEST_AUTO_CREATE_DEALS")
 
+    # Hybrid inbound noise filter (see app/services/inbound_filter_service.py).
+    # Modes: off | permissive | balanced (default) | strict.
+    inbound_filter_mode: str = Field(default="balanced", validation_alias="INBOUND_FILTER_MODE")
+    # Stage B (LLM triage) toggle. When false, only the heuristic stage decides.
+    inbound_filter_llm: bool = Field(default=True, validation_alias="INBOUND_FILTER_LLM")
+    # Hard cap on proactive agent runs spawned from inbound items per user/hour.
+    # Items beyond the cap are downgraded to ``informational`` (they still land
+    # in the DB + RAG, just no thread/agent/push). 0 disables the cap.
+    inbound_filter_burst_per_hour: int = Field(
+        default=20, ge=0, le=10_000, validation_alias="INBOUND_FILTER_BURST_PER_HOUR"
+    )
+
     # Redis (used for OAuth state, ARQ worker queue, and sync scheduling). If unset, a local in-memory
     # fallback is used for OAuth state only (single-process dev); workers will refuse to start without it.
     redis_url: str = Field(default="", validation_alias="REDIS_URL")

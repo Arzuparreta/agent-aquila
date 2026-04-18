@@ -173,11 +173,30 @@ class CalendarMirrorService:
         except Exception:
             logger.exception("embedding sync failed for event %s", event.id)
         try:
-            from app.services.proactive_service import notify_calendar_event
+            from app.services.inbound_filter_service import (
+                CATEGORY_ACTIONABLE,
+                InboundFilterService,
+            )
 
-            await notify_calendar_event(db, user, event, action="created")
+            verdict = await InboundFilterService.classify_event(
+                db, user, event, payload=event_payload
+            )
+            InboundFilterService.apply_verdict_to_event(event, verdict)
+            await db.flush()
+            if verdict.category == CATEGORY_ACTIONABLE:
+                from app.services.proactive_service import notify_calendar_event
+
+                await notify_calendar_event(db, user, event, action="created")
+            else:
+                logger.info(
+                    "silenced calendar event %s (%s/%s): %s",
+                    event.id,
+                    verdict.category,
+                    verdict.source,
+                    verdict.reason,
+                )
         except Exception:
-            logger.exception("proactive notification failed for event %s", event.id)
+            logger.exception("inbound filter / proactive notification failed for event %s", event.id)
         return event
 
     @staticmethod

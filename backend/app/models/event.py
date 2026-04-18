@@ -41,6 +41,11 @@ class Event(Base, TimestampMixin):
     end_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     all_day: Mapped[bool | None] = mapped_column(nullable=True)
 
+    triage_category: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    triage_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    triage_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    triage_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     embedding_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
