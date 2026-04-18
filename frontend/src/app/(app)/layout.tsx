@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/auth";
 import { SemanticSearchHit } from "@/types/api";
 
 const NAV = [
+  { href: "/cockpit", label: "Cockpit" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/contacts", label: "Contacts" },
   { href: "/deals", label: "Deals" },
@@ -78,7 +79,7 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
           <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-6 py-3">
             <form className="flex min-w-[240px] flex-1 items-center gap-2" onSubmit={onSearchSubmit}>
               <Input
-                placeholder="Semantic search (needs API key in AI settings)"
+                placeholder="Hybrid RAG search — vector + keyword over chunked CRM text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -100,6 +101,8 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
                   <li key={`${hit.entity_type}-${hit.entity_id}`} className="rounded-md border border-slate-100 p-2">
                     <div className="text-xs uppercase text-slate-500">
                       {hit.entity_type} · score {hit.score.toFixed(3)}
+                      {hit.match_sources?.length ? ` · ${hit.match_sources.join("+")}` : ""}
+                      {hit.rrf_score != null ? ` · rrf ${hit.rrf_score.toFixed(3)}` : ""}
                     </div>
                     <div className="font-medium">{hit.title}</div>
                     <div className="text-slate-600">{hit.snippet}</div>

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.routes import ai, auth, contacts, deals, emails, events
+from app.routes import agent, ai, auth, contacts, deals, emails, events
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -9,3 +9,4 @@ api_router.include_router(emails.router)
 api_router.include_router(deals.router)
 api_router.include_router(events.router)
 api_router.include_router(ai.router)
+api_router.include_router(agent.router)

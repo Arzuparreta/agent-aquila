@@ -13,9 +13,12 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 
 - JWT auth (`/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/me`)
 - CRUD APIs for `contacts`, `emails`, `deals`, `events`
+- **Operations cockpit** (Next.js `/cockpit`): agent copilot with **human-gated deal proposals** (`POST /api/v1/agent/runs`, approve/reject under `/api/v1/agent/proposals/...`)
+- **Chunked hybrid RAG**: per-entity text is split into labeled chunks, embedded, and searched with **dense vectors + PostgreSQL full-text (RRF fusion)**. Falls back to legacy single-vector row search if `rag_chunks` is empty. Rebuild indexes with `POST /api/v1/ai/rag/backfill`.
+- Per-user AI settings (OpenAI-compatible / Ollama / OpenRouter) and encrypted API keys
 - Deterministic email ingestion rule on `POST /api/v1/emails`:
   - upsert contact by sender email
-  - create `new` deal when subject contains `concert|booking|show`
+  - create `new` deal when subject contains `concert|booking|show` (LLM triage can refine when configured)
 - Audit log table for create/update/delete tracking
 - Clean layering: `models/`, `schemas/`, `services/`, `routes/`
 
@@ -66,6 +69,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 
 ## Notes for future AI evolution
 
-- `services/` layer is the extension point for future AI workflows.
-- `pgvector` extension is enabled in migration `0001_initial`.
+- `services/` layer is the extension point for future AI workflows; the agent coordinator lives in `app/services/agent_service.py` with tools over the same CRM APIs.
+- `pgvector` extension is enabled in migration `0001_initial`; migration `0003_rag_agent` adds `rag_chunks` (HNSW + GIN fts), `agent_runs`, and `pending_proposals`.
 - `audit_logs` keeps deterministic history for replay/training pipelines.
+- For **JSON `response_format` on chat completions**, use an OpenAI-compatible provider; some local stacks omit this and may require a code-path change.

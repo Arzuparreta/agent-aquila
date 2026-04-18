@@ -8,6 +8,7 @@ from app.models.event import Event
 from app.schemas.event import EventCreate, EventUpdate
 from app.services.audit_service import create_audit_log
 from app.services.embedding_service import EmbeddingService
+from app.services.rag_index_service import RagIndexService
 
 
 class EventService:
@@ -51,5 +52,6 @@ class EventService:
     async def delete_event(db: AsyncSession, event_id: int, user_id: int | None = None) -> None:
         event = await EventService.get_event(db, event_id)
         await create_audit_log(db, "event", event.id, "deleted", None, user_id)
+        await RagIndexService.delete_entity_chunks(db, "event", event_id)
         await db.delete(event)
         await db.commit()

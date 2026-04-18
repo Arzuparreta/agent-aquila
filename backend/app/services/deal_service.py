@@ -8,6 +8,7 @@ from app.models.deal import Deal
 from app.schemas.deal import DealCreate, DealUpdate
 from app.services.audit_service import create_audit_log
 from app.services.embedding_service import EmbeddingService
+from app.services.rag_index_service import RagIndexService
 
 
 class DealService:
@@ -32,14 +33,20 @@ class DealService:
         return deal
 
     @staticmethod
-    async def create_deal(db: AsyncSession, payload: DealCreate, user_id: int | None = None) -> Deal:
+    async def create_deal(
+        db: AsyncSession, payload: DealCreate, user_id: int | None = None, *, commit: bool = True
+    ) -> Deal:
         deal = Deal(**payload.model_dump())
         db.add(deal)
         await db.flush()
         await create_audit_log(db, "deal", deal.id, "created", payload.model_dump(mode="json"), user_id)
         await EmbeddingService.sync_deal(db, user_id, deal.id)
-        await db.commit()
-        await db.refresh(deal)
+        if commit:
+            await db.commit()
+            await db.refresh(deal)
+        else:
+            await db.flush()
+            await db.refresh(deal)
         return deal
 
     @staticmethod
@@ -58,5 +65,6 @@ class DealService:
     async def delete_deal(db: AsyncSession, deal_id: int, user_id: int | None = None) -> None:
         deal = await DealService.get_deal(db, deal_id)
         await create_audit_log(db, "deal", deal.id, "deleted", None, user_id)
+        await RagIndexService.delete_deal_subtree(db, deal_id)
         await db.delete(deal)
         await db.commit()

@@ -42,6 +42,9 @@ class SemanticSearchHit(BaseModel):
     title: str
     snippet: str
     citation: str
+    chunk_id: int | None = None
+    match_sources: list[str] | None = None
+    rrf_score: float | None = None
 
 
 class EmailDraftResponse(BaseModel):

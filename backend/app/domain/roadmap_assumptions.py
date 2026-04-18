@@ -22,8 +22,9 @@ D — AI configuration
     Users can disable AI entirely (`ai_disabled`).
 
 E — RAG
-    Semantic search over contacts, emails, deals, and events that have embeddings.
-    Search API returns citation snippets (title/text preview + entity id + type).
+    Chunked hybrid retrieval: entities are indexed as labeled text chunks in `rag_chunks` (dense embeddings + English FTS, RRF fusion).
+    Row-level `embedding` columns remain as a mean-of-chunks summary and legacy fallback when chunk index is empty.
+    Search API returns citation snippets (chunk text + entity id + type + optional chunk id).
     Retention: same as row storage (no separate purge).
 
 F — Email

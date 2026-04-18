@@ -62,6 +62,36 @@ export type SemanticSearchHit = {
   title: string;
   snippet: string;
   citation: string;
+  chunk_id?: number | null;
+  match_sources?: string[] | null;
+  rrf_score?: number | null;
+};
+
+export type PendingProposal = {
+  id: number;
+  kind: string;
+  status: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  resolved_at: string | null;
+  resolution_note: string | null;
+};
+
+export type AgentStep = {
+  step_index: number;
+  kind: string;
+  name: string | null;
+  payload: Record<string, unknown> | null;
+};
+
+export type AgentRun = {
+  id: number;
+  status: string;
+  user_message: string;
+  assistant_reply: string | null;
+  error: string | null;
+  steps: AgentStep[];
+  pending_proposals: PendingProposal[];
 };
 
 export type EmailDraftResponse = {
