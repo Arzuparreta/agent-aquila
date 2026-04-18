@@ -16,10 +16,15 @@ from app.services.connector_service import ConnectorService
 from app.services.contact_service import ContactService
 from app.services.deal_service import DealService
 from app.services.event_service import EventService
-from app.services.connectors.calendar_adapters import create_calendar_event as cal_create
+from app.services.connectors.calendar_adapters import (
+    create_calendar_event as cal_create,
+    delete_calendar_event as cal_delete,
+    update_calendar_event as cal_update,
+)
 from app.services.connectors.email_adapters import send_email as email_send
-from app.services.connectors.file_adapters import upload_file as file_upload
+from app.services.connectors.file_adapters import share_file as file_share, upload_file as file_upload
 from app.services.connectors.teams_adapter import post_channel_message as teams_post
+from app.services.oauth import TokenManager
 
 
 class PendingExecutionService:
@@ -72,6 +77,15 @@ class PendingExecutionService:
         if kind == "connector_teams_message":
             await PendingExecutionService._exec_connector_teams(db, user, payload)
             return
+        if kind == "connector_calendar_update":
+            await PendingExecutionService._exec_connector_calendar_update(db, user, payload)
+            return
+        if kind == "connector_calendar_delete":
+            await PendingExecutionService._exec_connector_calendar_delete(db, user, payload)
+            return
+        if kind == "connector_file_share":
+            await PendingExecutionService._exec_connector_file_share(db, user, payload)
+            return
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown proposal kind: {kind}")
 
@@ -85,34 +99,71 @@ class PendingExecutionService:
         subject = str(payload["subject"])
         body = str(payload["body"])
         content_type = str(payload.get("content_type") or "text")
+        thread_id = payload.get("thread_id")
+        in_reply_to = payload.get("in_reply_to")
+        references = payload.get("references")
         row = await ConnectorService.require_connection(db, user, conn_id)
-        creds = ConnectorService.decrypt_credentials(row)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
         result = await email_send(
-            row.provider, creds, to_list, subject, body, content_type=content_type, dry_run=False
+            provider,
+            creds,
+            to_list,
+            subject,
+            body,
+            content_type=content_type,
+            dry_run=False,
+            thread_id=str(thread_id) if thread_id else None,
+            in_reply_to=str(in_reply_to) if in_reply_to else None,
+            references=str(references) if references else None,
         )
         await create_audit_log(
             db,
             "connector_action",
             conn_id,
             "email_send",
-            {"provider": row.provider, "to": to_list, "subject": subject, "result": result},
+            {"provider": provider, "to": to_list, "subject": subject, "result": result},
             user.id,
         )
+        # Record the outbound message into the CRM mirror so sent mail appears alongside received.
+        try:
+            from app.services.gmail_mirror_service import GmailMirrorService
+
+            await GmailMirrorService.record_outbound(
+                db,
+                user,
+                row,
+                to_list=to_list,
+                subject=subject,
+                body=body,
+                content_type=content_type,
+                send_result=result,
+                thread_id=str(thread_id) if thread_id else None,
+                in_reply_to=str(in_reply_to) if in_reply_to else None,
+            )
+        except Exception:  # pragma: no cover — best-effort mirror
+            pass
 
     @staticmethod
     async def _exec_connector_calendar(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
         conn_id = int(payload["connection_id"])
         row = await ConnectorService.require_connection(db, user, conn_id)
-        creds = ConnectorService.decrypt_credentials(row)
-        result = await cal_create(row.provider, creds, payload, dry_run=False)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
+        result = await cal_create(provider, creds, payload, dry_run=False)
         await create_audit_log(
             db,
             "connector_action",
             conn_id,
             "calendar_create",
-            {"provider": row.provider, "payload_keys": list(payload.keys()), "result": result},
+            {"provider": provider, "payload_keys": list(payload.keys()), "result": result},
             user.id,
         )
+        # Upsert the returned event into the calendar mirror so it is visible immediately.
+        try:
+            from app.services.calendar_mirror_service import CalendarMirrorService
+
+            await CalendarMirrorService.upsert_from_write_result(db, user, row, payload, result)
+        except Exception:  # pragma: no cover
+            pass
 
     @staticmethod
     async def _exec_connector_file(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
@@ -127,14 +178,72 @@ class PendingExecutionService:
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file payload needs content_base64 or content_text")
         row = await ConnectorService.require_connection(db, user, conn_id)
-        creds = ConnectorService.decrypt_credentials(row)
-        result = await file_upload(row.provider, creds, path, raw, mime, dry_run=False)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
+        result = await file_upload(provider, creds, path, raw, mime, dry_run=False)
         await create_audit_log(
             db,
             "connector_action",
             conn_id,
             "file_upload",
-            {"provider": row.provider, "path": path, "bytes": len(raw), "result": result},
+            {"provider": provider, "path": path, "bytes": len(raw), "result": result},
+            user.id,
+        )
+
+    @staticmethod
+    async def _exec_connector_calendar_update(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
+        result = await cal_update(provider, creds, payload, dry_run=False)
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "calendar_update",
+            {"provider": provider, "event_id": payload.get("event_id"), "result": result},
+            user.id,
+        )
+
+    @staticmethod
+    async def _exec_connector_calendar_delete(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
+        result = await cal_delete(provider, creds, str(payload["event_id"]), dry_run=False)
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "calendar_delete",
+            {"provider": provider, "event_id": payload.get("event_id"), "result": result},
+            user.id,
+        )
+
+    @staticmethod
+    async def _exec_connector_file_share(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
+        result = await file_share(
+            provider,
+            creds,
+            str(payload["file_id"]),
+            str(payload["email"]),
+            str(payload.get("role") or "reader"),
+            dry_run=False,
+        )
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "file_share",
+            {
+                "provider": provider,
+                "file_id": payload.get("file_id"),
+                "email": payload.get("email"),
+                "role": payload.get("role") or "reader",
+                "result": result,
+            },
             user.id,
         )
 
@@ -145,14 +254,14 @@ class PendingExecutionService:
         channel_id = str(payload["channel_id"])
         text = str(payload["body"])
         row = await ConnectorService.require_connection(db, user, conn_id)
-        creds = ConnectorService.decrypt_credentials(row)
-        result = await teams_post(row.provider, creds, team_id, channel_id, text, dry_run=False)
+        _, creds, provider = await TokenManager.get_valid_creds(db, row)
+        result = await teams_post(provider, creds, team_id, channel_id, text, dry_run=False)
         await create_audit_log(
             db,
             "connector_action",
             conn_id,
             "teams_message",
-            {"team_id": team_id, "channel_id": channel_id, "result": result},
+            {"team_id": team_id, "channel_id": channel_id, "provider": provider, "result": result},
             user.id,
         )
 
@@ -272,4 +381,19 @@ def preview_for_proposal_kind(kind: str, payload: dict[str, Any]) -> dict[str, A
         return build_file_preview(payload)
     if kind == "connector_teams_message":
         return build_teams_preview(payload)
+    if kind == "connector_calendar_update":
+        return {
+            "action": "calendar_update",
+            "event_id": payload.get("event_id"),
+            "patch": {k: v for k, v in payload.items() if k not in ("event_id", "connection_id")},
+        }
+    if kind == "connector_calendar_delete":
+        return {"action": "calendar_delete", "event_id": payload.get("event_id")}
+    if kind == "connector_file_share":
+        return {
+            "action": "file_share",
+            "file_id": payload.get("file_id"),
+            "email": payload.get("email"),
+            "role": payload.get("role") or "reader",
+        }
     return {"action": kind, "payload": payload}

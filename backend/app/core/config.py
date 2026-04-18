@@ -32,6 +32,38 @@ class Settings(BaseSettings):
     # When false, email ingest never auto-creates deals from triage/rules (aligns with human-gated agent policy).
     email_ingest_auto_create_deals: bool = Field(default=True, validation_alias="EMAIL_INGEST_AUTO_CREATE_DEALS")
 
+    # Redis (used for OAuth state, ARQ worker queue, and sync scheduling). If unset, a local in-memory
+    # fallback is used for OAuth state only (single-process dev); workers will refuse to start without it.
+    redis_url: str = Field(default="", validation_alias="REDIS_URL")
+
+    # Google OAuth (https://console.cloud.google.com → OAuth 2.0 Client IDs → "Web application").
+    # Redirect URI registered in Google must be `${google_oauth_redirect_base}/api/v1/oauth/google/callback`.
+    google_oauth_client_id: str = Field(default="", validation_alias="GOOGLE_OAUTH_CLIENT_ID")
+    google_oauth_client_secret: str = Field(default="", validation_alias="GOOGLE_OAUTH_CLIENT_SECRET")
+    google_oauth_redirect_base: str = Field(
+        default="http://localhost:8000", validation_alias="GOOGLE_OAUTH_REDIRECT_BASE"
+    )
+    # Where to send the browser after a successful callback (usually the Next.js app).
+    oauth_post_auth_redirect: str = Field(
+        default="http://localhost:3002/settings", validation_alias="OAUTH_POST_AUTH_REDIRECT"
+    )
+
+    # Microsoft Graph OAuth (Azure AD app registration). Optional; enables Phase 5.
+    microsoft_oauth_client_id: str = Field(default="", validation_alias="MICROSOFT_OAUTH_CLIENT_ID")
+    microsoft_oauth_client_secret: str = Field(default="", validation_alias="MICROSOFT_OAUTH_CLIENT_SECRET")
+    microsoft_oauth_tenant: str = Field(default="common", validation_alias="MICROSOFT_OAUTH_TENANT")
+
+    # Gmail initial sync cap — how many recent messages to pull on first connect (None = all).
+    gmail_initial_sync_max_messages: int = Field(
+        default=2000, ge=0, le=200_000, validation_alias="GMAIL_INITIAL_SYNC_MAX_MESSAGES"
+    )
+    # Delta sync cadence (seconds) per active connection.
+    gmail_delta_poll_seconds: int = Field(default=120, ge=30, le=3600, validation_alias="GMAIL_DELTA_POLL_SECONDS")
+    calendar_delta_poll_seconds: int = Field(
+        default=300, ge=60, le=3600, validation_alias="CALENDAR_DELTA_POLL_SECONDS"
+    )
+    drive_delta_poll_seconds: int = Field(default=300, ge=60, le=3600, validation_alias="DRIVE_DELTA_POLL_SECONDS")
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")

@@ -1,0 +1,154 @@
+"""Google OAuth 2.0 auth-code flow + token refresh.
+
+Reference: https://developers.google.com/identity/protocols/oauth2/web-server
+"""
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from urllib.parse import urlencode
+
+import httpx
+
+from app.core.config import settings
+from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
+
+AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+
+# Google Workspace scope groups. Request as a flat space-separated list.
+SCOPES_GMAIL = [
+    "https://www.googleapis.com/auth/gmail.modify",
+]
+SCOPES_CALENDAR = [
+    "https://www.googleapis.com/auth/calendar",
+]
+SCOPES_DRIVE = [
+    "https://www.googleapis.com/auth/drive",
+]
+SCOPES_IDENTITY = ["openid", "email", "profile"]
+
+
+def scopes_for_intent(intent: str) -> list[str]:
+    """Translate an `intent` string from the UI into the concrete scope list."""
+    parts = {p.strip().lower() for p in (intent or "all").split(",") if p.strip()}
+    if "all" in parts or not parts:
+        parts = {"gmail", "calendar", "drive"}
+    selected: list[str] = list(SCOPES_IDENTITY)
+    if "gmail" in parts:
+        selected += SCOPES_GMAIL
+    if "calendar" in parts:
+        selected += SCOPES_CALENDAR
+    if "drive" in parts:
+        selected += SCOPES_DRIVE
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for s in selected:
+        if s not in seen:
+            out.append(s)
+            seen.add(s)
+    return out
+
+
+def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
+    """Map granted scopes → per-product connector provider ids we create in the DB."""
+    out: list[str] = []
+    joined = " ".join(scopes)
+    if "/auth/gmail" in joined:
+        out.append("google_gmail")
+    if "/auth/calendar" in joined:
+        out.append("google_calendar")
+    if "/auth/drive" in joined:
+        out.append("google_drive")
+    return out
+
+
+def redirect_uri() -> str:
+    base = settings.google_oauth_redirect_base.rstrip("/")
+    return f"{base}/api/v1/oauth/google/callback"
+
+
+def is_configured() -> bool:
+    return bool(settings.google_oauth_client_id and settings.google_oauth_client_secret)
+
+
+def build_authorize_url(state: str, scopes: list[str]) -> str:
+    if not is_configured():
+        raise OAuthError(
+            "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env."
+        )
+    params = {
+        "client_id": settings.google_oauth_client_id,
+        "redirect_uri": redirect_uri(),
+        "response_type": "code",
+        "scope": " ".join(scopes),
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+        "state": state,
+    }
+    return f"{AUTHORIZE_URL}?{urlencode(params)}"
+
+
+async def exchange_code(code: str) -> dict[str, Any]:
+    """Trade an auth code for access + refresh tokens. Returns the raw Google JSON."""
+    if not is_configured():
+        raise OAuthError("Google OAuth is not configured.")
+    form = {
+        "client_id": settings.google_oauth_client_id,
+        "client_secret": settings.google_oauth_client_secret,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri(),
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(TOKEN_URL, data=form)
+    if r.status_code >= 300:
+        raise OAuthError(f"Google token exchange failed: {r.status_code} {r.text[:300]}")
+    data = r.json()
+    if "access_token" not in data:
+        raise OAuthError(f"Google token response missing access_token: {data}")
+    return data
+
+
+async def fetch_userinfo(access_token: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"})
+    if r.status_code >= 300:
+        return {}
+    return r.json()
+
+
+async def refresh_access_token(refresh_token: str, *, connection_id: int | None = None) -> dict[str, Any]:
+    """Use a stored refresh_token to mint a fresh access_token. Raises ConnectorNeedsReauth on 400/401."""
+    if not is_configured():
+        raise OAuthError("Google OAuth is not configured.")
+    form = {
+        "client_id": settings.google_oauth_client_id,
+        "client_secret": settings.google_oauth_client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(TOKEN_URL, data=form)
+    if r.status_code in (400, 401):
+        raise ConnectorNeedsReauth(connection_id, "google", r.text[:300])
+    if r.status_code >= 300:
+        raise OAuthError(f"Google token refresh failed: {r.status_code} {r.text[:300]}")
+    data = r.json()
+    if "access_token" not in data:
+        raise OAuthError(f"Google refresh response missing access_token: {data}")
+    return data
+
+
+def compute_expires_at(token_payload: dict[str, Any]) -> datetime | None:
+    """Google returns `expires_in` seconds. Convert to an absolute UTC timestamp."""
+    exp = token_payload.get("expires_in")
+    if exp is None:
+        return None
+    try:
+        return datetime.now(UTC) + timedelta(seconds=int(exp) - 30)
+    except (TypeError, ValueError):
+        return None

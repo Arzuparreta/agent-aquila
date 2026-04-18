@@ -18,9 +18,37 @@ from app.services.capability_policy import risk_tier_for_kind
 from app.services.connector_dry_run_service import ACTION_TO_KIND as _ACTION_TO_KIND
 from app.services.connector_dry_run_service import ConnectorDryRunService
 from app.services.connector_service import ConnectorService
+from app.services.job_queue import enqueue as enqueue_job
+from app.services.oauth import TokenManager
 from app.services.pending_execution_service import preview_for_proposal_kind
+from app.services.sync_state_service import SyncStateService
 
 router = APIRouter(prefix="/connectors", tags=["connectors"], dependencies=[Depends(get_current_user)])
+
+_RESOURCE_TO_PROVIDERS: dict[str, tuple[str, ...]] = {
+    "gmail": ("google_gmail", "gmail"),
+    "calendar": ("google_calendar", "gcal"),
+    "drive": ("google_drive", "gdrive"),
+    "graph_mail": ("graph_mail",),
+    "graph_calendar": ("graph_calendar",),
+    "graph_drive": ("graph_onedrive",),
+}
+_RESOURCE_TO_INITIAL_JOB: dict[str, str] = {
+    "gmail": "gmail_initial_sync",
+    "calendar": "calendar_initial_sync",
+    "drive": "drive_initial_sync",
+    "graph_mail": "graph_mail_initial_sync",
+    "graph_calendar": "graph_calendar_initial_sync",
+    "graph_drive": "graph_drive_initial_sync",
+}
+_RESOURCE_TO_DELTA_JOB: dict[str, str] = {
+    "gmail": "gmail_delta_sync",
+    "calendar": "calendar_delta_sync",
+    "drive": "drive_delta_sync",
+    "graph_mail": "graph_mail_delta_sync",
+    "graph_calendar": "graph_calendar_delta_sync",
+    "graph_drive": "graph_drive_delta_sync",
+}
 
 
 @router.get("", response_model=list[ConnectorConnectionRead])
@@ -110,14 +138,75 @@ async def dry_run_connector_action(
             detail=f"Unknown action. Use one of: {', '.join(sorted(_ACTION_TO_KIND))}",
         )
     row = await ConnectorService.require_connection(db, current_user, payload.connection_id)
-    creds = ConnectorService.decrypt_credentials(row)
+    _, creds, provider = await TokenManager.get_valid_creds(db, row)
     merged = {**payload.payload, "connection_id": payload.connection_id}
-    result = await ConnectorDryRunService.run(row.provider, creds, payload.action, merged)
+    result = await ConnectorDryRunService.run(provider, creds, payload.action, merged)
     ok = bool(result.get("ok"))
     return ConnectorDryRunResponse(
         ok=ok,
-        provider=row.provider,
+        provider=provider,
         action=payload.action,
         risk_tier=risk_tier_for_kind(kind),
         result=result,
     )
+
+
+@router.get("/{connection_id}/sync-status")
+async def connection_sync_status(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    row = await ConnectorService.get_connection(db, current_user, connection_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+    states = await SyncStateService.list_for_connection(db, connection_id)
+    return [
+        {
+            "connection_id": s.connection_id,
+            "resource": s.resource,
+            "status": s.status,
+            "cursor": s.cursor,
+            "last_full_sync_at": s.last_full_sync_at.isoformat() if s.last_full_sync_at else None,
+            "last_delta_at": s.last_delta_at.isoformat() if s.last_delta_at else None,
+            "last_error": s.last_error,
+            "error_count": s.error_count,
+        }
+        for s in states
+    ]
+
+
+@router.post("/{connection_id}/sync/{resource}")
+async def trigger_connection_sync(
+    connection_id: int,
+    resource: str,
+    mode: str = "auto",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Enqueue a background sync for this connection. `mode` = `auto` | `initial` | `delta`."""
+    row = await ConnectorService.get_connection(db, current_user, connection_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+    providers = _RESOURCE_TO_PROVIDERS.get(resource)
+    if not providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown resource: {resource}. Use gmail|calendar|drive.",
+        )
+    if row.provider not in providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Connection provider '{row.provider}' is not compatible with resource '{resource}'.",
+        )
+
+    state = await SyncStateService.get_or_create(db, connection_id, resource)
+    await db.commit()
+
+    if mode == "initial" or (mode == "auto" and not state.cursor):
+        func = _RESOURCE_TO_INITIAL_JOB[resource]
+    else:
+        func = _RESOURCE_TO_DELTA_JOB[resource]
+
+    result = await enqueue_job(func, connection_id, job_id=f"{resource}-{func}-{connection_id}")
+    return {"resource": resource, "mode": mode, "job": func, **result}

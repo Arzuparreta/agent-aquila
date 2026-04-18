@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contact import Contact
 from app.models.deal import Deal
+from app.models.drive_file import DriveFile
 from app.models.email import Email
 from app.models.event import Event
 from app.models.rag_chunk import RagChunk
@@ -61,6 +62,11 @@ class SemanticSearchService:
             if not row:
                 return ("", "")
             return (row.venue_name, _snippet(row.notes))
+        if entity_type == "drive_file":
+            row = await db.get(DriveFile, entity_id)
+            if not row:
+                return ("", "")
+            return (row.name, _snippet(row.content_text))
         return ("", "")
 
     @staticmethod

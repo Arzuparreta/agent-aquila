@@ -21,6 +21,9 @@ async def send_email(
     *,
     content_type: str = "text",
     dry_run: bool = False,
+    thread_id: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> dict[str, Any]:
     """Send email via Microsoft Graph, Gmail API, SMTP, or mock (no network)."""
     if dry_run:
@@ -47,6 +50,10 @@ async def send_email(
         mime["Subject"] = subject
         mime["From"] = str(creds.get("from_addr") or username)
         mime["To"] = ", ".join(to)
+        if in_reply_to:
+            mime["In-Reply-To"] = in_reply_to
+        if references:
+            mime["References"] = references
 
         def _send() -> None:
             with smtplib.SMTP(host, port, timeout=60) as smtp:
@@ -81,12 +88,26 @@ async def send_email(
         mime = MIMEText(body, "html" if content_type.lower() == "html" else "plain")
         mime["to"] = ", ".join(to)
         mime["subject"] = subject
+        if in_reply_to:
+            mime["In-Reply-To"] = in_reply_to
+        if references:
+            mime["References"] = references
         raw = base64.urlsafe_b64encode(mime.as_bytes()).decode().rstrip("=")
+        payload: dict[str, Any] = {"raw": raw}
+        if thread_id:
+            payload["threadId"] = thread_id
         async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(GMAIL_SEND, json={"raw": raw}, headers={"Authorization": f"Bearer {token}"})
+            r = await client.post(GMAIL_SEND, json=payload, headers={"Authorization": f"Bearer {token}"})
         if r.status_code >= 300:
             return {"ok": False, "status": r.status_code, "detail": r.text[:500]}
-        return {"ok": True, "status": r.status_code, "id": r.json().get("id")}
+        data = r.json()
+        return {
+            "ok": True,
+            "status": r.status_code,
+            "id": data.get("id"),
+            "thread_id": data.get("threadId"),
+            "label_ids": data.get("labelIds") or [],
+        }
 
     if provider == "mock_email":
         return {"ok": True, "mock": True, "to": to, "subject": subject}

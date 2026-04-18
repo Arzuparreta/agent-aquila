@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.models.contact import Contact
 from app.models.deal import Deal
+from app.models.drive_file import DriveFile
 from app.models.email import Email
 from app.models.event import Event
 from app.models.pending_proposal import PendingProposal
@@ -32,7 +33,12 @@ Rules:
 - phase "answer" requires a non-null "reply" string and "citations" as an array of strings like "deal:12" or "email:3".
 - Read-only tools:
   - hybrid_rag_search — args: {"query": string, "limit_per_type": optional number 1-8, default 5}
-  - get_entity — args: {"entity_type":"contact|email|deal|event","entity_id": number}
+  - get_entity — args: {"entity_type":"contact|email|deal|event|drive_file","entity_id": number}
+  - search_emails — args: {"query": optional, "direction": optional "inbound|outbound", "thread_id": optional, "connection_id": optional, "limit": optional 1-25}
+  - get_thread — args: {"thread_id": string, "connection_id": optional}
+  - list_calendar_events — args: {"start": optional ISO, "end": optional ISO, "connection_id": optional, "limit": optional 1-50}
+  - search_drive — args: {"query": string, "limit": optional 1-25}
+  - get_drive_file_text — args: {"file_id": number}  // triggers on-demand extraction if not yet cached
 - Proposal tools (each creates a PENDING human approval only; nothing applies until approved):
   - propose_create_deal — {"contact_id": number, "title": string, "status": optional (new|contacted|negotiating|won|lost), "notes": optional, "amount": optional, "currency": optional}
   - propose_update_deal — {"deal_id": number, optional: title, status, amount, currency, notes}
@@ -44,6 +50,10 @@ Rules:
   - propose_connector_calendar_create — {"connection_id": number, "summary": string, "start_iso": string, "end_iso": string, optional "description", "timezone" default "UTC"}
   - propose_connector_file_upload — {"connection_id": number, "path": string, "mime_type": string, optional "content_text" or "content_base64"}
   - propose_connector_teams_message — {"connection_id": number, "team_id": string, "channel_id": string, "body": string}
+  - propose_connector_email_reply — {"connection_id": number, "thread_id": string, "in_reply_to": optional, "to": optional string[], "subject": optional, "body": string, "content_type": optional "text"|"html"}
+  - propose_connector_calendar_update — {"connection_id": number, "event_id": string, optional: summary, description, start_iso, end_iso, timezone}
+  - propose_connector_calendar_delete — {"connection_id": number, "event_id": string}
+  - propose_connector_file_share — {"connection_id": number, "file_id": string, "email": string, "role": optional "reader"|"writer" default reader}
 - Optional on any proposal tool: "idempotency_key" (string, max 128 chars). Reuses an existing PENDING row with the same key instead of creating a duplicate.
 - Prefer hybrid_rag_search before answering factual questions about the business.
 - Be concise; operators are busy. Use the same language as the user when possible.
@@ -113,6 +123,23 @@ class AgentService:
         if et == "event":
             row = await db.get(Event, eid)
             return {"found": row is not None, "entity": AgentService._serialize_event(row) if row else None}
+        if et == "drive_file":
+            row = await db.get(DriveFile, eid)
+            if not row:
+                return {"found": False, "entity": None}
+            return {
+                "found": True,
+                "entity": {
+                    "id": row.id,
+                    "connection_id": row.connection_id,
+                    "name": row.name,
+                    "mime_type": row.mime_type,
+                    "size_bytes": row.size_bytes,
+                    "web_view_link": row.web_view_link,
+                    "modified_time": row.modified_time.isoformat() if row.modified_time else None,
+                    "has_text": bool(row.content_text),
+                },
+            }
         return {"error": "invalid entity_type"}
 
     @staticmethod
@@ -139,6 +166,166 @@ class AgentService:
                 }
                 for h in hits
             ]
+        }
+
+    @staticmethod
+    async def _tool_search_emails(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        from sqlalchemy import and_, or_
+
+        limit = max(1, min(25, int(args.get("limit") or 10)))
+        q = str(args.get("query") or "").strip()
+        direction = str(args.get("direction") or "").strip().lower() or None
+        thread_id = args.get("thread_id")
+        connection_id = args.get("connection_id")
+
+        filters = []
+        if direction in ("inbound", "outbound"):
+            filters.append(Email.direction == direction)
+        if thread_id:
+            filters.append(Email.provider_thread_id == str(thread_id))
+        if connection_id is not None:
+            filters.append(Email.connection_id == int(connection_id))
+        if q:
+            like = f"%{q}%"
+            filters.append(or_(Email.subject.ilike(like), Email.body.ilike(like), Email.sender_email.ilike(like)))
+        stmt = select(Email).order_by(Email.received_at.desc()).limit(limit)
+        if filters:
+            stmt = stmt.where(and_(*filters))
+        r = await db.execute(stmt)
+        hits = []
+        for e in r.scalars().all():
+            hits.append(
+                {
+                    "id": e.id,
+                    "subject": e.subject,
+                    "from": f"{e.sender_name or ''} <{e.sender_email}>",
+                    "direction": e.direction,
+                    "received_at": e.received_at.isoformat(),
+                    "thread_id": e.provider_thread_id,
+                    "snippet": (e.snippet or e.body or "")[:300],
+                    "citation": f"email:{e.id}",
+                }
+            )
+        return {"hits": hits}
+
+    @staticmethod
+    async def _tool_get_thread(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        tid = str(args.get("thread_id") or "")
+        if not tid:
+            return {"error": "thread_id required"}
+        stmt = select(Email).where(Email.provider_thread_id == tid)
+        if args.get("connection_id") is not None:
+            stmt = stmt.where(Email.connection_id == int(args["connection_id"]))
+        r = await db.execute(stmt.order_by(Email.received_at.asc()))
+        msgs = []
+        for e in r.scalars().all():
+            msgs.append(
+                {
+                    "id": e.id,
+                    "direction": e.direction,
+                    "from": f"{e.sender_name or ''} <{e.sender_email}>",
+                    "subject": e.subject,
+                    "received_at": e.received_at.isoformat(),
+                    "body": (e.body or "")[:8000],
+                    "citation": f"email:{e.id}",
+                }
+            )
+        return {"thread_id": tid, "messages": msgs}
+
+    @staticmethod
+    async def _tool_list_calendar_events(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        from datetime import datetime as dt
+
+        limit = max(1, min(50, int(args.get("limit") or 20)))
+        stmt = select(Event).order_by(Event.start_utc.asc().nulls_last(), Event.event_date.asc())
+        if args.get("connection_id") is not None:
+            stmt = stmt.where(Event.connection_id == int(args["connection_id"]))
+        if args.get("start"):
+            try:
+                s_dt = dt.fromisoformat(str(args["start"]).replace("Z", "+00:00"))
+                stmt = stmt.where((Event.start_utc >= s_dt) | (Event.event_date >= s_dt.date()))
+            except ValueError:
+                pass
+        if args.get("end"):
+            try:
+                e_dt = dt.fromisoformat(str(args["end"]).replace("Z", "+00:00"))
+                stmt = stmt.where((Event.start_utc <= e_dt) | (Event.event_date <= e_dt.date()))
+            except ValueError:
+                pass
+        r = await db.execute(stmt.limit(limit))
+        out = []
+        for ev in r.scalars().all():
+            out.append(
+                {
+                    "id": ev.id,
+                    "summary": ev.summary or ev.venue_name,
+                    "start": ev.start_utc.isoformat() if ev.start_utc else ev.event_date.isoformat(),
+                    "end": ev.end_utc.isoformat() if ev.end_utc else None,
+                    "provider": ev.provider,
+                    "provider_event_id": ev.provider_event_id,
+                    "connection_id": ev.connection_id,
+                    "location": ev.location,
+                    "html_link": ev.html_link,
+                    "citation": f"event:{ev.id}",
+                }
+            )
+        return {"events": out}
+
+    @staticmethod
+    async def _tool_search_drive(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        from sqlalchemy import or_
+
+        q = str(args.get("query") or "").strip()
+        if not q:
+            return {"error": "query required"}
+        limit = max(1, min(25, int(args.get("limit") or 10)))
+        like = f"%{q}%"
+        stmt = (
+            select(DriveFile)
+            .where(or_(DriveFile.name.ilike(like), DriveFile.content_text.ilike(like)))
+            .order_by(DriveFile.modified_time.desc().nulls_last())
+            .limit(limit)
+        )
+        r = await db.execute(stmt)
+        out = []
+        for f in r.scalars().all():
+            out.append(
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "mime_type": f.mime_type,
+                    "size_bytes": f.size_bytes,
+                    "web_view_link": f.web_view_link,
+                    "modified_time": f.modified_time.isoformat() if f.modified_time else None,
+                    "has_text": bool(f.content_text),
+                    "citation": f"drive_file:{f.id}",
+                }
+            )
+        return {"hits": out}
+
+    @staticmethod
+    async def _tool_get_drive_file_text(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
+        fid = int(args.get("file_id") or 0)
+        if not fid:
+            return {"error": "file_id required"}
+        row = await db.get(DriveFile, fid)
+        if not row:
+            return {"found": False}
+        if not row.content_text:
+            try:
+                from app.services.drive_sync_service import run_extract_text
+
+                await run_extract_text(db, fid)
+                await db.refresh(row)
+            except Exception as exc:
+                return {"found": True, "extracted": False, "error": str(exc)[:300]}
+        return {
+            "found": True,
+            "extracted": bool(row.content_text),
+            "name": row.name,
+            "mime_type": row.mime_type,
+            "text": (row.content_text or "")[:40_000],
+            "web_view_link": row.web_view_link,
         }
 
     @staticmethod
@@ -363,6 +550,109 @@ class AgentService:
             db, user, run_id, "connector_teams_message", payload, summary, idempotency_key=AgentService._idem(args)
         )
 
+    @staticmethod
+    async def _tool_propose_connector_email_reply(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        thread_id = str(args.get("thread_id") or "").strip()
+        if not thread_id:
+            return {"error": "thread_id required"}
+        to_raw = args.get("to")
+        to_list: list[str]
+        if to_raw:
+            to_list = to_raw if isinstance(to_raw, list) else [str(to_raw)]
+        else:
+            # Default: reply to the sender of the last inbound message in this thread.
+            r = await db.execute(
+                select(Email)
+                .where(Email.provider_thread_id == thread_id, Email.direction == "inbound")
+                .order_by(Email.received_at.desc())
+                .limit(1)
+            )
+            last = r.scalar_one_or_none()
+            if not last or not last.sender_email:
+                return {"error": "no inbound sender found in thread; provide `to` explicitly"}
+            to_list = [last.sender_email]
+        # Default subject = "Re: <last subject>".
+        subject = args.get("subject")
+        if not subject:
+            r2 = await db.execute(
+                select(Email)
+                .where(Email.provider_thread_id == thread_id)
+                .order_by(Email.received_at.desc())
+                .limit(1)
+            )
+            last = r2.scalar_one_or_none()
+            if last:
+                subj = (last.subject or "").strip()
+                subject = subj if subj.lower().startswith("re:") else f"Re: {subj}"[:998]
+            else:
+                subject = "Re:"
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "to": [str(x) for x in to_list],
+            "subject": str(subject)[:998],
+            "body": str(args["body"]),
+            "content_type": str(args.get("content_type") or "text"),
+            "thread_id": thread_id,
+            "in_reply_to": args.get("in_reply_to"),
+        }
+        summary = f"Reply in thread: {payload['subject'][:80]}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_email_send", payload, summary, idempotency_key=AgentService._idem(args)
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_calendar_update(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "connection_id": int(args["connection_id"]),
+            "event_id": str(args["event_id"]),
+        }
+        for k in ("summary", "description", "start_iso", "end_iso", "timezone"):
+            if args.get(k) is not None:
+                payload[k] = str(args[k])
+        if len(payload) <= 2:
+            return {"error": "no fields to update"}
+        summary = f"Update calendar event {payload['event_id']}"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_calendar_update", payload, summary,
+            idempotency_key=AgentService._idem(args),
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_calendar_delete(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "event_id": str(args["event_id"]),
+        }
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_calendar_delete", payload,
+            f"Delete calendar event {payload['event_id']}",
+            idempotency_key=AgentService._idem(args),
+        )
+
+    @staticmethod
+    async def _tool_propose_connector_file_share(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "file_id": str(args["file_id"]),
+            "email": str(args["email"]),
+            "role": str(args.get("role") or "reader"),
+        }
+        if payload["role"] not in ("reader", "writer"):
+            payload["role"] = "reader"
+        return await AgentService._insert_proposal(
+            db, user, run_id, "connector_file_share", payload,
+            f"Share file {payload['file_id']} with {payload['email']} ({payload['role']})",
+            idempotency_key=AgentService._idem(args),
+        )
+
     _PROPOSAL_TOOL_METHODS: dict[str, str] = {
         "propose_create_deal": "_tool_propose_create_deal",
         "propose_update_deal": "_tool_propose_update_deal",
@@ -374,6 +664,10 @@ class AgentService:
         "propose_connector_calendar_create": "_tool_propose_connector_calendar_create",
         "propose_connector_file_upload": "_tool_propose_connector_file_upload",
         "propose_connector_teams_message": "_tool_propose_connector_teams_message",
+        "propose_connector_email_reply": "_tool_propose_connector_email_reply",
+        "propose_connector_calendar_update": "_tool_propose_connector_calendar_update",
+        "propose_connector_calendar_delete": "_tool_propose_connector_calendar_delete",
+        "propose_connector_file_share": "_tool_propose_connector_file_share",
     }
 
     @staticmethod
@@ -463,6 +757,16 @@ class AgentService:
                     result = await AgentService._tool_rag(db, user, args)
                 elif tool_name == "get_entity":
                     result = await AgentService._tool_get_entity(db, args)
+                elif tool_name == "search_emails":
+                    result = await AgentService._tool_search_emails(db, user, args)
+                elif tool_name == "get_thread":
+                    result = await AgentService._tool_get_thread(db, user, args)
+                elif tool_name == "list_calendar_events":
+                    result = await AgentService._tool_list_calendar_events(db, user, args)
+                elif tool_name == "search_drive":
+                    result = await AgentService._tool_search_drive(db, user, args)
+                elif tool_name == "get_drive_file_text":
+                    result = await AgentService._tool_get_drive_file_text(db, user, args)
                 elif tool_name in AgentService._PROPOSAL_TOOL_METHODS:
                     method_name = AgentService._PROPOSAL_TOOL_METHODS[tool_name]
                     handler = getattr(AgentService, method_name)

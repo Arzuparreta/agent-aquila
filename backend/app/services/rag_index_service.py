@@ -252,6 +252,41 @@ class RagIndexService:
         )
 
     @staticmethod
+    async def index_text(
+        db: AsyncSession,
+        *,
+        user_id: int,
+        entity_type: str,
+        entity_id: int,
+        title: str,
+        text: str,
+    ) -> list[float] | None:
+        """Generic indexer for arbitrary text (e.g. mirrored Drive files). Plays well with existing
+        hybrid search — chunks + embeddings land in the same `rag_chunks` table.
+        """
+        user = await db.get(User, user_id)
+        if not user:
+            return None
+        settings_row = await UserAISettingsService.get_or_create(db, user)
+        if settings_row.ai_disabled:
+            await RagIndexService.delete_entity_chunks(db, entity_type, entity_id)
+            return None
+        api_key = await UserAISettingsService.get_api_key(db, user)
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
+            await RagIndexService.delete_entity_chunks(db, entity_type, entity_id)
+            return None
+        doc = f"ENTITY: {entity_type.upper()}\nTitle: {title}\n\n{text}".strip()
+        return await RagIndexService._replace_chunks(
+            db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            document=doc,
+            api_key=api_key or "",
+            settings_row=settings_row,
+            metadata_base={"title": title},
+        )
+
+    @staticmethod
     async def reindex_event(db: AsyncSession, user_id: int | None, event_id: int) -> list[float] | None:
         user = await db.get(User, user_id) if user_id else None
         if not user:

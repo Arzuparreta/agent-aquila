@@ -33,8 +33,12 @@ async def test_agent_proposal_tool_registry_matches_service() -> None:
         "propose_create_event",
         "propose_update_event",
         "propose_connector_email_send",
+        "propose_connector_email_reply",
         "propose_connector_calendar_create",
+        "propose_connector_calendar_update",
+        "propose_connector_calendar_delete",
         "propose_connector_file_upload",
+        "propose_connector_file_share",
         "propose_connector_teams_message",
     }
     assert set(AgentService._PROPOSAL_TOOL_METHODS.keys()) == expected
