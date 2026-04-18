@@ -1,185 +1,248 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 
+import { AdvancedSection } from "@/components/features/ai-settings/advanced-section";
+import { ModelSelector } from "@/components/features/ai-settings/model-selector";
+import { ProviderFields } from "@/components/features/ai-settings/provider-fields";
+import { ProviderPicker } from "@/components/features/ai-settings/provider-picker";
+import { TestConnectionButton } from "@/components/features/ai-settings/test-connection-button";
+import { useSettingsForm } from "@/components/features/ai-settings/use-settings-form";
 import { AlertBanner } from "@/components/ui/alert-banner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { apiFetch } from "@/lib/api";
-import { useAsyncAction } from "@/lib/useAsyncAction";
-import { isNonEmpty } from "@/lib/validation";
-import { UserAISettings } from "@/types/api";
+import { useProviderRegistry } from "@/lib/ai-providers";
 
 type Banner = { variant: "error" | "success" | "info"; message: string };
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState<UserAISettings | null>(null);
-  const [providerKind, setProviderKind] = useState("openai_compatible");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [embeddingModel, setEmbeddingModel] = useState("text-embedding-3-small");
-  const [chatModel, setChatModel] = useState("gpt-4o-mini");
-  const [classifyModel, setClassifyModel] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [aiDisabled, setAiDisabled] = useState(false);
+  const registry = useProviderRegistry();
+  const ctrl = useSettingsForm({ providers: registry.providers, providersLoading: registry.loading });
   const [banner, setBanner] = useState<Banner | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<{ providerKind?: string; embeddingModel?: string; chatModel?: string }>({});
+  const [saving, setSaving] = useState(false);
 
-  const asyncAction = useAsyncAction();
-
-  const load = async () => {
-    try {
-      const data = await apiFetch<UserAISettings>("/ai/settings");
-      setSettings(data);
-      setProviderKind(data.provider_kind);
-      setBaseUrl(data.base_url || "");
-      setEmbeddingModel(data.embedding_model);
-      setChatModel(data.chat_model);
-      setClassifyModel(data.classify_model || "");
-      setAiDisabled(data.ai_disabled);
-    } catch (e) {
-      setBanner({
-        variant: "error",
-        message: e instanceof Error ? e.message : "Could not load settings"
-      });
+  const canTest = useMemo(() => {
+    if (!ctrl.provider) return false;
+    for (const field of ctrl.provider.fields) {
+      if (!field.required) continue;
+      if (field.key === "api_key") {
+        const hasKey = ctrl.form.apiKey.trim() || ctrl.settings?.has_api_key;
+        if (!hasKey) return false;
+      } else if (field.key === "base_url") {
+        if (!ctrl.form.baseUrl.trim()) return false;
+      } else if (!(ctrl.form.extras[field.key] ?? "").trim()) {
+        return false;
+      }
     }
-  };
+    return true;
+  }, [ctrl.form, ctrl.provider, ctrl.settings?.has_api_key]);
 
-  useEffect(() => {
-    void load();
-  }, []);
+  const canSave = useMemo(() => {
+    if (!ctrl.provider) return false;
+    if (!ctrl.form.chatModel.trim()) return false;
+    return true;
+  }, [ctrl.form.chatModel, ctrl.provider]);
 
-  const validate = () => {
-    const errs: { providerKind?: string; embeddingModel?: string; chatModel?: string } = {};
-    if (!isNonEmpty(providerKind)) errs.providerKind = "Provider kind is required";
-    if (!isNonEmpty(embeddingModel)) errs.embeddingModel = "Embedding model is required";
-    if (!isNonEmpty(chatModel)) errs.chatModel = "Chat model is required";
-    return errs;
-  };
-
-  const save = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBanner(null);
-    const errs = validate();
-    setFieldErrors(errs);
-    if (Object.keys(errs).length) return;
-
-    const payload: Record<string, unknown> = {
-      provider_kind: providerKind.trim(),
-      base_url: baseUrl.trim() || null,
-      embedding_model: embeddingModel.trim(),
-      chat_model: chatModel.trim(),
-      classify_model: classifyModel.trim() || null,
-      ai_disabled: aiDisabled
-    };
-    if (apiKey.trim()) {
-      payload.api_key = apiKey.trim();
-    }
-
-    const result = await asyncAction.run(() => apiFetch<UserAISettings>("/ai/settings", { method: "PATCH", body: JSON.stringify(payload) }));
-    if (result) {
-      setApiKey("");
-      setBanner({ variant: "success", message: "Saved" });
-      await load();
+    setSaving(true);
+    try {
+      const result = await ctrl.save();
+      if (!result) return;
+      setBanner({ variant: result.ok ? "success" : "error", message: result.message });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const clearKey = async () => {
+  const handleClearKey = async () => {
     setBanner(null);
-    setFieldErrors({});
-    const result = await asyncAction.run(() =>
-      apiFetch<UserAISettings>("/ai/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ api_key: "" })
-      })
-    );
-    if (result) {
-      setBanner({ variant: "success", message: "API key cleared" });
-      await load();
-    }
+    await ctrl.clearKey();
+    setBanner({ variant: "success", message: "API key cleared." });
   };
+
+  const modelPickerHint = ctrl.provider?.model_list_is_deployments
+    ? "Azure deployments appear here after a successful test."
+    : ctrl.tested?.ok
+      ? undefined
+      : "Run Test connection to load available models.";
+
+  const testedOk = ctrl.tested?.ok === true;
+  const disabledReason = !ctrl.provider
+    ? "Pick a provider first"
+    : !testedOk && ctrl.models.length === 0
+      ? "Test the connection to load models"
+      : null;
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="mb-4 text-2xl font-semibold">AI settings</h1>
-      <p className="mb-4 text-sm text-slate-600">
-        Configure OpenAI-compatible endpoints, OpenRouter, or Ollama (<code className="rounded bg-slate-100 px-1">http://host:11434/v1</code>
-        ). Keys are encrypted at rest when <code className="rounded bg-slate-100 px-1">FERNET_ENCRYPTION_KEY</code> is set; otherwise a dev key is
-        derived from <code className="rounded bg-slate-100 px-1">JWT_SECRET</code>.
-      </p>
-      {settings ? (
-        <p className="mb-4 text-sm">
-          API key on file: <strong>{settings.has_api_key ? "yes" : "no"}</strong>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold">AI settings</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Connect an AI provider, verify the connection, and pick a model. Keys are encrypted at rest.
         </p>
-      ) : null}
+      </div>
 
       {banner ? (
         <div className="mb-4">
           <AlertBanner variant={banner.variant} message={banner.message} onDismiss={() => setBanner(null)} />
         </div>
       ) : null}
-      {asyncAction.error ? (
+
+      {registry.error ? (
         <div className="mb-4">
-          <AlertBanner variant="error" message={asyncAction.error} onDismiss={asyncAction.reset} />
+          <AlertBanner variant="error" message={registry.error} />
+        </div>
+      ) : null}
+      {ctrl.loadError ? (
+        <div className="mb-4">
+          <AlertBanner variant="error" message={ctrl.loadError} />
         </div>
       ) : null}
 
-      <Card>
-        <form className="grid gap-3" onSubmit={save}>
-          <label className="text-sm font-medium">
-            Provider kind
-            <Input
-              value={providerKind}
-              onChange={(e) => setProviderKind(e.target.value)}
-              placeholder="openai_compatible"
-              aria-invalid={Boolean(fieldErrors.providerKind)}
+      <form onSubmit={handleSave}>
+        <Card className="grid gap-6 p-5">
+          {/* Step 1: provider picker */}
+          <section className="grid gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="ai-provider-combobox" className="text-sm font-medium text-slate-800">
+                Provider
+                <span className="ml-1 text-red-600">*</span>
+              </label>
+              {ctrl.provider?.docs_url ? (
+                <a
+                  href={ctrl.provider.docs_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-slate-500 underline hover:text-slate-700"
+                >
+                  {ctrl.provider.label} docs
+                </a>
+              ) : null}
+            </div>
+            <ProviderPicker
+              providers={ctrl.providers}
+              value={ctrl.form.providerId}
+              onChange={ctrl.setProviderId}
+              disabled={ctrl.providersLoading}
             />
-            {fieldErrors.providerKind ? <p className="mt-1 text-xs text-red-600">{fieldErrors.providerKind}</p> : null}
-          </label>
-          <label className="text-sm font-medium">
-            Base URL (optional)
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://api.openai.com/v1 or http://localhost:11434/v1"
-            />
-          </label>
-          <label className="text-sm font-medium">
-            Embedding model
-            <Input value={embeddingModel} onChange={(e) => setEmbeddingModel(e.target.value)} aria-invalid={Boolean(fieldErrors.embeddingModel)} />
-            {fieldErrors.embeddingModel ? <p className="mt-1 text-xs text-red-600">{fieldErrors.embeddingModel}</p> : null}
-          </label>
-          <label className="text-sm font-medium">
-            Chat model
-            <Input value={chatModel} onChange={(e) => setChatModel(e.target.value)} aria-invalid={Boolean(fieldErrors.chatModel)} />
-            {fieldErrors.chatModel ? <p className="mt-1 text-xs text-red-600">{fieldErrors.chatModel}</p> : null}
-          </label>
-          <label className="text-sm font-medium">
-            Classify model (optional)
-            <Input
-              value={classifyModel}
-              onChange={(e) => setClassifyModel(e.target.value)}
-              placeholder="defaults to chat model"
-            />
-          </label>
-          <label className="text-sm font-medium">
-            API key (leave blank to keep existing)
-            <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={aiDisabled} onChange={(e) => setAiDisabled(e.target.checked)} />
-            Disable AI (skips embeddings, triage LLM, search, drafts)
-          </label>
-          <div className="flex gap-2">
-            <Button type="submit" disabled={asyncAction.pending}>
-              Save
-            </Button>
-            <Button type="button" className="border-dashed" onClick={() => void clearKey()} disabled={asyncAction.pending}>
-              Clear API key
-            </Button>
-          </div>
-        </form>
-      </Card>
+            {ctrl.provider?.description ? (
+              <p className="text-xs text-slate-500">{ctrl.provider.description}</p>
+            ) : null}
+          </section>
+
+          {ctrl.provider ? (
+            <>
+              <div className="h-px w-full bg-slate-200" />
+
+              {/* Step 2: dynamic fields */}
+              <section className="grid gap-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Credentials</h2>
+                <ProviderFields
+                  provider={ctrl.provider}
+                  value={{ apiKey: ctrl.form.apiKey, baseUrl: ctrl.form.baseUrl, extras: ctrl.form.extras }}
+                  storedApiKey={Boolean(ctrl.settings?.has_api_key)}
+                  onChange={({ apiKey, baseUrl, extras }) =>
+                    ctrl.setFieldsValue({ apiKey, baseUrl, extras })
+                  }
+                />
+              </section>
+
+              <div className="h-px w-full bg-slate-200" />
+
+              {/* Step 3: test connection */}
+              <section className="grid gap-2">
+                <TestConnectionButton
+                  onTest={() => void ctrl.test()}
+                  pending={ctrl.testing}
+                  result={ctrl.tested}
+                  disabled={!canTest}
+                />
+                {!canTest ? (
+                  <p className="text-xs text-slate-500">Fill in the required fields to enable the test.</p>
+                ) : null}
+              </section>
+
+              <div className="h-px w-full bg-slate-200" />
+
+              {/* Step 4: model selection */}
+              <section className="grid gap-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Model</h2>
+                <ModelSelector
+                  id="chat-model"
+                  label={ctrl.provider.model_list_is_deployments ? "Chat deployment" : "Chat model"}
+                  required
+                  value={ctrl.form.chatModel}
+                  onChange={(value) => ctrl.setField("chatModel", value)}
+                  models={ctrl.models}
+                  loading={ctrl.loadingModels}
+                  capability="chat"
+                  disabledReason={disabledReason}
+                  helpText={modelPickerHint}
+                />
+              </section>
+
+              {/* Advanced */}
+              <AdvancedSection>
+                <ModelSelector
+                  id="embedding-model"
+                  label="Embedding model"
+                  value={ctrl.form.embeddingModel}
+                  onChange={(value) => ctrl.setField("embeddingModel", value)}
+                  models={ctrl.models}
+                  loading={ctrl.loadingModels}
+                  capability="embedding"
+                  disabledReason={disabledReason}
+                  helpText="Used for semantic search and RAG. Leave blank to use the provider default."
+                />
+                <ModelSelector
+                  id="classify-model"
+                  label="Classify model (optional)"
+                  value={ctrl.form.classifyModel}
+                  onChange={(value) => ctrl.setField("classifyModel", value)}
+                  models={ctrl.models}
+                  loading={ctrl.loadingModels}
+                  capability="chat"
+                  disabledReason={disabledReason}
+                  helpText="Smaller/cheaper model for triage. Falls back to the chat model when empty."
+                />
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={ctrl.form.aiDisabled}
+                    onChange={(event) => ctrl.setField("aiDisabled", event.target.checked)}
+                  />
+                  Disable AI (skips embeddings, triage LLM, search, drafts)
+                </label>
+                {ctrl.settings?.has_api_key ? (
+                  <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-3">
+                    <span className="text-xs text-slate-500">A key is stored on this account.</span>
+                    <Button type="button" className="border-dashed" onClick={() => void handleClearKey()}>
+                      Clear API key
+                    </Button>
+                  </div>
+                ) : null}
+              </AdvancedSection>
+
+              <div className="flex items-center justify-between border-t border-slate-200 pt-4">
+                <span className="text-xs text-slate-500">
+                  Credentials are encrypted at rest using <code className="rounded bg-slate-100 px-1">FERNET_ENCRYPTION_KEY</code>.
+                </span>
+                <Button
+                  type="submit"
+                  className="bg-slate-900 text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-slate-900"
+                  disabled={!canSave || saving}
+                >
+                  {saving ? "Saving..." : "Save settings"}
+                </Button>
+              </div>
+            </>
+          ) : registry.loading ? (
+            <p className="text-sm text-slate-500">Loading providers...</p>
+          ) : null}
+        </Card>
+      </form>
     </div>
   );
 }

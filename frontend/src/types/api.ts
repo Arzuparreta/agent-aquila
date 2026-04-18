@@ -55,6 +55,71 @@ export type UserAISettings = {
   extras: Record<string, unknown> | null;
 };
 
+export type ProviderFieldType = "text" | "password" | "url" | "select";
+export type ProviderAuthKind = "bearer" | "x-api-key" | "api-key-header" | "none";
+
+export type ProviderField = {
+  key: string;
+  label: string;
+  type: ProviderFieldType;
+  required: boolean;
+  placeholder?: string;
+  help?: string;
+  secret?: boolean;
+  default?: string | null;
+  options?: string[] | null;
+};
+
+export type AIProvider = {
+  id: string;
+  label: string;
+  description: string;
+  auth_kind: ProviderAuthKind;
+  fields: ProviderField[];
+  default_base_url: string | null;
+  default_chat_model: string | null;
+  default_embedding_model: string | null;
+  default_classify_model: string | null;
+  docs_url?: string | null;
+  model_list_is_deployments?: boolean;
+  chat_openai_compatible?: boolean;
+  supports_capability_filter?: boolean;
+};
+
+export type ProviderConfigRequest = {
+  provider_id: string;
+  api_key?: string | null;
+  base_url?: string | null;
+  extras?: Record<string, unknown> | null;
+};
+
+export type TestConnectionResult = {
+  ok: boolean;
+  message: string;
+  code?: string | null;
+  detail?: string | null;
+};
+
+export type ModelCapability = "chat" | "embedding" | "unknown";
+
+export type ModelInfo = {
+  id: string;
+  label: string;
+  capability: ModelCapability;
+};
+
+export type ListModelsResponse = {
+  ok: boolean;
+  models: ModelInfo[];
+  error?: TestConnectionResult | null;
+};
+
+/**
+ * Sentinel sent in the api_key field of provider test / list-models requests
+ * to tell the backend "reuse the key that's already stored for this user".
+ */
+export const STORED_API_KEY_SENTINEL = "__stored__";
+
 export type SemanticSearchHit = {
   entity_type: string;
   entity_id: number;

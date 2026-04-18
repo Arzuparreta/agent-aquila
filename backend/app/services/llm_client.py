@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from app.models.user_ai_settings import UserAISettings
-from app.services.embedding_client import _api_root, _extra_headers
+from app.services.embedding_client import _api_root, _auth_headers, _extra_headers
 
 
 class LLMClient:
@@ -23,7 +23,7 @@ class LLMClient:
     ) -> str:
         root = _api_root(settings_row)
         url = f"{root}/chat/completions"
-        headers: dict[str, str] = {"Authorization": f"Bearer {api_key}", **_extra_headers(settings_row)}
+        headers: dict[str, str] = {**_auth_headers(api_key, settings_row), **_extra_headers(settings_row)}
         body: dict[str, Any] = {
             "model": model or settings_row.chat_model,
             "messages": messages,
