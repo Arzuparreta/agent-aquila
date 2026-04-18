@@ -14,7 +14,7 @@ from app.models.rag_chunk import RagChunk
 from app.models.user import User
 from app.schemas.ai import SemanticSearchHit
 from app.services.embedding_client import EmbeddingClient
-from app.services.embedding_service import pad_embedding
+from app.services.embedding_vector import pad_embedding
 from app.services.user_ai_settings_service import UserAISettingsService
 
 RRF_K = 60

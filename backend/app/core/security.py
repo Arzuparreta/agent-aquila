@@ -31,7 +31,8 @@ def create_access_token(subject: str, expires_minutes: int | None = None) -> str
     expires_at = datetime.now(UTC) + expire_delta
     # Integer `exp` avoids python-jose / library edge cases with datetime payloads.
     payload: dict[str, Any] = {"sub": subject, "exp": timegm(expires_at.utctimetuple())}
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return token if isinstance(token, str) else token.decode("utf-8")
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
