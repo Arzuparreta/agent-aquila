@@ -15,8 +15,20 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.connector_connection import ConnectorConnection
 from app.models.user import User
-from app.schemas.oauth import OAuthStartRequest, OAuthStartResponse, OAuthStatusResponse
+from app.schemas.oauth import (
+    GoogleOAuthAppCredentialsResponse,
+    GoogleOAuthAppCredentialsUpdate,
+    OAuthStartRequest,
+    OAuthStartResponse,
+    OAuthStatusResponse,
+)
 from app.services.connector_service import ConnectorService
+from app.services.instance_oauth_service import (
+    get_google_app_credentials_form,
+    get_google_runtime_config,
+    get_redirect_base as get_instance_redirect_base,
+    save_google_app_credentials,
+)
 from app.services.job_queue import enqueue as enqueue_job
 from app.services.oauth import google_oauth, microsoft_oauth, state_store
 from app.services.oauth.errors import OAuthError
@@ -42,12 +54,40 @@ router = APIRouter(prefix="/oauth", tags=["oauth"])
 
 
 @router.get("/google/status", response_model=OAuthStatusResponse)
-async def google_status() -> OAuthStatusResponse:
+async def google_status(db: AsyncSession = Depends(get_db)) -> OAuthStatusResponse:
+    cfg = await get_google_runtime_config(db)
     return OAuthStatusResponse(
-        configured=google_oauth.is_configured(),
-        redirect_uri=google_oauth.redirect_uri(),
+        configured=google_oauth.is_runtime_ready(cfg),
+        redirect_uri=google_oauth.redirect_uri_for(cfg),
         providers=["google_gmail", "google_calendar", "google_drive"],
     )
+
+
+@router.get("/google/app-credentials", response_model=GoogleOAuthAppCredentialsResponse)
+async def get_google_app_credentials(
+    db: AsyncSession = Depends(get_db), _user: User = Depends(get_current_user)
+) -> GoogleOAuthAppCredentialsResponse:
+    data = await get_google_app_credentials_form(db)
+    return GoogleOAuthAppCredentialsResponse(**data)
+
+
+@router.put("/google/app-credentials", response_model=GoogleOAuthAppCredentialsResponse)
+async def put_google_app_credentials(
+    payload: GoogleOAuthAppCredentialsUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> GoogleOAuthAppCredentialsResponse:
+    try:
+        await save_google_app_credentials(
+            db,
+            client_id=payload.client_id,
+            client_secret=payload.client_secret,
+            redirect_base=payload.redirect_base,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    data = await get_google_app_credentials_form(db)
+    return GoogleOAuthAppCredentialsResponse(**data)
 
 
 @router.post(
@@ -56,12 +96,15 @@ async def google_status() -> OAuthStatusResponse:
     dependencies=[Depends(get_current_user)],
 )
 async def google_start(
-    payload: OAuthStartRequest, current_user: User = Depends(get_current_user)
+    payload: OAuthStartRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> OAuthStartResponse:
-    if not google_oauth.is_configured():
+    cfg = await get_google_runtime_config(db)
+    if not google_oauth.is_runtime_ready(cfg):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google OAuth is not configured on the server. Set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET.",
+            detail="Google sign-in for this app is not set up yet. Open Settings and save your Google Client ID and secret (one-time), then try again.",
         )
     scopes = google_oauth.scopes_for_intent(payload.intent)
     state = await state_store.create_state(
@@ -74,7 +117,7 @@ async def google_start(
         )
     )
     try:
-        url = google_oauth.build_authorize_url(state, scopes)
+        url = google_oauth.build_authorize_url(state, scopes, cfg)
     except OAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return OAuthStartResponse(authorize_url=url, state=state, scopes=scopes, configured=True)
@@ -199,8 +242,9 @@ async def google_callback(
             status_code=status.HTTP_302_FOUND,
         )
 
+    cfg = await get_google_runtime_config(db)
     try:
-        token_payload = await google_oauth.exchange_code(code)
+        token_payload = await google_oauth.exchange_code(code, cfg)
     except OAuthError as exc:
         return RedirectResponse(
             _frontend_redirect(
@@ -363,10 +407,11 @@ async def _upsert_microsoft_connection(
 
 
 @router.get("/microsoft/status", response_model=OAuthStatusResponse)
-async def microsoft_status() -> OAuthStatusResponse:
+async def microsoft_status(db: AsyncSession = Depends(get_db)) -> OAuthStatusResponse:
+    base = await get_instance_redirect_base(db)
     return OAuthStatusResponse(
         configured=microsoft_oauth.is_configured(),
-        redirect_uri=microsoft_oauth.redirect_uri(),
+        redirect_uri=microsoft_oauth.redirect_uri_for_base(base),
         providers=["graph_mail", "graph_calendar", "graph_onedrive"],
     )
 
@@ -377,7 +422,9 @@ async def microsoft_status() -> OAuthStatusResponse:
     dependencies=[Depends(get_current_user)],
 )
 async def microsoft_start(
-    payload: OAuthStartRequest, current_user: User = Depends(get_current_user)
+    payload: OAuthStartRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> OAuthStartResponse:
     if not microsoft_oauth.is_configured():
         raise HTTPException(
@@ -395,7 +442,9 @@ async def microsoft_start(
         )
     )
     try:
-        url = microsoft_oauth.build_authorize_url(state, scopes)
+        base = await get_instance_redirect_base(db)
+        ms_redir = microsoft_oauth.redirect_uri_for_base(base)
+        url = microsoft_oauth.build_authorize_url(state, scopes, redirect_uri_override=ms_redir)
     except OAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return OAuthStartResponse(authorize_url=url, state=state, scopes=scopes, configured=True)
@@ -439,8 +488,10 @@ async def microsoft_callback(
             status_code=status.HTTP_302_FOUND,
         )
 
+    base = await get_instance_redirect_base(db)
+    ms_redir = microsoft_oauth.redirect_uri_for_base(base)
     try:
-        token_payload = await microsoft_oauth.exchange_code(code)
+        token_payload = await microsoft_oauth.exchange_code(code, redirect_uri_override=ms_redir)
     except OAuthError as exc:
         return RedirectResponse(
             _frontend_redirect(

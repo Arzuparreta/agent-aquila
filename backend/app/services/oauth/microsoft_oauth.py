@@ -36,9 +36,12 @@ def _token_url() -> str:
     return f"{AUTH_BASE}/{_tenant()}/oauth2/v2.0/token"
 
 
+def redirect_uri_for_base(base: str) -> str:
+    return f"{base.rstrip('/')}/api/v1/oauth/microsoft/callback"
+
+
 def redirect_uri() -> str:
-    base = settings.google_oauth_redirect_base.rstrip("/")
-    return f"{base}/api/v1/oauth/microsoft/callback"
+    return redirect_uri_for_base(settings.google_oauth_redirect_base)
 
 
 def scopes_for_intent(intent: str) -> list[str]:
@@ -77,13 +80,14 @@ def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
     return out
 
 
-def build_authorize_url(state: str, scopes: list[str]) -> str:
+def build_authorize_url(state: str, scopes: list[str], *, redirect_uri_override: str | None = None) -> str:
     if not is_configured():
         raise OAuthError("Microsoft OAuth is not configured. Set MICROSOFT_OAUTH_CLIENT_ID / SECRET.")
+    redir = redirect_uri_override or redirect_uri()
     params = {
         "client_id": settings.microsoft_oauth_client_id,
         "response_type": "code",
-        "redirect_uri": redirect_uri(),
+        "redirect_uri": redir,
         "response_mode": "query",
         "scope": " ".join(scopes),
         "state": state,
@@ -92,15 +96,16 @@ def build_authorize_url(state: str, scopes: list[str]) -> str:
     return f"{_authorize_url()}?{urlencode(params)}"
 
 
-async def exchange_code(code: str) -> dict[str, Any]:
+async def exchange_code(code: str, *, redirect_uri_override: str | None = None) -> dict[str, Any]:
     if not is_configured():
         raise OAuthError("Microsoft OAuth is not configured.")
+    redir = redirect_uri_override or redirect_uri()
     form = {
         "client_id": settings.microsoft_oauth_client_id,
         "client_secret": settings.microsoft_oauth_client_secret,
         "code": code,
         "grant_type": "authorization_code",
-        "redirect_uri": redirect_uri(),
+        "redirect_uri": redir,
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(_token_url(), data=form)

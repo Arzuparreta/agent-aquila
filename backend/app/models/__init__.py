@@ -8,6 +8,7 @@ from app.models.deal import Deal
 from app.models.drive_file import DriveFile
 from app.models.email import Email, EmailAttachment
 from app.models.event import Event
+from app.models.instance_oauth_settings import InstanceOAuthSettings
 from app.models.pending_proposal import PendingProposal
 from app.models.rag_chunk import RagChunk
 from app.models.user import User
@@ -25,6 +26,7 @@ __all__ = [
     "Email",
     "EmailAttachment",
     "Event",
+    "InstanceOAuthSettings",
     "ConnectorConnection",
     "PendingProposal",
     "RagChunk",

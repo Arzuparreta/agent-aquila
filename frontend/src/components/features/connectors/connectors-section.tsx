@@ -30,6 +30,14 @@ type GoogleStatus = {
   providers: string[];
 };
 
+type GoogleAppCredentials = {
+  client_id: string;
+  redirect_base: string;
+  redirect_uri: string;
+  configured: boolean;
+  has_saved_secret: boolean;
+};
+
 type OAuthStart = {
   authorize_url: string;
   state: string;
@@ -58,7 +66,11 @@ export function ConnectorsSection() {
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
+  const [googleApp, setGoogleApp] = useState<GoogleAppCredentials | null>(null);
+  const [googleFormClientId, setGoogleFormClientId] = useState("");
+  const [googleFormRedirectBase, setGoogleFormRedirectBase] = useState("");
+  const [googleFormSecret, setGoogleFormSecret] = useState("");
+  const [googleSetupSaving, setGoogleSetupSaving] = useState(false);
   const [msStatus, setMsStatus] = useState<GoogleStatus | null>(null);
 
   const load = useCallback(async () => {
@@ -83,15 +95,25 @@ export function ConnectorsSection() {
     }
   }, []);
 
+  const loadGoogleApp = useCallback(async () => {
+    try {
+      const data = await apiFetch<GoogleAppCredentials>("/oauth/google/app-credentials");
+      setGoogleApp(data);
+      setGoogleFormClientId(data.client_id);
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      setGoogleFormRedirectBase(data.redirect_base.trim() ? data.redirect_base : origin);
+    } catch {
+      setGoogleApp(null);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-    void apiFetch<GoogleStatus>("/oauth/google/status")
-      .then(setGoogleStatus)
-      .catch(() => setGoogleStatus(null));
+    void loadGoogleApp();
     void apiFetch<GoogleStatus>("/oauth/microsoft/status")
       .then(setMsStatus)
       .catch(() => setMsStatus(null));
-  }, [load]);
+  }, [load, loadGoogleApp]);
 
   // Absorb OAuth callback query params (`?oauth=success|error&...`) so the user sees feedback.
   useEffect(() => {
@@ -105,6 +127,7 @@ export function ConnectorsSection() {
       const niceProv = prov === "microsoft" ? "Microsoft" : prov === "google" ? "Google" : prov;
       setInfo(`${niceProv} connected${account ? ` as ${account}` : ""}. Initial sync scheduled.`);
       void load();
+      void loadGoogleApp();
     } else if (status === "error") {
       const err = params.get("error") || "unknown";
       const detail = params.get("detail") || "";
@@ -115,7 +138,7 @@ export function ConnectorsSection() {
       url.searchParams.delete(k)
     );
     window.history.replaceState({}, "", url.toString());
-  }, [load]);
+  }, [load, loadGoogleApp]);
 
   const startOAuth = async (vendor: "google" | "microsoft", intent: string) => {
     setError(null);
@@ -136,6 +159,34 @@ export function ConnectorsSection() {
   };
   const connectGoogle = (intent: string) => startOAuth("google", intent);
   const connectMicrosoft = (intent: string) => startOAuth("microsoft", intent);
+
+  const saveGoogleAppSetup = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    setGoogleSetupSaving(true);
+    try {
+      const updated = await apiFetch<GoogleAppCredentials>("/oauth/google/app-credentials", {
+        method: "PUT",
+        body: JSON.stringify({
+          client_id: googleFormClientId.trim(),
+          redirect_base: googleFormRedirectBase.trim(),
+          client_secret: googleFormSecret.trim() ? googleFormSecret.trim() : null
+        })
+      });
+      setGoogleApp(updated);
+      setGoogleFormSecret("");
+      setInfo(
+        updated.configured
+          ? "Google link saved. You can use Connect Google below, or update these fields any time."
+          : "Saved. Add the Client secret if Google still asks for it, then try Connect Google."
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save Google settings");
+    } finally {
+      setGoogleSetupSaving(false);
+    }
+  };
 
   const triggerSync = async (connectionId: number, resource: string) => {
     setError(null);
@@ -215,60 +266,100 @@ export function ConnectorsSection() {
       ) : null}
 
       <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900">Google Workspace</h3>
-            <p className="text-xs text-slate-600">
-              {googleStatus?.configured
-                ? `OAuth client configured. Redirect URI: ${googleStatus.redirect_uri}`
-                : "OAuth is not set up on this server yet. The connect buttons stay disabled until an administrator adds credentials (see below)."}
-            </p>
-          </div>
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-slate-900">Google Workspace</h3>
+          <p className="text-xs text-slate-600">
+            First, link this app to Google once (any signed-in person can do it). Then use{" "}
+            <span className="font-medium">Connect Google</span> to pick which Google account to use — no server
+            configuration files.
+          </p>
         </div>
-        {!googleStatus?.configured ? (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-            <p className="font-medium">For whoever runs this deployment</p>
-            <ol className="mt-2 list-decimal space-y-1 pl-4 text-amber-900">
-              <li>
-                In{" "}
-                <a
-                  className="font-medium underline underline-offset-2 hover:text-amber-950"
-                  href="https://console.cloud.google.com/apis/credentials"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Google Cloud Console → Credentials
-                </a>
-                , create an OAuth 2.0 Client ID (Web application).
-              </li>
-              <li>
-                Under Authorized redirect URIs, add exactly:{" "}
-                <code className="break-all rounded bg-white/80 px-1 py-0.5 text-[11px] text-slate-800">
-                  {googleStatus?.redirect_uri ?? "…load status to see URI…"}
-                </code>
-              </li>
-              <li>Enable Gmail API, Google Calendar API, and Google Drive API for the project.</li>
-              <li>
-                Set <code className="rounded bg-white/80 px-1">GOOGLE_OAUTH_CLIENT_ID</code> and{" "}
-                <code className="rounded bg-white/80 px-1">GOOGLE_OAUTH_CLIENT_SECRET</code> in the API server
-                environment, set <code className="rounded bg-white/80 px-1">GOOGLE_OAUTH_REDIRECT_BASE</code> to match
-                your API origin, then restart the backend.
-              </li>
-            </ol>
-            <p className="mt-2 text-amber-800">
-              After that, end users only click Connect and sign in with Google — no API keys to paste.
-            </p>
-          </div>
-        ) : null}
+
+        <form className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3" onSubmit={(e) => void saveGoogleAppSetup(e)}>
+          <p className="text-xs font-medium text-slate-800">Step 1 — Google Cloud (external site)</p>
+          <ol className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
+            <li>
+              Open{" "}
+              <a
+                className="font-medium text-slate-900 underline underline-offset-2"
+                href="https://console.cloud.google.com/apis/credentials"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Google Cloud Console → Credentials
+              </a>{" "}
+              and create an <span className="font-medium">OAuth client ID</span> of type{" "}
+              <span className="font-medium">Web application</span>.
+            </li>
+            <li>
+              Under <span className="font-medium">Authorized redirect URIs</span>, add this exact line (copy–paste):{" "}
+              <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
+                {`${googleFormRedirectBase.replace(/\/$/, "") || "(set website address below)"}/api/v1/oauth/google/callback`}
+              </code>
+            </li>
+            <li>
+              Turn on the <span className="font-medium">Gmail</span>, <span className="font-medium">Calendar</span>, and{" "}
+              <span className="font-medium">Drive</span> APIs for that project.
+            </li>
+          </ol>
+
+          <p className="text-xs font-medium text-slate-800">Step 2 — Paste into this page</p>
+          <label className="text-xs font-medium text-slate-800">
+            Website address for this app
+            <Input
+              className="mt-1 font-mono text-xs"
+              value={googleFormRedirectBase}
+              onChange={(e) => setGoogleFormRedirectBase(e.target.value)}
+              placeholder="https://the-address-you-type-in-the-browser"
+              autoComplete="off"
+            />
+            <span className="mt-1 block font-normal text-slate-500">
+              Usually the same as the start of the URL in your address bar. We pre-fill it when possible.
+            </span>
+          </label>
+          <label className="text-xs font-medium text-slate-800">
+            Client ID (from Google)
+            <Input
+              className="mt-1 font-mono text-xs"
+              value={googleFormClientId}
+              onChange={(e) => setGoogleFormClientId(e.target.value)}
+              placeholder="….apps.googleusercontent.com"
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-slate-800">
+            Client secret (from Google)
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={googleFormSecret}
+              onChange={(e) => setGoogleFormSecret(e.target.value)}
+              placeholder={
+                googleApp?.has_saved_secret
+                  ? "Leave blank to keep the saved secret, or paste a new one to replace it"
+                  : "Paste the secret from Google (stored encrypted on this server)"
+              }
+              autoComplete="off"
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit bg-slate-900 text-white hover:bg-slate-800"
+            disabled={googleSetupSaving}
+          >
+            {googleSetupSaving ? "Saving…" : "Save Google link"}
+          </Button>
+        </form>
+
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
             className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
-            disabled={!googleStatus?.configured}
+            disabled={!googleApp?.configured}
             title={
-              googleStatus?.configured
+              googleApp?.configured
                 ? undefined
-                : "Disabled until GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET are set on the server."
+                : "Save the Client ID and secret above first, then these buttons open Google sign-in."
             }
             onClick={() => void connectGoogle("all")}
           >
@@ -276,36 +367,24 @@ export function ConnectorsSection() {
           </Button>
           <Button
             type="button"
-            disabled={!googleStatus?.configured}
-            title={
-              googleStatus?.configured
-                ? undefined
-                : "Disabled until Google OAuth is configured on the server."
-            }
+            disabled={!googleApp?.configured}
+            title={googleApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
             onClick={() => void connectGoogle("gmail")}
           >
             Gmail only
           </Button>
           <Button
             type="button"
-            disabled={!googleStatus?.configured}
-            title={
-              googleStatus?.configured
-                ? undefined
-                : "Disabled until Google OAuth is configured on the server."
-            }
+            disabled={!googleApp?.configured}
+            title={googleApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
             onClick={() => void connectGoogle("calendar")}
           >
             Calendar only
           </Button>
           <Button
             type="button"
-            disabled={!googleStatus?.configured}
-            title={
-              googleStatus?.configured
-                ? undefined
-                : "Disabled until Google OAuth is configured on the server."
-            }
+            disabled={!googleApp?.configured}
+            title={googleApp?.configured ? undefined : "Complete Step 2 and save, then try again."}
             onClick={() => void connectGoogle("drive")}
           >
             Drive only

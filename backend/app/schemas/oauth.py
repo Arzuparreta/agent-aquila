@@ -19,3 +19,19 @@ class OAuthStatusResponse(BaseModel):
     configured: bool
     redirect_uri: str
     providers: list[str]
+
+
+class GoogleOAuthAppCredentialsResponse(BaseModel):
+    """Google Cloud *application* OAuth client — configured in-app, not per-user."""
+
+    client_id: str
+    redirect_base: str
+    redirect_uri: str
+    configured: bool
+    has_saved_secret: bool
+
+
+class GoogleOAuthAppCredentialsUpdate(BaseModel):
+    client_id: str = Field(default="", max_length=512)
+    client_secret: str | None = Field(default=None, max_length=512)
+    redirect_base: str = Field(default="", max_length=1024)

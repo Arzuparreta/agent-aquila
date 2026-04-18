@@ -4,6 +4,7 @@ Reference: https://developers.google.com/identity/protocols/oauth2/web-server
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -28,6 +29,61 @@ SCOPES_DRIVE = [
     "https://www.googleapis.com/auth/drive",
 ]
 SCOPES_IDENTITY = ["openid", "email", "profile"]
+
+
+@dataclass(frozen=True)
+class GoogleOAuthRuntimeConfig:
+    client_id: str
+    client_secret: str
+    redirect_base: str
+
+
+def runtime_config_from_env() -> GoogleOAuthRuntimeConfig:
+    """Env-only snapshot (used by the provider registry and legacy call sites)."""
+    return GoogleOAuthRuntimeConfig(
+        client_id=settings.google_oauth_client_id,
+        client_secret=settings.google_oauth_client_secret,
+        redirect_base=settings.google_oauth_redirect_base,
+    )
+
+
+def is_runtime_ready(config: GoogleOAuthRuntimeConfig) -> bool:
+    return bool(config.client_id and config.client_secret)
+
+
+def redirect_uri_for(config: GoogleOAuthRuntimeConfig) -> str:
+    base = config.redirect_base.rstrip("/")
+    return f"{base}/api/v1/oauth/google/callback"
+
+
+def redirect_uri() -> str:
+    return redirect_uri_for(runtime_config_from_env())
+
+
+def is_configured() -> bool:
+    return is_runtime_ready(runtime_config_from_env())
+
+
+def build_authorize_url(
+    state: str, scopes: list[str], config: GoogleOAuthRuntimeConfig | None = None
+) -> str:
+    cfg = config or runtime_config_from_env()
+    if not is_runtime_ready(cfg):
+        raise OAuthError(
+            "Google OAuth is not configured. Add your Google app Client ID and secret under Settings, "
+            "or set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET on the server."
+        )
+    params = {
+        "client_id": cfg.client_id,
+        "redirect_uri": redirect_uri_for(cfg),
+        "response_type": "code",
+        "scope": " ".join(scopes),
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+        "state": state,
+    }
+    return f"{AUTHORIZE_URL}?{urlencode(params)}"
 
 
 def scopes_for_intent(intent: str) -> list[str]:
@@ -65,43 +121,17 @@ def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
     return out
 
 
-def redirect_uri() -> str:
-    base = settings.google_oauth_redirect_base.rstrip("/")
-    return f"{base}/api/v1/oauth/google/callback"
-
-
-def is_configured() -> bool:
-    return bool(settings.google_oauth_client_id and settings.google_oauth_client_secret)
-
-
-def build_authorize_url(state: str, scopes: list[str]) -> str:
-    if not is_configured():
-        raise OAuthError(
-            "Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET in .env."
-        )
-    params = {
-        "client_id": settings.google_oauth_client_id,
-        "redirect_uri": redirect_uri(),
-        "response_type": "code",
-        "scope": " ".join(scopes),
-        "access_type": "offline",
-        "include_granted_scopes": "true",
-        "prompt": "consent",
-        "state": state,
-    }
-    return f"{AUTHORIZE_URL}?{urlencode(params)}"
-
-
-async def exchange_code(code: str) -> dict[str, Any]:
+async def exchange_code(code: str, config: GoogleOAuthRuntimeConfig | None = None) -> dict[str, Any]:
     """Trade an auth code for access + refresh tokens. Returns the raw Google JSON."""
-    if not is_configured():
+    cfg = config or runtime_config_from_env()
+    if not is_runtime_ready(cfg):
         raise OAuthError("Google OAuth is not configured.")
     form = {
-        "client_id": settings.google_oauth_client_id,
-        "client_secret": settings.google_oauth_client_secret,
+        "client_id": cfg.client_id,
+        "client_secret": cfg.client_secret,
         "code": code,
         "grant_type": "authorization_code",
-        "redirect_uri": redirect_uri(),
+        "redirect_uri": redirect_uri_for(cfg),
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(TOKEN_URL, data=form)
@@ -121,13 +151,19 @@ async def fetch_userinfo(access_token: str) -> dict[str, Any]:
     return r.json()
 
 
-async def refresh_access_token(refresh_token: str, *, connection_id: int | None = None) -> dict[str, Any]:
+async def refresh_access_token(
+    refresh_token: str,
+    *,
+    connection_id: int | None = None,
+    config: GoogleOAuthRuntimeConfig | None = None,
+) -> dict[str, Any]:
     """Use a stored refresh_token to mint a fresh access_token. Raises ConnectorNeedsReauth on 400/401."""
-    if not is_configured():
+    cfg = config or runtime_config_from_env()
+    if not is_runtime_ready(cfg):
         raise OAuthError("Google OAuth is not configured.")
     form = {
-        "client_id": settings.google_oauth_client_id,
-        "client_secret": settings.google_oauth_client_secret,
+        "client_id": cfg.client_id,
+        "client_secret": cfg.client_secret,
         "refresh_token": refresh_token,
         "grant_type": "refresh_token",
     }
