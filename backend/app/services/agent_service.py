@@ -506,6 +506,9 @@ class AgentService:
         await db.commit()
         await db.refresh(run)
 
+        # After commit, ORM instances are expired; lazy loads raise MissingGreenlet in async.
+        for p in proposals_created:
+            await db.refresh(p)
         prop_reads = [proposal_to_read(p) for p in proposals_created]
         steps = await AgentService._load_steps(db, run.id)
         return AgentService._to_read(run, steps, prop_reads)
