@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr
 
+from app.schemas.chat import StartChatResponse as StartChatResponse  # re-export for callers
 from app.schemas.common import ORMBaseModel
 
 
@@ -38,10 +39,6 @@ class EmailRead(ORMBaseModel):
 
 class EmailReadStateUpdate(BaseModel):
     is_read: bool
-
-
-class StartChatResponse(BaseModel):
-    thread_id: int
 
 
 class UnreadCountResponse(BaseModel):

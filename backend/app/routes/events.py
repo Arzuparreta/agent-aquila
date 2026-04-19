@@ -11,7 +11,9 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.chat_thread import ChatThread
 from app.models.user import User
+from app.schemas.chat import StartChatResponse
 from app.schemas.event import EventCreate, EventRead, EventUpdate
+from app.services.chat_service import start_entity_chat
 from app.services.event_service import EventService
 from app.services.inbound_filter_service import (
     CATEGORY_ACTIONABLE,
@@ -87,6 +89,46 @@ async def promote_event(
     await db.commit()
     await db.refresh(event)
     return EventRead.model_validate(event)
+
+
+@router.post("/{event_id}/start-chat", response_model=StartChatResponse)
+async def start_chat_from_event(
+    event_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StartChatResponse:
+    """Create (or reuse) an entity-bound chat thread for this event and seed it with
+    a single ``event`` announcement. Mirrors ``POST /emails/{id}/start-chat``.
+    """
+    event = await EventService.get_event(db, event_id)
+
+    title = f"Evento · {event.venue_name}"[:255]
+    when = event.event_date.isoformat() if event.event_date else None
+    detail_bits = [
+        f"Fecha: {when}" if when else None,
+        f"Ciudad: {event.city}" if event.city else None,
+        f"Recinto: {event.venue_name}" if event.venue_name else None,
+        f"Estado: {event.status}" if event.status else None,
+    ]
+    details = " · ".join(b for b in detail_bits if b)
+    body = event.notes or event.description or event.summary or ""
+    announcement = (
+        f"🎤 Evento referenciado\n"
+        f"{event.venue_name}\n"
+        f"{details}\n\n"
+        f"{body[:600]}"
+    )
+    thread = await start_entity_chat(
+        db,
+        current_user,
+        entity_type="event",
+        entity_id=event.id,
+        title=title,
+        announcement=announcement,
+        event_attachments=[{"event_kind": "event_referenced", "event_id": event.id}],
+    )
+    await db.commit()
+    return StartChatResponse(thread_id=thread.id)
 
 
 @router.post("/{event_id}/suppress", response_model=EventRead)

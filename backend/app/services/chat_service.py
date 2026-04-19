@@ -103,6 +103,53 @@ async def get_or_create_entity_thread(
     return row
 
 
+async def start_entity_chat(
+    db: AsyncSession,
+    user: User,
+    *,
+    entity_type: str,
+    entity_id: int,
+    title: str,
+    announcement: str,
+    event_attachments: list[dict] | None = None,
+) -> ChatThread:
+    """Upsert an entity-bound thread and (idempotently) seed one ``event`` announcement.
+
+    Returns the thread. Also unarchives the thread if it was archived, so reopening from
+    the library / inbox brings it back into the conversation list. The caller is
+    responsible for committing the session (mirrors the pattern used by
+    ``start_chat_from_email`` — keeps the endpoint in control of its own transaction).
+    """
+    thread = await get_or_create_entity_thread(
+        db, user, entity_type=entity_type, entity_id=entity_id, title=title
+    )
+
+    res = await db.execute(
+        select(ChatMessage.id)
+        .where(
+            ChatMessage.thread_id == thread.id,
+            ChatMessage.role == "event",
+        )
+        .limit(1)
+    )
+    already_seeded = res.scalar_one_or_none() is not None
+
+    if not already_seeded:
+        await append_message(
+            db,
+            thread,
+            role="event",
+            content=announcement,
+            attachments=event_attachments,
+        )
+
+    if thread.archived:
+        thread.archived = False
+        thread.updated_at = datetime.now(UTC)
+
+    return thread
+
+
 async def list_threads(
     db: AsyncSession, user: User, *, include_archived: bool = False
 ) -> list[ChatThread]:
@@ -164,21 +211,27 @@ async def history_for_agent(
 ) -> list[dict[str, str]]:
     """Returns prior turns as the OpenAI-compatible ``[{role, content}, ...]`` list.
 
-    Filters out ``system`` and ``event`` roles (those are UI-side annotations, not part of
-    the LLM exchange). Keeps the most recent ``limit`` user/assistant pairs.
+    Keeps the most recent ``limit`` user/assistant pairs and also surfaces ``event``
+    rows as ``system`` messages so the seeded entity announcement (written by the
+    various ``/start-chat`` endpoints via ``start_entity_chat``) actually reaches the
+    model. ``system`` rows stored on the thread are still stripped — those are author-
+    authored UI annotations, not model-facing context.
     """
     stmt = (
         select(ChatMessage)
         .where(
             ChatMessage.thread_id == thread.id,
-            ChatMessage.role.in_(("user", "assistant")),
+            ChatMessage.role.in_(("user", "assistant", "event")),
         )
         .order_by(ChatMessage.id.desc())
         .limit(limit * 2)
     )
     rows = list((await db.execute(stmt)).scalars().all())
     rows.reverse()
-    return [{"role": r.role, "content": r.content} for r in rows]
+    return [
+        {"role": "system" if r.role == "event" else r.role, "content": r.content}
+        for r in rows
+    ]
 
 
 def thread_to_read(thread: ChatThread, *, unread: int = 0) -> ThreadRead:

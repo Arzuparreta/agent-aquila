@@ -72,3 +72,13 @@ class MessageSendResult(BaseModel):
     user_message: MessageRead
     assistant_message: MessageRead
     error: str | None = None
+
+
+class StartChatResponse(BaseModel):
+    """Returned by every ``POST /{entity}/{id}/start-chat`` endpoint.
+
+    The frontend uses ``thread_id`` to navigate to ``/?thread=<id>`` so the user lands
+    in the entity-bound thread with the seeded announcement already visible.
+    """
+
+    thread_id: int

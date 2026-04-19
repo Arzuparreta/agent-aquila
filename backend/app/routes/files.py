@@ -18,8 +18,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
+from app.schemas.chat import StartChatResponse
 from app.schemas.file import AttachmentRead
 from app.services.attachment_service import get_attachment, list_attachments, store_upload
+from app.services.chat_service import start_entity_chat
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -82,6 +84,47 @@ async def read_file_meta(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     return _to_read(row)
+
+
+@router.post("/{attachment_id}/start-chat", response_model=StartChatResponse)
+async def start_chat_from_file(
+    attachment_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StartChatResponse:
+    """Create (or reuse) an entity-bound chat thread for this file and seed it with
+    a single ``event`` announcement. Mirrors ``POST /emails/{id}/start-chat``. Uses
+    ``entity_type='attachment'`` to match the library drawer's tab mapping.
+    """
+    row = await get_attachment(db, current_user, attachment_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    title = f"Archivo · {row.filename}"[:255]
+    size_kb = (row.size_bytes or 0) / 1024
+    detail_bits = [
+        f"Tipo: {row.mime_type}" if row.mime_type else None,
+        f"Tamaño: {size_kb:.1f} KB",
+    ]
+    details = " · ".join(b for b in detail_bits if b)
+    preview = (row.extracted_text or "")[:600]
+    announcement = (
+        f"📎 Archivo referenciado\n"
+        f"Nombre: {row.filename}\n"
+        f"{details}\n\n"
+        f"{preview}"
+    )
+    thread = await start_entity_chat(
+        db,
+        current_user,
+        entity_type="attachment",
+        entity_id=row.id,
+        title=title,
+        announcement=announcement,
+        event_attachments=[{"event_kind": "file_referenced", "attachment_id": row.id}],
+    )
+    await db.commit()
+    return StartChatResponse(thread_id=thread.id)
 
 
 @router.get("/{attachment_id}/download")

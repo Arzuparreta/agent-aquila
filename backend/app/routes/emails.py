@@ -19,7 +19,7 @@ from app.schemas.email import (
     StartChatResponse,
     UnreadCountResponse,
 )
-from app.services.chat_service import append_message, get_or_create_entity_thread
+from app.services.chat_service import start_entity_chat
 from app.services.email_service import EmailService
 from app.services.inbound_filter_service import (
     CATEGORY_ACTIONABLE,
@@ -107,37 +107,21 @@ async def start_chat_from_email(
 
     sender = email.sender_name or email.sender_email or "Remitente desconocido"
     title = f"Correo · {sender}"[:255]
-    thread = await get_or_create_entity_thread(
-        db, current_user, entity_type="email", entity_id=email.id, title=title
+    announcement = (
+        f"📩 Correo referenciado\n"
+        f"De: {email.sender_name or ''} <{email.sender_email or ''}>\n"
+        f"Asunto: {email.subject or ''}\n\n"
+        f"{(email.snippet or email.body or '')[:600]}"
     )
-
-    # Only seed the announcement once (idempotent on repeat clicks).
-    from app.models.chat_message import ChatMessage
-    res = await db.execute(
-        select(ChatMessage.id).where(
-            ChatMessage.thread_id == thread.id,
-            ChatMessage.role == "event",
-        ).limit(1)
+    thread = await start_entity_chat(
+        db,
+        current_user,
+        entity_type="email",
+        entity_id=email.id,
+        title=title,
+        announcement=announcement,
+        event_attachments=[{"event_kind": "email_referenced", "email_id": email.id}],
     )
-    already_seeded = res.scalar_one_or_none() is not None
-
-    if not already_seeded:
-        announcement = (
-            f"📩 Correo referenciado\n"
-            f"De: {email.sender_name or ''} <{email.sender_email or ''}>\n"
-            f"Asunto: {email.subject or ''}\n\n"
-            f"{(email.snippet or email.body or '')[:600]}"
-        )
-        await append_message(
-            db, thread, role="event", content=announcement,
-            attachments=[{"event_kind": "email_referenced", "email_id": email.id}],
-        )
-
-    # Unarchive if the user is reopening it.
-    if thread.archived:
-        thread.archived = False
-        thread.updated_at = datetime.now(UTC)
-
     await db.commit()
     return StartChatResponse(thread_id=thread.id)
 

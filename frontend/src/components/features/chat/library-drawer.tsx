@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
@@ -60,23 +61,40 @@ const ENDPOINTS: Record<Tab, string> = {
   files: "/files"
 };
 
+// Maps entity type -> the REST prefix that hosts ``/{id}/start-chat``. Files come
+// back from /files but the chat layer labels them as ``attachment`` entities.
+const START_CHAT_PREFIX: Record<ChatEntityType, string | null> = {
+  contact: "/contacts",
+  deal: "/deals",
+  event: "/events",
+  email: "/emails",
+  attachment: "/files",
+  drive_file: null
+};
+
 /**
  * "Everything visible at a glance" library drawer.
  *
  * Renders a tabbed read-only view over all the data the agent already knows about.
- * Tapping a row pushes a reference chip into the composer (via `useChatReferences`)
- * and closes the drawer — same UX intent as Cursor's @mention picker.
+ * Each row exposes two actions, mirroring the inbox-detail pattern:
+ *   - "Iniciar chat" (default body click) — POSTs to ``/{entity}/{id}/start-chat``
+ *     which creates / reuses an entity-bound thread and seeds it with an event
+ *     announcement; we then navigate to ``/?thread=<id>``.
+ *   - "Referenciar" — pushes an @mention chip into the shared composer state and
+ *     closes the drawer, so the user can keep typing in the current thread.
  *
  * For now this hits each domain endpoint directly with no pagination; everything is
  * single-tenant and lists are small. Files also expose an "Subir" button that POSTs
  * a multipart form to /files.
  */
 export function LibraryDrawer({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("contacts");
   const [data, setData] = useState<RowsByTab>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emailFilter, setEmailFilter] = useState<EmailFilter>("actionable");
+  const [busyOpen, setBusyOpen] = useState<string | null>(null);
   const refs = useChatReferences();
 
   const fetchTab = useCallback(
@@ -132,6 +150,30 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
     refs.add(ref);
     onClose();
   };
+
+  const openChat = useCallback(
+    async (entity_type: ChatEntityType, id: number) => {
+      const prefix = START_CHAT_PREFIX[entity_type];
+      if (!prefix) {
+        setError("Este tipo de elemento aún no puede abrir un chat dedicado.");
+        return;
+      }
+      const key = `${entity_type}:${id}`;
+      setBusyOpen(key);
+      try {
+        const res = await apiFetch<{ thread_id: number }>(`${prefix}/${id}/start-chat`, {
+          method: "POST"
+        });
+        onClose();
+        router.push(`/?thread=${res.thread_id}`);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "No se pudo iniciar el chat.");
+      } finally {
+        setBusyOpen(null);
+      }
+    },
+    [onClose, router]
+  );
 
   const onUpload = async (file: File) => {
     const fd = new FormData();
@@ -214,13 +256,15 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
           <LibraryRows
             tab={tab}
             data={data}
-            onPick={reference}
+            onReference={reference}
+            onOpenChat={openChat}
+            busyOpen={busyOpen}
             onPromoteEmail={promoteEmail}
             onSuppressEmail={suppressEmail}
           />
         </div>
         <footer className="pb-safe border-t border-border-subtle px-3 py-2 text-center text-[11px] text-fg-subtle">
-          Toca un elemento para mencionarlo en la conversación.
+          Toca un elemento para abrir un chat dedicado, o usa <span className="font-medium">Referenciar</span> para mencionarlo en el chat actual.
         </footer>
       </div>
       <button
@@ -232,16 +276,67 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
   );
 }
 
+type RowActions = {
+  entity_type: ChatEntityType;
+  id: number;
+  label: string;
+  busyOpen: string | null;
+  onReference: (entity_type: ChatEntityType, id: number, label: string) => void;
+  onOpenChat: (entity_type: ChatEntityType, id: number) => void;
+};
+
+function EntityRowActions({
+  entity_type,
+  id,
+  label,
+  busyOpen,
+  onReference,
+  onOpenChat,
+  extra
+}: RowActions & { extra?: React.ReactNode }) {
+  const key = `${entity_type}:${id}`;
+  const isBusy = busyOpen === key;
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle px-3 py-1 text-xs">
+      <button
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onOpenChat(entity_type, id);
+        }}
+        disabled={busyOpen !== null}
+        className="rounded-full bg-primary px-2 py-0.5 font-medium text-primary-fg hover:opacity-90 disabled:opacity-60"
+      >
+        {isBusy ? "Abriendo…" : "Iniciar chat"}
+      </button>
+      <button
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onReference(entity_type, id, label);
+        }}
+        disabled={busyOpen !== null}
+        className="rounded-full bg-primary/20 px-2 py-0.5 text-fg hover:bg-primary/30 disabled:opacity-60"
+      >
+        Referenciar
+      </button>
+      {extra}
+    </div>
+  );
+}
+
 function LibraryRows({
   tab,
   data,
-  onPick,
+  onReference,
+  onOpenChat,
+  busyOpen,
   onPromoteEmail,
   onSuppressEmail
 }: {
   tab: Tab;
   data: RowsByTab;
-  onPick: (entity_type: ChatEntityType, id: number, label: string) => void;
+  onReference: (entity_type: ChatEntityType, id: number, label: string) => void;
+  onOpenChat: (entity_type: ChatEntityType, id: number) => void;
+  busyOpen: string | null;
   onPromoteEmail: (id: number) => Promise<void> | void;
   onSuppressEmail: (id: number) => Promise<void> | void;
 }) {
@@ -259,16 +354,16 @@ function LibraryRows({
           const cat: TriageCategory = (e.triage_category ?? "unknown") as TriageCategory;
           const badge = TRIAGE_BADGE[cat] ?? TRIAGE_BADGE.unknown;
           const isNoise = cat === "noise" || cat === "informational";
+          const label = e.subject || "(sin asunto)";
           return (
             <li key={`emails-${e.id}`} className="rounded-md bg-surface-elevated">
               <button
-                onClick={() => onPick(entity_type, e.id, e.subject || "(sin asunto)")}
-                className="flex w-full flex-col items-start gap-0.5 rounded-t-md px-3 py-2 text-left text-sm text-fg hover:bg-surface-muted"
+                onClick={() => onOpenChat(entity_type, e.id)}
+                disabled={busyOpen !== null}
+                className="flex w-full flex-col items-start gap-0.5 rounded-t-md px-3 py-2 text-left text-sm text-fg hover:bg-surface-muted disabled:opacity-60"
               >
                 <span className="flex w-full items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate font-medium">
-                    {e.subject || "(sin asunto)"}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${badge.className}`}
                     title={e.triage_reason ?? undefined}
@@ -280,24 +375,40 @@ function LibraryRows({
                   {e.sender_name || e.sender_email}
                 </span>
               </button>
-              <div className="flex gap-2 border-t border-border-subtle px-3 py-1 text-xs">
-                {isNoise ? (
-                  <button
-                    onClick={() => void onPromoteEmail(e.id)}
-                    className="rounded-full bg-emerald-700/40 px-2 py-0.5 text-emerald-200 hover:bg-emerald-700/60"
-                  >
-                    Promover a accionable
-                  </button>
-                ) : null}
-                {cat !== "noise" ? (
-                  <button
-                    onClick={() => void onSuppressEmail(e.id)}
-                    className="rounded-full bg-surface-muted px-2 py-0.5 text-fg-muted hover:bg-surface-inset"
-                  >
-                    Silenciar
-                  </button>
-                ) : null}
-              </div>
+              <EntityRowActions
+                entity_type={entity_type}
+                id={e.id}
+                label={label}
+                busyOpen={busyOpen}
+                onReference={onReference}
+                onOpenChat={onOpenChat}
+                extra={
+                  <>
+                    {isNoise ? (
+                      <button
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          void onPromoteEmail(e.id);
+                        }}
+                        className="rounded-full bg-emerald-700/40 px-2 py-0.5 text-emerald-200 hover:bg-emerald-700/60"
+                      >
+                        Promover a accionable
+                      </button>
+                    ) : null}
+                    {cat !== "noise" ? (
+                      <button
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          void onSuppressEmail(e.id);
+                        }}
+                        className="rounded-full bg-surface-muted px-2 py-0.5 text-fg-muted hover:bg-surface-inset"
+                      >
+                        Silenciar
+                      </button>
+                    ) : null}
+                  </>
+                }
+              />
             </li>
           );
         })}
@@ -344,14 +455,23 @@ function LibraryRows({
   return (
     <ul className="flex flex-col gap-1">
       {rows.map((r) => (
-        <li key={`${tab}-${r.id}`}>
+        <li key={`${tab}-${r.id}`} className="rounded-md bg-surface-elevated">
           <button
-            onClick={() => onPick(entity_type, r.id, r.label)}
-            className="flex w-full flex-col items-start gap-0.5 rounded-md bg-surface-elevated px-3 py-2 text-left text-sm text-fg hover:bg-surface-muted"
+            onClick={() => onOpenChat(entity_type, r.id)}
+            disabled={busyOpen !== null}
+            className="flex w-full flex-col items-start gap-0.5 rounded-t-md px-3 py-2 text-left text-sm text-fg hover:bg-surface-muted disabled:opacity-60"
           >
             <span className="truncate font-medium">{r.label}</span>
             {r.sub ? <span className="truncate text-xs text-fg-subtle">{r.sub}</span> : null}
           </button>
+          <EntityRowActions
+            entity_type={entity_type}
+            id={r.id}
+            label={r.label}
+            busyOpen={busyOpen}
+            onReference={onReference}
+            onOpenChat={onOpenChat}
+          />
         </li>
       ))}
     </ul>
