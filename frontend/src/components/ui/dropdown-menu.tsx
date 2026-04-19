@@ -128,7 +128,7 @@ export function DropdownMenu({
               if (stopPropagation) e.stopPropagation();
             }}
             className={cn(
-              "absolute top-full z-40 mt-1 min-w-[12rem] overflow-hidden rounded-lg border border-white/10 bg-slate-900 py-1 text-sm text-slate-100 shadow-xl",
+              "absolute top-full z-40 mt-1 min-w-[12rem] overflow-hidden rounded-lg border border-border bg-surface-elevated py-1 text-sm text-fg shadow-xl",
               align === "end" ? "right-0" : "left-0",
               menuClassName
             )}
@@ -167,8 +167,8 @@ export function DropdownMenuItem({
         ctx?.close();
       }}
       className={cn(
-        "block w-full px-3 py-2 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50",
-        destructive ? "text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" : "",
+        "block w-full px-3 py-2 text-left transition hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-50",
+        destructive ? "text-rose-600 hover:bg-rose-500/10 hover:text-rose-700" : "",
         className
       )}
     >
@@ -178,12 +178,12 @@ export function DropdownMenuItem({
 }
 
 export function DropdownMenuSeparator() {
-  return <div className="my-1 h-px bg-white/10" role="separator" />;
+  return <div className="my-1 h-px bg-border-subtle" role="separator" />;
 }
 
 export function DropdownMenuLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle">
       {children}
     </div>
   );

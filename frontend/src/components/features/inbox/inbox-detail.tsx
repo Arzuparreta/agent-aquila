@@ -10,9 +10,9 @@ import { EmailActionsMenu } from "./email-actions-menu";
 
 const TRIAGE_BADGE: Record<TriageCategory, { label: string; className: string }> = {
   actionable: { label: "Accionable", className: "bg-emerald-600/30 text-emerald-200" },
-  informational: { label: "Info", className: "bg-slate-600/40 text-slate-200" },
+  informational: { label: "Info", className: "bg-surface-muted text-fg-muted" },
   noise: { label: "Silenciado", className: "bg-rose-700/30 text-rose-200" },
-  unknown: { label: "Sin clasificar", className: "bg-slate-700/40 text-slate-300" }
+  unknown: { label: "Sin clasificar", className: "bg-surface-muted/90 text-fg-subtle" }
 };
 
 /**
@@ -72,10 +72,10 @@ export function InboxDetail({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center gap-2 border-b border-white/5 bg-slate-900 px-3 py-2">
+      <header className="flex items-center gap-2 border-b border-border-subtle bg-surface-elevated px-3 py-2">
         <button
           onClick={onClose}
-          className="rounded-md p-2 text-slate-300 hover:bg-white/5 md:hidden"
+          className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover md:hidden"
           aria-label="Volver"
         >
           ←
@@ -84,7 +84,7 @@ export function InboxDetail({
           <div className="truncate text-base font-semibold">
             {email.subject || "(sin asunto)"}
           </div>
-          <div className="truncate text-xs text-slate-400">
+          <div className="truncate text-xs text-fg-subtle">
             {email.sender_name ? `${email.sender_name} · ` : ""}
             {email.sender_email}
           </div>
@@ -105,18 +105,18 @@ export function InboxDetail({
         />
       </header>
 
-      <div className="flex flex-wrap gap-2 border-b border-white/5 bg-slate-900/40 px-3 py-2 text-xs">
+      <div className="flex flex-wrap gap-2 border-b border-border-subtle bg-surface-elevated/70 px-3 py-2 text-xs">
         <button
           onClick={onReference}
           disabled={busy !== null}
-          className="rounded-full bg-indigo-600 px-3 py-1 font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+          className="rounded-full bg-primary px-3 py-1 font-medium text-primary-fg hover:opacity-90 disabled:opacity-60"
         >
           Referenciar en chat
         </button>
         <button
           onClick={() => void wrap("chat", () => onStartChat(email.id))}
           disabled={busy !== null}
-          className="rounded-full bg-indigo-700/40 px-3 py-1 font-medium text-indigo-100 hover:bg-indigo-700/60 disabled:opacity-60"
+          className="rounded-full bg-primary/20 px-3 py-1 font-medium text-fg hover:bg-primary/30 disabled:opacity-60"
         >
           {busy === "chat" ? "Abriendo…" : "Iniciar chat sobre este correo"}
         </button>
@@ -133,18 +133,18 @@ export function InboxDetail({
           <button
             onClick={() => void wrap("suppress", () => onSuppress(email.id))}
             disabled={busy !== null}
-            className="rounded-full bg-slate-700/40 px-3 py-1 text-slate-200 hover:bg-slate-700/60 disabled:opacity-60"
+            className="rounded-full bg-surface-muted px-3 py-1 text-fg-muted hover:bg-surface-inset disabled:opacity-60"
           >
             {busy === "suppress" ? "…" : "Silenciar"}
           </button>
         ) : null}
-        <span className="ml-auto self-center text-[11px] text-slate-500">
+        <span className="ml-auto self-center text-[11px] text-fg-subtle">
           {new Date(email.received_at).toLocaleString("es-ES")}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-200">
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-fg">
           {email.body || email.snippet || ""}
         </pre>
       </div>

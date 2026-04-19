@@ -57,19 +57,19 @@ export function ChatComposer({
   }, [value, disabled, onSend, refs.refs]);
 
   return (
-    <div className="pb-safe border-t border-white/5 bg-slate-900 px-3 py-2">
+    <div className="pb-safe border-t border-border-subtle bg-surface-elevated px-3 py-2">
       {refs.refs.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-1">
           {refs.refs.map((r, idx) => (
             <button
               key={`${r.type}-${r.id}-${idx}`}
               onClick={() => refs.remove(idx)}
-              className="flex items-center gap-1 rounded-full bg-indigo-700/40 px-2 py-1 text-xs text-indigo-100 hover:bg-indigo-700/60"
+              className="flex items-center gap-1 rounded-full bg-primary/15 px-2 py-1 text-xs text-fg hover:bg-primary/25"
               title="Quitar referencia"
             >
               <span>{ENTITY_LABEL[r.type] ?? "•"}</span>
               <span className="max-w-[10rem] truncate">{r.label || `${r.type} #${r.id}`}</span>
-              <span className="text-indigo-300">×</span>
+              <span className="text-fg-subtle">×</span>
             </button>
           ))}
         </div>
@@ -88,12 +88,12 @@ export function ChatComposer({
           rows={1}
           disabled={disabled}
           placeholder="Escribe a tu mánager…"
-          className="min-h-[42px] flex-1 resize-none rounded-2xl border border-white/10 bg-slate-800 px-4 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+          className="min-h-[42px] flex-1 resize-none rounded-2xl border border-border bg-surface-muted px-4 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-ring/40"
         />
         <button
           onClick={submit}
           disabled={disabled || !value.trim()}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white transition disabled:bg-slate-700 disabled:text-slate-500"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-fg transition disabled:bg-surface-muted disabled:text-fg-subtle"
           aria-label="Enviar"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>

@@ -10,9 +10,9 @@ export type EmailFilter = "all" | "actionable" | "informational" | "noise";
 
 const TRIAGE_BADGE: Record<TriageCategory, { label: string; className: string }> = {
   actionable: { label: "Accionable", className: "bg-emerald-600/30 text-emerald-200" },
-  informational: { label: "Info", className: "bg-slate-600/40 text-slate-200" },
+  informational: { label: "Info", className: "bg-surface-muted text-fg-muted" },
   noise: { label: "Silenciado", className: "bg-rose-700/30 text-rose-200" },
-  unknown: { label: "Sin clasificar", className: "bg-slate-700/40 text-slate-300" }
+  unknown: { label: "Sin clasificar", className: "bg-surface-muted/90 text-fg-subtle" }
 };
 
 function relativeTime(iso: string): string {
@@ -52,14 +52,14 @@ export function InboxList({
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   if (loading && emails.length === 0) {
-    return <div className="p-4 text-sm text-slate-400">Cargando…</div>;
+    return <div className="p-4 text-sm text-fg-subtle">Cargando…</div>;
   }
   if (error) {
     return <div className="p-4 text-sm text-rose-300">{error}</div>;
   }
   if (emails.length === 0) {
     return (
-      <div className="p-6 text-center text-sm text-slate-500">
+      <div className="p-6 text-center text-sm text-fg-subtle">
         No hay correos en este filtro.
       </div>
     );
@@ -76,8 +76,8 @@ export function InboxList({
         return (
           <li key={email.id}>
             <div
-              className={`group/row relative flex items-stretch border-b border-white/5 transition ${
-                isActive ? "bg-indigo-600/10" : "hover:bg-white/5"
+              className={`group/row relative flex items-stretch border-b border-border-subtle transition ${
+                isActive ? "bg-primary/10" : "hover:bg-interactive-hover"
               }`}
             >
               <button
@@ -88,24 +88,24 @@ export function InboxList({
                 <div className="flex items-center gap-2">
                   <span
                     className={`h-2 w-2 shrink-0 rounded-full ${
-                      unread ? "bg-indigo-400" : "bg-transparent"
+                      unread ? "bg-primary" : "bg-transparent"
                     }`}
                     aria-label={unread ? "No leído" : "Leído"}
                   />
                   <span
                     className={`min-w-0 flex-1 truncate text-sm ${
-                      unread ? "font-semibold text-white" : "font-normal text-slate-300"
+                      unread ? "font-semibold text-fg" : "font-normal text-fg-muted"
                     }`}
                   >
                     {sender}
                   </span>
-                  <span className="shrink-0 text-[11px] text-slate-500">
+                  <span className="shrink-0 text-[11px] text-fg-subtle">
                     {relativeTime(email.received_at)}
                   </span>
                 </div>
                 <div
                   className={`truncate text-sm ${
-                    unread ? "text-slate-100" : "text-slate-400"
+                    unread ? "text-fg" : "text-fg-subtle"
                   }`}
                 >
                   {email.subject || "(sin asunto)"}
@@ -117,7 +117,7 @@ export function InboxList({
                   >
                     {badge.label}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+                  <span className="min-w-0 flex-1 truncate text-xs text-fg-subtle">
                     {email.snippet || ""}
                   </span>
                 </div>

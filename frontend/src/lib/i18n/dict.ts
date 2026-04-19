@@ -312,6 +312,13 @@ const en = {
   "language.option.en": "English",
   "language.option.es": "Spanish (Español)",
 
+  // ── Appearance / theme ───────────────────────────────────────────────────
+  "theme.sectionTitle": "Appearance",
+  "theme.intro": "Choose light or dark interface. Your choice is remembered on this device. More themes can be added later.",
+  "theme.label": "Theme",
+  "theme.option.dark": "Dark",
+  "theme.option.light": "Light",
+
   // ── Connectors ───────────────────────────────────────────────────────────
   "connectors.title": "External connectors",
   "connectors.intro":
@@ -743,6 +750,14 @@ const es: Record<keyof typeof en, string> = {
   "language.label": "Idioma de la interfaz",
   "language.option.en": "Inglés (English)",
   "language.option.es": "Español",
+
+  // ── Appearance / theme ───────────────────────────────────────────────────
+  "theme.sectionTitle": "Apariencia",
+  "theme.intro":
+    "Elige interfaz clara u oscura. Tu elección se recordará en este dispositivo. Se podrán añadir más temas más adelante.",
+  "theme.label": "Tema",
+  "theme.option.dark": "Oscuro",
+  "theme.option.light": "Claro",
 
   // ── Connectors ───────────────────────────────────────────────────────────
   "connectors.title": "Conectores externos",

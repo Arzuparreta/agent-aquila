@@ -216,7 +216,7 @@ export function InboxPage() {
   );
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-slate-950 text-slate-100">
+    <div className="flex h-screen w-screen flex-col bg-surface-base text-fg">
       <InboxTopBar />
       {status ? (
         <div
@@ -234,7 +234,7 @@ export function InboxPage() {
                 status.action?.onClick();
                 setStatus(null);
               }}
-              className="rounded border border-white/30 px-2 py-0.5 text-[11px] font-medium hover:bg-white/10"
+              className="rounded border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-interactive-hover-strong"
             >
               {status.action.label}
             </button>
@@ -242,7 +242,7 @@ export function InboxPage() {
           <button
             type="button"
             onClick={() => setStatus(null)}
-            className="rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-white"
+            className="rounded p-0.5 text-fg-muted hover:bg-interactive-hover-strong hover:text-fg"
             aria-label="Cerrar mensaje"
           >
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -253,7 +253,7 @@ export function InboxPage() {
       ) : null}
       <div className="flex min-h-0 flex-1">
         <section
-          className={`flex min-w-0 flex-1 flex-col border-r border-white/5 md:max-w-md ${
+          className={`flex min-w-0 flex-1 flex-col border-r border-border-subtle md:max-w-md ${
             activeId ? "hidden md:flex" : "flex"
           }`}
         >
@@ -295,7 +295,7 @@ export function InboxPage() {
               onStartChat={onStartChat}
             />
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+            <div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
               Selecciona un correo
             </div>
           )}
@@ -323,7 +323,7 @@ function FilterBar({
     { id: "all", label: "Todos" }
   ];
   return (
-    <div className="border-b border-white/5 bg-slate-900/60">
+    <div className="border-b border-border-subtle bg-surface-elevated/80">
       <div className="flex gap-1 overflow-x-auto px-2 py-2 text-xs">
         {chips.map((c) => (
           <button
@@ -331,20 +331,20 @@ function FilterBar({
             onClick={() => onFilterChange(c.id)}
             className={`shrink-0 rounded-full px-3 py-1 ${
               filter === c.id
-                ? "bg-indigo-600 text-white"
-                : "text-slate-300 hover:bg-white/5"
+                ? "bg-primary text-primary-fg"
+                : "text-fg-muted hover:bg-interactive-hover"
             }`}
           >
             {c.label}
           </button>
         ))}
       </div>
-      <label className="flex items-center gap-2 px-3 pb-2 text-xs text-slate-300">
+      <label className="flex items-center gap-2 px-3 pb-2 text-xs text-fg-muted">
         <input
           type="checkbox"
           checked={unreadOnly}
           onChange={(e) => onUnreadOnlyChange(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-slate-500 bg-slate-800"
+          className="h-3.5 w-3.5 rounded border-border bg-surface-muted"
         />
         Solo no leídos
       </label>

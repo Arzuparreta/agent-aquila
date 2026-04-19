@@ -40,7 +40,7 @@ export function MaintenanceSection() {
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-fg-subtle">
         Borra las conversaciones que se generaron automáticamente para correos
         entrantes (por ejemplo &ldquo;Mozilla&rdquo;, &ldquo;LinkedIn&rdquo;,
         &ldquo;Correo · X&rdquo;) en las que nunca llegaste a escribir nada.

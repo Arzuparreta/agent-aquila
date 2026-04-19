@@ -21,8 +21,8 @@ export function TestConnectionButton({ onTest, pending, result, disabled }: Test
         onClick={onTest}
         disabled={disabled || pending}
         className={cn(
-          "bg-slate-900 text-white hover:bg-slate-800",
-          (disabled || pending) && "cursor-not-allowed opacity-60 hover:bg-slate-900"
+          "border-primary bg-primary text-primary-fg hover:opacity-90",
+          (disabled || pending) && "cursor-not-allowed opacity-60 hover:opacity-60"
         )}
       >
         {pending ? (

@@ -85,18 +85,18 @@ export default function AutomationsPage() {
 
   return (
     <ProtectedPage>
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-        <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="min-h-screen bg-surface-base text-fg">
+        <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-surface-elevated px-4 py-3 shadow-sm">
           <Link
             href="/"
-            className="rounded-md px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+            className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-muted"
           >
             ← Volver al chat
           </Link>
           <h1 className="text-base font-semibold">Reglas aprendidas</h1>
         </header>
         <main className="mx-auto flex max-w-2xl flex-col gap-3 px-4 py-4">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-fg-muted">
             Tu mánager crea estas reglas automáticamente cuando le pides cosas como{" "}
             <em>“nunca contestes a este correo”</em> o{" "}
             <em>“avísame siempre que mencionen Madrid”</em>. Aquí puedes verlas, ajustarlas
@@ -113,7 +113,7 @@ export default function AutomationsPage() {
             <Card>Cargando…</Card>
           ) : rows.length === 0 ? (
             <Card>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-fg-muted">
                 Aún no hay reglas. Cuando hables con tu mánager y aparezca alguna pauta,
                 la verás aquí.
               </p>
@@ -124,7 +124,7 @@ export default function AutomationsPage() {
                 <div className="mb-2 flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold">{row.name}</div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                    <div className="text-[11px] uppercase tracking-wide text-fg-subtle">
                       {row.source === "agent" ? "Aprendida automáticamente" : "Creada por ti"}
                       {row.run_count > 0 ? ` · ejecutada ${row.run_count}×` : ""}
                     </div>
@@ -146,13 +146,13 @@ export default function AutomationsPage() {
                       value={editing.text}
                       onChange={(e) => setEditing({ id: row.id, text: e.target.value })}
                       rows={3}
-                      className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                      className="w-full rounded border border-border bg-surface-inset px-2 py-1 text-sm text-fg"
                     />
                     <div className="flex gap-2">
                       <Button
                         onClick={saveEdit}
                         disabled={busy}
-                        className="bg-slate-900 text-white hover:bg-slate-800"
+                        className="border-primary bg-primary text-primary-fg hover:opacity-90"
                       >
                         Guardar
                       </Button>
@@ -162,7 +162,7 @@ export default function AutomationsPage() {
                     </div>
                   </div>
                 ) : (
-                  <p className="whitespace-pre-wrap text-sm text-slate-700">
+                  <p className="whitespace-pre-wrap text-sm text-fg">
                     {row.instruction_natural_language ||
                       "(Sin descripción en lenguaje natural — borrar y recrear desde el chat para que tu mánager la explique)."}
                   </p>

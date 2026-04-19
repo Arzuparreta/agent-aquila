@@ -37,9 +37,9 @@ const TAB_ENTITY: Record<Tab, ChatEntityType> = {
 
 const TRIAGE_BADGE: Record<TriageCategory, { label: string; className: string }> = {
   actionable: { label: "Accionable", className: "bg-emerald-600/30 text-emerald-200" },
-  informational: { label: "Info", className: "bg-slate-600/40 text-slate-200" },
+  informational: { label: "Info", className: "bg-surface-muted text-fg-muted" },
   noise: { label: "Silenciado", className: "bg-rose-700/30 text-rose-200" },
-  unknown: { label: "Sin clasificar", className: "bg-slate-700/40 text-slate-300" }
+  unknown: { label: "Sin clasificar", className: "bg-surface-muted/90 text-fg-subtle" }
 };
 
 type RowsByTab = {
@@ -152,18 +152,18 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex">
-      <div className="ml-auto flex h-full w-full max-w-md flex-col bg-slate-950 shadow-2xl">
-        <header className="pt-safe flex items-center gap-2 border-b border-white/10 px-3 py-2">
+      <div className="ml-auto flex h-full w-full max-w-md flex-col bg-surface-base text-fg shadow-2xl">
+        <header className="pt-safe flex items-center gap-2 border-b border-border px-3 py-2">
           <button
             onClick={onClose}
-            className="rounded-md p-2 text-slate-300 hover:bg-white/5"
+            className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover"
             aria-label="Cerrar"
           >
             ✕
           </button>
           <h2 className="flex-1 text-base font-semibold">Biblioteca</h2>
           {tab === "files" ? (
-            <label className="cursor-pointer rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500">
+            <label className="cursor-pointer rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-fg hover:opacity-90">
               Subir
               <input
                 type="file"
@@ -177,13 +177,13 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
             </label>
           ) : null}
         </header>
-        <nav className="flex gap-1 overflow-x-auto border-b border-white/5 px-2 py-2 text-sm">
+        <nav className="flex gap-1 overflow-x-auto border-b border-border-subtle px-2 py-2 text-sm">
           {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`shrink-0 rounded-full px-3 py-1 ${
-                t === tab ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-white/5"
+                t === tab ? "bg-primary text-primary-fg" : "text-fg-muted hover:bg-interactive-hover"
               }`}
             >
               {TAB_LABELS[t]}
@@ -191,7 +191,7 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
           ))}
         </nav>
         {tab === "emails" ? (
-          <div className="flex gap-1 overflow-x-auto border-b border-white/5 bg-slate-900/60 px-2 py-1 text-xs">
+          <div className="flex gap-1 overflow-x-auto border-b border-border-subtle bg-surface-elevated/80 px-2 py-1 text-xs">
             {(["actionable", "informational", "noise", "all"] as EmailFilter[]).map((f) => (
               <button
                 key={f}
@@ -200,7 +200,7 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
                   void fetchTab("emails", f);
                 }}
                 className={`shrink-0 rounded-full px-2 py-1 ${
-                  emailFilter === f ? "bg-indigo-500/30 text-white" : "text-slate-400 hover:bg-white/5"
+                  emailFilter === f ? "bg-primary/25 text-fg" : "text-fg-subtle hover:bg-interactive-hover"
                 }`}
               >
                 {f === "all" ? "Todos" : TRIAGE_BADGE[f as TriageCategory].label}
@@ -209,7 +209,7 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
         <div className="scroll-stealth min-h-0 flex-1 overflow-y-auto p-2">
-          {loading ? <div className="p-3 text-sm text-slate-400">Cargando…</div> : null}
+          {loading ? <div className="p-3 text-sm text-fg-subtle">Cargando…</div> : null}
           {error ? <div className="p-3 text-sm text-rose-300">{error}</div> : null}
           <LibraryRows
             tab={tab}
@@ -219,13 +219,13 @@ export function LibraryDrawer({ onClose }: { onClose: () => void }) {
             onSuppressEmail={suppressEmail}
           />
         </div>
-        <footer className="pb-safe border-t border-white/5 px-3 py-2 text-center text-[11px] text-slate-500">
+        <footer className="pb-safe border-t border-border-subtle px-3 py-2 text-center text-[11px] text-fg-subtle">
           Toca un elemento para mencionarlo en la conversación.
         </footer>
       </div>
       <button
         onClick={onClose}
-        className="flex-1 bg-black/40"
+        className="flex-1 bg-scrim"
         aria-label="Cerrar fondo"
       />
     </div>
@@ -250,7 +250,7 @@ function LibraryRows({
   if (tab === "emails") {
     if (data.emails.length === 0) {
       return (
-        <div className="p-4 text-center text-sm text-slate-500">No hay nada todavía aquí.</div>
+        <div className="p-4 text-center text-sm text-fg-subtle">No hay nada todavía aquí.</div>
       );
     }
     return (
@@ -260,10 +260,10 @@ function LibraryRows({
           const badge = TRIAGE_BADGE[cat] ?? TRIAGE_BADGE.unknown;
           const isNoise = cat === "noise" || cat === "informational";
           return (
-            <li key={`emails-${e.id}`} className="rounded-md bg-slate-900">
+            <li key={`emails-${e.id}`} className="rounded-md bg-surface-elevated">
               <button
                 onClick={() => onPick(entity_type, e.id, e.subject || "(sin asunto)")}
-                className="flex w-full flex-col items-start gap-0.5 rounded-t-md px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800"
+                className="flex w-full flex-col items-start gap-0.5 rounded-t-md px-3 py-2 text-left text-sm text-fg hover:bg-surface-muted"
               >
                 <span className="flex w-full items-center gap-2">
                   <span className="min-w-0 flex-1 truncate font-medium">
@@ -276,11 +276,11 @@ function LibraryRows({
                     {badge.label}
                   </span>
                 </span>
-                <span className="truncate text-xs text-slate-400">
+                <span className="truncate text-xs text-fg-subtle">
                   {e.sender_name || e.sender_email}
                 </span>
               </button>
-              <div className="flex gap-2 border-t border-white/5 px-3 py-1 text-xs">
+              <div className="flex gap-2 border-t border-border-subtle px-3 py-1 text-xs">
                 {isNoise ? (
                   <button
                     onClick={() => void onPromoteEmail(e.id)}
@@ -292,7 +292,7 @@ function LibraryRows({
                 {cat !== "noise" ? (
                   <button
                     onClick={() => void onSuppressEmail(e.id)}
-                    className="rounded-full bg-slate-700/40 px-2 py-0.5 text-slate-200 hover:bg-slate-700/60"
+                    className="rounded-full bg-surface-muted px-2 py-0.5 text-fg-muted hover:bg-surface-inset"
                   >
                     Silenciar
                   </button>
@@ -338,7 +338,7 @@ function LibraryRows({
 
   if (rows.length === 0) {
     return (
-      <div className="p-4 text-center text-sm text-slate-500">No hay nada todavía aquí.</div>
+      <div className="p-4 text-center text-sm text-fg-subtle">No hay nada todavía aquí.</div>
     );
   }
   return (
@@ -347,10 +347,10 @@ function LibraryRows({
         <li key={`${tab}-${r.id}`}>
           <button
             onClick={() => onPick(entity_type, r.id, r.label)}
-            className="flex w-full flex-col items-start gap-0.5 rounded-md bg-slate-900 px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-800"
+            className="flex w-full flex-col items-start gap-0.5 rounded-md bg-surface-elevated px-3 py-2 text-left text-sm text-fg hover:bg-surface-muted"
           >
             <span className="truncate font-medium">{r.label}</span>
-            {r.sub ? <span className="truncate text-xs text-slate-400">{r.sub}</span> : null}
+            {r.sub ? <span className="truncate text-xs text-fg-subtle">{r.sub}</span> : null}
           </button>
         </li>
       ))}

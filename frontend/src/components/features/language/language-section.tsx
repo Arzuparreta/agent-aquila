@@ -1,6 +1,5 @@
 "use client";
 
-import { Card } from "@/components/ui/card";
 import { SUPPORTED_LOCALES, useTranslation, type Locale, type TranslationKey } from "@/lib/i18n";
 
 const OPTIONS: { value: Locale; labelKey: TranslationKey }[] = [
@@ -16,17 +15,16 @@ export function LanguageSection() {
   const { t, locale, setLocale } = useTranslation();
 
   return (
-    <Card className="mb-4 p-5">
-      <h2 className="text-lg font-semibold text-slate-900">{t("language.sectionTitle")}</h2>
-      <p className="mt-1 text-sm text-slate-600">{t("language.intro")}</p>
+    <>
+      <p className="mt-1 text-sm text-fg-muted">{t("language.intro")}</p>
 
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <label htmlFor="language-select" className="text-sm font-medium text-slate-800 sm:min-w-[160px]">
+        <label htmlFor="language-select" className="text-sm font-medium text-fg sm:min-w-[160px]">
           {t("language.label")}
         </label>
         <select
           id="language-select"
-          className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm sm:w-auto"
+          className="w-full rounded-md border border-border bg-surface-inset px-3 py-2 text-sm text-fg sm:w-auto"
           value={locale}
           onChange={(event) => setLocale(event.target.value as Locale)}
         >
@@ -37,6 +35,6 @@ export function LanguageSection() {
           ))}
         </select>
       </div>
-    </Card>
+    </>
   );
 }

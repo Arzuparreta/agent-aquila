@@ -1,10 +1,11 @@
+/**
+ * Theme tokens: each [data-theme="…"] block defines the same variable names.
+ * To add a theme: extend ThemeId in lib/theme/types.ts, add a matching block
+ * here, and append to THEMES in the same file.
+ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-:root {
-  color-scheme: dark;
-}
 
 html,
 body,
@@ -12,10 +13,50 @@ body,
   height: 100%;
 }
 
+[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-base: #09090b;
+  --surface-elevated: #18181b;
+  --surface-muted: #27272a;
+  --surface-inset: #3f3f46;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --border-default: #3f3f46;
+  --border-subtle: rgb(255 255 255 / 0.08);
+  --primary: #e4e4e7;
+  --primary-fg: #18181b;
+  --ring: #a1a1aa;
+  --overlay-scrim: rgb(0 0 0 / 0.55);
+  --meta-theme-color: #09090b;
+  --interactive-hover: rgb(255 255 255 / 0.05);
+  --interactive-hover-strong: rgb(255 255 255 / 0.1);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --surface-base: #fafafa;
+  --surface-elevated: #ffffff;
+  --surface-muted: #f4f4f5;
+  --surface-inset: #ffffff;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #71717a;
+  --border-default: #e4e4e7;
+  --border-subtle: rgb(0 0 0 / 0.08);
+  --primary: #27272a;
+  --primary-fg: #fafafa;
+  --ring: #71717a;
+  --overlay-scrim: rgb(0 0 0 / 0.35);
+  --meta-theme-color: #fafafa;
+  --interactive-hover: rgb(0 0 0 / 0.06);
+  --interactive-hover-strong: rgb(0 0 0 / 0.1);
+}
+
 body {
   margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--surface-base);
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     "Noto Sans", sans-serif;
   -webkit-font-smoothing: antialiased;

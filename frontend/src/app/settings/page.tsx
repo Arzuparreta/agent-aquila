@@ -13,9 +13,11 @@ import { useSettingsForm } from "@/components/features/ai-settings/use-settings-
 import { ConnectorsSection } from "@/components/features/connectors/connectors-section";
 import { LanguageSection } from "@/components/features/language/language-section";
 import { MaintenanceSection } from "@/components/features/maintenance/maintenance-section";
+import { ThemeSection } from "@/components/features/theme/theme-section";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
+import { useTranslation } from "@/lib/i18n";
 
 /**
  * Technical / advanced settings.
@@ -26,6 +28,7 @@ import { useProviderRegistry } from "@/lib/ai-providers";
  * just rearranged to be much less visually busy than the previous tabs page.
  */
 export default function SettingsPage() {
+  const { t } = useTranslation();
   const { providers, loading: providersLoading } = useProviderRegistry();
   const form = useSettingsForm({ providers, providersLoading });
   const [savedToast, setSavedToast] = useState<string | null>(null);
@@ -38,11 +41,11 @@ export default function SettingsPage() {
 
   return (
     <ProtectedPage>
-      <div className="min-h-screen bg-slate-50 text-slate-900">
-        <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="min-h-screen bg-surface-base text-fg">
+        <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-surface-elevated px-4 py-3 shadow-sm">
           <Link
             href="/"
-            className="rounded-md px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+            className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-muted"
           >
             ← Volver al chat
           </Link>
@@ -51,7 +54,7 @@ export default function SettingsPage() {
         <main className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-4">
           <Card>
             <h2 className="mb-1 text-base font-semibold">Modelo de IA</h2>
-            <p className="mb-3 text-xs text-slate-500">
+            <p className="mb-3 text-xs text-fg-subtle">
               Trae tu propia clave (BYOK). Puedes elegir un modelo distinto para cada tarea.
             </p>
             <div className="grid gap-3">
@@ -108,7 +111,7 @@ export default function SettingsPage() {
                       models={form.models}
                       loading={form.loadingModels}
                     />
-                    <label className="mt-2 flex items-center gap-2 text-sm">
+                    <label className="mt-2 flex items-center gap-2 text-sm text-fg">
                       <input
                         type="checkbox"
                         checked={form.form.aiDisabled}
@@ -127,25 +130,30 @@ export default function SettingsPage() {
               <div className="mt-2 flex items-center gap-3">
                 <Button
                   onClick={onSave}
-                  className="bg-slate-900 text-white hover:bg-slate-800"
+                  className="border-primary bg-primary text-primary-fg hover:opacity-90"
                 >
                   Guardar
                 </Button>
                 {savedToast ? (
-                  <span className="text-sm text-emerald-700">{savedToast}</span>
+                  <span className="text-sm text-emerald-600">{savedToast}</span>
                 ) : null}
               </div>
             </div>
           </Card>
 
           <Card>
-            <h2 className="mb-1 text-base font-semibold">Idioma</h2>
+            <h2 className="mb-1 text-base font-semibold">{t("theme.sectionTitle")}</h2>
+            <ThemeSection />
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold">{t("language.sectionTitle")}</h2>
             <LanguageSection />
           </Card>
 
           <Card>
             <h2 className="mb-1 text-base font-semibold">Conectores</h2>
-            <p className="mb-3 text-xs text-slate-500">
+            <p className="mb-3 text-xs text-fg-subtle">
               Casi siempre tu mánager te guiará para conectar Gmail, Outlook o Google Drive
               desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.
             </p>

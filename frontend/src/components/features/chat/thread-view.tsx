@@ -90,14 +90,14 @@ export function ChatThreadView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div ref={scrollerRef} className="scroll-stealth min-h-0 flex-1 overflow-y-auto px-3 py-4">
-        {loading ? <div className="text-center text-sm text-slate-400">Cargando…</div> : null}
+        {loading ? <div className="text-center text-sm text-fg-subtle">Cargando…</div> : null}
         {error ? (
           <div className="mx-auto mb-3 max-w-md rounded-md bg-rose-900/40 px-3 py-2 text-sm text-rose-100">
             {error}
           </div>
         ) : null}
         {!loading && messages.length === 0 ? (
-          <div className="mx-auto mt-12 max-w-sm text-center text-sm text-slate-400">
+          <div className="mx-auto mt-12 max-w-sm text-center text-sm text-fg-subtle">
             Hola. Cuéntame qué necesitas y me encargo. También puedo avisarte cuando llegue
             algo importante (correos, eventos, propuestas).
           </div>
@@ -107,7 +107,7 @@ export function ChatThreadView({
             <MessageBubble key={m.id} message={m} onMessageUpdate={updateMessage} />
           ))}
           {sending ? (
-            <div className="self-start rounded-2xl bg-slate-800 px-4 py-2 text-sm text-slate-300">
+            <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-sm text-fg-muted">
               Pensando…
             </div>
           ) : null}

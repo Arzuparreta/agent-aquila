@@ -25,7 +25,7 @@ export function MessageBubble({
 
   if (isEvent) {
     return (
-      <div className="mx-auto max-w-md rounded-md bg-slate-800/60 px-3 py-2 text-center text-xs text-slate-300">
+      <div className="mx-auto max-w-md rounded-md bg-surface-muted/80 px-3 py-2 text-center text-xs text-fg-muted">
         <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
       </div>
     );
@@ -38,10 +38,10 @@ export function MessageBubble({
           <div
             className={`rounded-2xl px-4 py-2 text-sm shadow-sm ${
               isUser
-                ? "bg-indigo-600 text-white"
+                ? "bg-primary text-primary-fg"
                 : isSystem
                 ? "bg-rose-900/40 text-rose-100"
-                : "bg-slate-800 text-slate-100"
+                : "bg-surface-muted text-fg"
             }`}
           >
             <pre className="whitespace-pre-wrap break-words font-sans">{message.content}</pre>
@@ -54,7 +54,7 @@ export function MessageBubble({
             onAfterAction={(patch) => onMessageUpdate({ ...message, ...patch })}
           />
         ))}
-        <div className={`text-[10px] text-slate-500 ${isUser ? "text-right" : "text-left"}`}>
+        <div className={`text-[10px] text-fg-subtle ${isUser ? "text-right" : "text-left"}`}>
           {formatTime(message.created_at)}
         </div>
       </div>

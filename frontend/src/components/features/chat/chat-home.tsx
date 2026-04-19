@@ -218,7 +218,7 @@ export function ChatHome() {
     Notification.permission === "default";
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-slate-950 text-slate-100">
+    <div className="flex h-screen w-screen flex-col bg-surface-base text-fg">
       <ChatTopBar
         title={activeThread?.title ?? "Mánager"}
         activeThread={activeThread}
@@ -244,7 +244,7 @@ export function ChatHome() {
                 statusMessage.action?.onClick();
                 setStatusMessage(null);
               }}
-              className="rounded border border-white/30 px-2 py-0.5 text-[11px] font-medium hover:bg-white/10"
+              className="rounded border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-interactive-hover-strong"
             >
               {statusMessage.action.label}
             </button>
@@ -252,7 +252,7 @@ export function ChatHome() {
           <button
             type="button"
             onClick={() => setStatusMessage(null)}
-            className="rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-white"
+            className="rounded p-0.5 text-fg-muted hover:bg-interactive-hover-strong hover:text-fg"
             aria-label="Cerrar mensaje"
           >
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5}>
@@ -264,7 +264,7 @@ export function ChatHome() {
       {showPushBanner ? (
         <button
           onClick={push.enable}
-          className="bg-indigo-600/90 px-4 py-2 text-center text-sm font-medium text-white"
+          className="bg-primary px-4 py-2 text-center text-sm font-medium text-primary-fg opacity-95 hover:opacity-100"
         >
           Activar notificaciones para enterarte al instante
         </button>
@@ -276,7 +276,7 @@ export function ChatHome() {
       ) : null}
       <div className="flex min-h-0 flex-1">
         {/* Permanent rail on desktop */}
-        <aside className="hidden w-72 shrink-0 border-r border-white/5 bg-slate-900 md:flex md:flex-col">
+        <aside className="hidden w-72 shrink-0 border-r border-border-subtle bg-surface-elevated md:flex md:flex-col">
           <ArchiveTabs
             showArchived={showArchived}
             onChange={(next) => {
@@ -303,7 +303,7 @@ export function ChatHome() {
         {/* Mobile drawer */}
         {drawerOpen ? (
           <div className="absolute inset-0 z-30 flex md:hidden">
-            <div className="flex w-72 max-w-[80vw] flex-col bg-slate-900 shadow-xl">
+            <div className="flex w-72 max-w-[80vw] flex-col bg-surface-elevated shadow-xl">
               <ArchiveTabs
                 showArchived={showArchived}
                 onChange={(next) => {
@@ -329,7 +329,7 @@ export function ChatHome() {
             </div>
             <button
               onClick={() => setDrawerOpen(false)}
-              className="flex-1 bg-black/60"
+              className="flex-1 bg-scrim"
               aria-label="Cerrar menú"
             />
           </div>
@@ -342,7 +342,7 @@ export function ChatHome() {
               onThreadUpdated={onThreadUpdated}
             />
           ) : (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-slate-400">
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-fg-subtle">
               {loading
                 ? "Cargando…"
                 : "No hay conversaciones todavía. Empieza escribiendo cualquier cosa."}
@@ -370,10 +370,10 @@ function ArchiveTabs({
 }) {
   const tabClass = (active: boolean) =>
     `flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition ${
-      active ? "border-b-2 border-indigo-500 text-white" : "text-slate-400 hover:text-slate-200"
+      active ? "border-b-2 border-primary text-fg" : "text-fg-subtle hover:text-fg-muted"
     }`;
   return (
-    <div className="flex border-b border-white/5">
+    <div className="flex border-b border-border-subtle">
       <button onClick={() => onChange(false)} className={tabClass(!showArchived)}>
         Activas
       </button>

@@ -41,7 +41,7 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
         : field.placeholder || "sk-...";
       return (
         <div key={field.key} className="grid gap-1">
-          <label htmlFor={id} className="text-sm font-medium text-slate-800">
+          <label htmlFor={id} className="text-sm font-medium text-fg">
             {field.label}
             {required && !storedApiKey ? <span className="ml-1 text-red-600">*</span> : null}
           </label>
@@ -55,7 +55,7 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
             aria-describedby={helpId}
           />
           {field.help ? (
-            <p id={helpId} className="text-xs text-slate-500">
+            <p id={helpId} className="text-xs text-fg-subtle">
               {field.help}
             </p>
           ) : null}
@@ -66,7 +66,7 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
     if (field.key === "base_url") {
       return (
         <div key={field.key} className="grid gap-1">
-          <label htmlFor={id} className="text-sm font-medium text-slate-800">
+          <label htmlFor={id} className="text-sm font-medium text-fg">
             {field.label}
             {required ? <span className="ml-1 text-red-600">*</span> : null}
           </label>
@@ -80,7 +80,7 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
             aria-describedby={helpId}
           />
           {field.help ? (
-            <p id={helpId} className="text-xs text-slate-500">
+            <p id={helpId} className="text-xs text-fg-subtle">
               {field.help}
             </p>
           ) : null}
@@ -91,7 +91,7 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
     const extraValue = value.extras[field.key] ?? "";
     return (
       <div key={field.key} className="grid gap-1">
-        <label htmlFor={id} className="text-sm font-medium text-slate-800">
+        <label htmlFor={id} className="text-sm font-medium text-fg">
           {field.label}
           {required ? <span className="ml-1 text-red-600">*</span> : null}
         </label>
@@ -104,7 +104,7 @@ export function ProviderFields({ provider, value, storedApiKey, onChange, idPref
           aria-describedby={helpId}
         />
         {field.help ? (
-          <p id={helpId} className="text-xs text-slate-500">
+          <p id={helpId} className="text-xs text-fg-subtle">
             {field.help}
           </p>
         ) : null}

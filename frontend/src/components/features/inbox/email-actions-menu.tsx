@@ -45,7 +45,7 @@ export function EmailActionsMenu({
     <button
       type="button"
       aria-label="Acciones del correo"
-      className={`rounded-md ${triggerSize} text-slate-400 hover:bg-white/10 hover:text-slate-100`}
+      className={`rounded-md ${triggerSize} text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg`}
       onClick={(e) => e.stopPropagation()}
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>

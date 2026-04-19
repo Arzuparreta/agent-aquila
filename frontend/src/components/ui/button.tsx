@@ -8,7 +8,10 @@ export function Button({
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
-      className={cn("rounded border px-3 py-2 text-sm font-medium hover:bg-slate-100", className)}
+      className={cn(
+        "rounded border border-border bg-surface-elevated px-3 py-2 text-sm font-medium text-fg hover:bg-surface-muted",
+        className
+      )}
       {...props}
     />
   );

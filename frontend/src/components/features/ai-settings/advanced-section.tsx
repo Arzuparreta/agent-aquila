@@ -21,14 +21,14 @@ export function AdvancedSection({ children, defaultOpen = false, summary }: Adva
   const [open, setOpen] = useState(defaultOpen);
   const label = summary ?? t("advanced.summary");
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50/50">
+    <div className="rounded-md border border-border bg-surface-muted/50">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100",
-          open && "border-b border-slate-200"
+          "flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted",
+          open && "border-b border-border"
         )}
       >
         <span>{label}</span>

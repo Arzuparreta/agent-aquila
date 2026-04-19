@@ -194,9 +194,9 @@ export function Combobox<T extends string>({
         onClick={() => setOpen(true)}
         onKeyDown={onKeyDown}
         className={cn(
-          "w-full rounded border border-slate-300 bg-white px-3 py-2 pr-8 text-sm",
-          "focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500",
-          disabled && "cursor-not-allowed bg-slate-100 text-slate-500"
+          "w-full rounded border border-border bg-surface-inset px-3 py-2 pr-8 text-sm text-fg",
+          "focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring",
+          disabled && "cursor-not-allowed bg-surface-muted text-fg-subtle"
         )}
       />
       <button
@@ -210,7 +210,7 @@ export function Combobox<T extends string>({
             inputRef.current?.focus();
           }
         }}
-        className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-slate-400 hover:text-slate-600"
+        className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-fg-subtle hover:text-fg-muted"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -221,10 +221,10 @@ export function Combobox<T extends string>({
           ref={listRef}
           role="listbox"
           id={listboxId}
-          className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
+          className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border bg-surface-elevated py-1 text-sm text-fg shadow-lg"
         >
           {filtered.length === 0 ? (
-            <li className="px-3 py-2 text-slate-500">
+            <li className="px-3 py-2 text-fg-subtle">
               {allowCustom && query.trim() ? (
                 <span>
                   Press Enter to use <strong>{query.trim()}</strong>
@@ -251,9 +251,9 @@ export function Combobox<T extends string>({
                   onMouseEnter={() => setHighlight(index)}
                   className={cn(
                     "cursor-pointer px-3 py-2",
-                    option.disabled && "cursor-not-allowed text-slate-400",
-                    !option.disabled && active && "bg-slate-100",
-                    !option.disabled && !active && "hover:bg-slate-50"
+                    option.disabled && "cursor-not-allowed text-fg-subtle",
+                    !option.disabled && active && "bg-surface-muted",
+                    !option.disabled && !active && "hover:bg-interactive-hover"
                   )}
                 >
                   {renderOption ? (
@@ -261,10 +261,16 @@ export function Combobox<T extends string>({
                   ) : (
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className={cn("truncate font-medium", selected && "text-slate-900")}>{option.label}</div>
-                        {option.description ? <div className="truncate text-xs text-slate-500">{option.description}</div> : null}
+                        <div className={cn("truncate font-medium", selected && "text-fg")}>{option.label}</div>
+                        {option.description ? (
+                          <div className="truncate text-xs text-fg-subtle">{option.description}</div>
+                        ) : null}
                       </div>
-                      {option.badge ? <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{option.badge}</span> : null}
+                      {option.badge ? (
+                        <span className="shrink-0 rounded bg-surface-muted px-2 py-0.5 text-xs text-fg-muted">
+                          {option.badge}
+                        </span>
+                      ) : null}
                     </div>
                   )}
                 </li>

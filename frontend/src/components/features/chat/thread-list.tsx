@@ -64,13 +64,13 @@ export function ChatThreadList({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-white/5 px-3 py-3">
-        <div className="flex-1 text-sm font-semibold uppercase tracking-wide text-slate-400">
+      <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-3">
+        <div className="flex-1 text-sm font-semibold uppercase tracking-wide text-fg-subtle">
           Conversaciones
         </div>
         <button
           onClick={startNewThread}
-          className="rounded-md p-1 text-slate-300 hover:bg-white/5"
+          className="rounded-md p-1 text-fg-muted hover:bg-interactive-hover"
           aria-label="Nueva conversación"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -79,7 +79,7 @@ export function ChatThreadList({
         </button>
       </div>
       <div className="scroll-stealth min-h-0 flex-1 overflow-y-auto">
-        {loading ? <div className="px-4 py-3 text-sm text-slate-400">Cargando…</div> : null}
+        {loading ? <div className="px-4 py-3 text-sm text-fg-subtle">Cargando…</div> : null}
         {error ? <div className="px-4 py-3 text-sm text-rose-300">{error}</div> : null}
         <ul>
           {threads.map((t) => {
@@ -90,7 +90,7 @@ export function ChatThreadList({
               <li key={t.id}>
                 <div
                   className={`group/row relative flex w-full items-center gap-3 px-3 py-3 transition ${
-                    active ? "bg-indigo-600/20 text-white" : "text-slate-200 hover:bg-white/5"
+                    active ? "bg-primary/20 text-fg" : "text-fg hover:bg-interactive-hover"
                   }`}
                 >
                   <button
@@ -104,13 +104,15 @@ export function ChatThreadList({
                         <span className="truncate text-sm font-medium">{t.title}</span>
                         {t.pinned ? <span className="text-xs text-amber-300">★</span> : null}
                       </span>
-                      <span className="block truncate text-xs text-slate-400">
+                      <span className="block truncate text-xs text-fg-subtle">
                         {t.kind === "entity" ? `${t.entity_type} · ` : ""}
                         {timeShort(t.last_message_at)}
                       </span>
                     </span>
                     {t.unread > 0 ? (
-                      <span className="shrink-0 rounded-full bg-indigo-500 px-2 py-0.5 text-xs">{t.unread}</span>
+                      <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-fg">
+                        {t.unread}
+                      </span>
                     ) : null}
                   </button>
                   {/* Fixed width so the title `truncate` ellipsis ends left of the ⋯ control.
@@ -137,7 +139,7 @@ export function ChatThreadList({
       </div>
       <button
         onClick={() => setLibraryOpen(true)}
-        className="border-t border-white/5 px-3 py-3 text-left text-sm text-slate-300 hover:bg-white/5"
+        className="border-t border-border-subtle px-3 py-3 text-left text-sm text-fg-muted hover:bg-interactive-hover"
       >
         📚 Biblioteca · contactos, eventos, archivos…
       </button>

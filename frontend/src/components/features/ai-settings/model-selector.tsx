@@ -61,7 +61,7 @@ export function ModelSelector({
 
   return (
     <div className="grid gap-1">
-      <label htmlFor={reactId} className="text-sm font-medium text-slate-800">
+      <label htmlFor={reactId} className="text-sm font-medium text-fg">
         {label}
         {required ? <span className="ml-1 text-red-600">*</span> : null}
       </label>
@@ -76,7 +76,7 @@ export function ModelSelector({
         ariaDescribedBy={helpId}
       />
       {helpText ? (
-        <p id={helpId} className={cn("text-xs text-slate-500")}>
+        <p id={helpId} className={cn("text-xs text-fg-subtle")}>
           {helpText}
         </p>
       ) : null}

@@ -55,10 +55,10 @@ export function ChatTopBar({
   }, []);
 
   return (
-    <header className="relative z-10 pt-safe flex items-center gap-2 border-b border-white/5 bg-slate-900 px-3 py-2">
+    <header className="relative z-10 pt-safe flex items-center gap-2 border-b border-border-subtle bg-surface-elevated px-3 py-2">
       <button
         onClick={onOpenDrawer}
-        className="rounded-md p-2 text-slate-300 hover:bg-white/5 md:hidden"
+        className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover md:hidden"
         aria-label="Abrir conversaciones"
       >
         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -78,7 +78,7 @@ export function ChatTopBar({
       ) : null}
       <Link
         href="/inbox"
-        className="relative rounded-md p-2 text-slate-300 hover:bg-white/5"
+        className="relative rounded-md p-2 text-fg-muted hover:bg-interactive-hover"
         aria-label="Bandeja"
         title="Bandeja"
       >
@@ -101,7 +101,7 @@ export function ChatTopBar({
       <div className="relative">
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="rounded-md p-2 text-slate-300 hover:bg-white/5"
+          className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover"
           aria-label="Menú"
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -112,19 +112,19 @@ export function ChatTopBar({
         </button>
         {menuOpen ? (
           <div
-            className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-lg border border-white/10 bg-slate-900 py-1 text-sm shadow-xl"
+            className="absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden rounded-lg border border-border bg-surface-elevated py-1 text-sm text-fg shadow-xl"
             onMouseLeave={() => setMenuOpen(false)}
           >
             <Link
               href="/settings"
-              className="block px-3 py-2 hover:bg-white/5"
+              className="block px-3 py-2 hover:bg-interactive-hover"
               onClick={() => setMenuOpen(false)}
             >
               Ajustes técnicos (avanzado)
             </Link>
             <Link
               href="/automations"
-              className="block px-3 py-2 hover:bg-white/5"
+              className="block px-3 py-2 hover:bg-interactive-hover"
               onClick={() => setMenuOpen(false)}
             >
               Reglas aprendidas
@@ -134,7 +134,7 @@ export function ChatTopBar({
                 setMenuOpen(false);
                 logout();
               }}
-              className="block w-full px-3 py-2 text-left text-rose-300 hover:bg-white/5"
+              className="block w-full px-3 py-2 text-left text-rose-600 hover:bg-interactive-hover"
             >
               Cerrar sesión
             </button>

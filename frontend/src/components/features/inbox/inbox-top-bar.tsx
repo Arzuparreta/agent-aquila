@@ -8,10 +8,10 @@ import Link from "next/link";
  */
 export function InboxTopBar() {
   return (
-    <header className="pt-safe flex items-center gap-2 border-b border-white/5 bg-slate-900 px-3 py-2">
+    <header className="pt-safe flex items-center gap-2 border-b border-border-subtle bg-surface-elevated px-3 py-2">
       <Link
         href="/"
-        className="rounded-md px-2 py-1 text-sm text-slate-300 hover:bg-white/5"
+        className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-interactive-hover"
         aria-label="Volver al chat"
       >
         ← Chat

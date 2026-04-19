@@ -329,8 +329,8 @@ export function ConnectorsSection() {
 
   return (
     <Card className="mt-8 p-5">
-      <h2 className="text-lg font-semibold text-slate-900">{t("connectors.title")}</h2>
-      <p className="mt-1 text-sm text-slate-600">{t("connectors.intro")}</p>
+      <h2 className="text-lg font-semibold text-fg">{t("connectors.title")}</h2>
+      <p className="mt-1 text-sm text-fg-muted">{t("connectors.intro")}</p>
       {error ? (
         <div className="mt-3">
           <AlertBanner variant="error" message={error} onDismiss={() => setError(null)} />
@@ -343,11 +343,11 @@ export function ConnectorsSection() {
       ) : null}
 
       <div className="mt-4 rounded-md border border-sky-200 bg-sky-50/60 p-4">
-        <h3 className="text-sm font-semibold text-slate-900">{t("connectors.publicUrlTitle")}</h3>
-        <p className="mt-1 text-xs text-slate-600">
+        <h3 className="text-sm font-semibold text-fg">{t("connectors.publicUrlTitle")}</h3>
+        <p className="mt-1 text-xs text-fg-muted">
           <RichText text={t("connectors.publicUrlIntro")} />
         </p>
-        <label className="mt-2 block text-xs font-medium text-slate-800">
+        <label className="mt-2 block text-xs font-medium text-fg">
           {t("connectors.publicUrlLabel")}
           <Input
             className="mt-1 font-mono text-xs"
@@ -357,27 +357,27 @@ export function ConnectorsSection() {
             autoComplete="off"
           />
         </label>
-        <p className="mt-2 text-xs text-slate-500">{t("connectors.publicUrlHelp")}</p>
+        <p className="mt-2 text-xs text-fg-subtle">{t("connectors.publicUrlHelp")}</p>
       </div>
 
-      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
         <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-semibold text-slate-900">{t("connectors.google.title")}</h3>
-          <p className="text-xs text-slate-600">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.google.title")}</h3>
+          <p className="text-xs text-fg-muted">
             <RichText text={t("connectors.google.intro")} />
           </p>
         </div>
 
         <form
-          className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3"
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
           onSubmit={(e) => void saveGoogleAppSetup(e)}
         >
-          <p className="text-xs font-medium text-slate-800">{t("connectors.google.step1")}</p>
-          <ol className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
+          <p className="text-xs font-medium text-fg">{t("connectors.google.step1")}</p>
+          <ol className="list-decimal space-y-1 pl-4 text-xs text-fg-muted">
             <li>
               {t("connectors.google.step1.line1Pre")}
               <a
-                className="font-medium text-slate-900 underline underline-offset-2"
+                className="font-medium text-fg underline underline-offset-2"
                 href="https://console.cloud.google.com/apis/credentials"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -388,7 +388,7 @@ export function ConnectorsSection() {
             </li>
             <li>
               <RichText text={t("connectors.google.step1.line2")} />
-              <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
+              <code className="mt-1 block break-all rounded bg-surface-muted px-2 py-1 font-mono text-[11px] text-fg">
                 {googleRedirect}
               </code>
             </li>
@@ -397,8 +397,8 @@ export function ConnectorsSection() {
             </li>
           </ol>
 
-          <p className="text-xs font-medium text-slate-800">{t("connectors.google.step2")}</p>
-          <label className="text-xs font-medium text-slate-800">
+          <p className="text-xs font-medium text-fg">{t("connectors.google.step2")}</p>
+          <label className="text-xs font-medium text-fg">
             {t("connectors.google.clientId")}
             <Input
               className="mt-1 font-mono text-xs"
@@ -408,7 +408,7 @@ export function ConnectorsSection() {
               autoComplete="off"
             />
           </label>
-          <label className="text-xs font-medium text-slate-800">
+          <label className="text-xs font-medium text-fg">
             {t("connectors.google.clientSecret")}
             <Input
               className="mt-1 font-mono text-xs"
@@ -425,7 +425,7 @@ export function ConnectorsSection() {
           </label>
           <Button
             type="submit"
-            className="w-fit bg-slate-900 text-white hover:bg-slate-800"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
             disabled={googleSetupSaving}
           >
             {googleSetupSaving ? t("connectors.google.saving") : t("connectors.google.saveLink")}
@@ -435,7 +435,7 @@ export function ConnectorsSection() {
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
-            className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+            className="border-primary bg-primary text-primary-fg hover:opacity-90 disabled:opacity-50"
             disabled={!googleApp?.configured}
             title={googleApp?.configured ? undefined : t("connectors.google.tooltipSaveFirst")}
             onClick={() => void connectGoogle("all")}
@@ -469,24 +469,24 @@ export function ConnectorsSection() {
         </div>
       </div>
 
-      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
         <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-semibold text-slate-900">{t("connectors.ms.title")}</h3>
-          <p className="text-xs text-slate-600">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.ms.title")}</h3>
+          <p className="text-xs text-fg-muted">
             <RichText text={t("connectors.ms.intro")} />
           </p>
         </div>
 
         <form
-          className="mt-3 grid gap-3 rounded-md border border-slate-200 bg-white p-3"
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
           onSubmit={(e) => void saveMicrosoftAppSetup(e)}
         >
-          <p className="text-xs font-medium text-slate-800">{t("connectors.ms.step1")}</p>
-          <ol className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
+          <p className="text-xs font-medium text-fg">{t("connectors.ms.step1")}</p>
+          <ol className="list-decimal space-y-1 pl-4 text-xs text-fg-muted">
             <li>
               {t("connectors.ms.step1.line1Pre")}
               <a
-                className="font-medium text-slate-900 underline underline-offset-2"
+                className="font-medium text-fg underline underline-offset-2"
                 href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -497,7 +497,7 @@ export function ConnectorsSection() {
             </li>
             <li>
               <RichText text={t("connectors.ms.step1.line2")} />
-              <code className="mt-1 block break-all rounded bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-800">
+              <code className="mt-1 block break-all rounded bg-surface-muted px-2 py-1 font-mono text-[11px] text-fg">
                 {msRedirect}
               </code>
             </li>
@@ -506,8 +506,8 @@ export function ConnectorsSection() {
             </li>
           </ol>
 
-          <p className="text-xs font-medium text-slate-800">{t("connectors.ms.step2")}</p>
-          <label className="text-xs font-medium text-slate-800">
+          <p className="text-xs font-medium text-fg">{t("connectors.ms.step2")}</p>
+          <label className="text-xs font-medium text-fg">
             {t("connectors.ms.clientId")}
             <Input
               className="mt-1 font-mono text-xs"
@@ -517,7 +517,7 @@ export function ConnectorsSection() {
               autoComplete="off"
             />
           </label>
-          <label className="text-xs font-medium text-slate-800">
+          <label className="text-xs font-medium text-fg">
             <RichText text={t("connectors.ms.tenant")} />
             <Input
               className="mt-1 font-mono text-xs"
@@ -526,11 +526,11 @@ export function ConnectorsSection() {
               placeholder={t("connectors.ms.tenantPlaceholder")}
               autoComplete="off"
             />
-            <span className="mt-1 block font-normal text-slate-500">
+            <span className="mt-1 block font-normal text-fg-subtle">
               <RichText text={t("connectors.ms.tenantHelp")} />
             </span>
           </label>
-          <label className="text-xs font-medium text-slate-800">
+          <label className="text-xs font-medium text-fg">
             {t("connectors.ms.clientSecret")}
             <Input
               className="mt-1 font-mono text-xs"
@@ -547,7 +547,7 @@ export function ConnectorsSection() {
           </label>
           <Button
             type="submit"
-            className="w-fit bg-slate-900 text-white hover:bg-slate-800"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
             disabled={msSetupSaving}
           >
             {msSetupSaving ? t("connectors.google.saving") : t("connectors.ms.saveLink")}
@@ -557,7 +557,7 @@ export function ConnectorsSection() {
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
-            className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+            className="border-primary bg-primary text-primary-fg hover:opacity-90 disabled:opacity-50"
             disabled={!msApp?.configured}
             title={msApp?.configured ? undefined : t("connectors.ms.tooltipSaveFirst")}
             onClick={() => void connectMicrosoft("all")}
@@ -594,7 +594,7 @@ export function ConnectorsSection() {
       <div className="mt-6">
         <button
           type="button"
-          className="text-xs font-medium text-slate-600 underline-offset-2 hover:underline"
+          className="text-xs font-medium text-fg-muted underline-offset-2 hover:underline"
           onClick={() => setShowAdvanced((v) => !v)}
         >
           {showAdvanced ? t("connectors.advanced.hide") : t("connectors.advanced.show")}
@@ -603,10 +603,10 @@ export function ConnectorsSection() {
 
       {showAdvanced ? (
         <form className="mt-4 grid gap-3" onSubmit={(e) => void addConnection(e)}>
-          <label className="text-sm font-medium text-slate-800">
+          <label className="text-sm font-medium text-fg">
             {t("connectors.advanced.provider")}
             <select
-              className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-sm"
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
             >
@@ -617,7 +617,7 @@ export function ConnectorsSection() {
               ))}
             </select>
           </label>
-          <label className="text-sm font-medium text-slate-800">
+          <label className="text-sm font-medium text-fg">
             {t("connectors.advanced.label")}
             <Input
               className="mt-1"
@@ -626,25 +626,25 @@ export function ConnectorsSection() {
               placeholder={t("connectors.advanced.labelPlaceholder")}
             />
           </label>
-          <label className="text-sm font-medium text-slate-800">
+          <label className="text-sm font-medium text-fg">
             {t("connectors.advanced.credentials")}
             <textarea
-              className="mt-1 min-h-[120px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs"
+              className="mt-1 min-h-[120px] w-full rounded-md border border-border bg-surface-elevated px-3 py-2 font-mono text-xs"
               value={credentialsJson}
               onChange={(e) => setCredentialsJson(e.target.value)}
               spellCheck={false}
             />
           </label>
-          <Button type="submit" className="w-fit bg-slate-900 text-white hover:bg-slate-800" disabled={loading}>
+          <Button type="submit" className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90" disabled={loading}>
             {t("connectors.advanced.add")}
           </Button>
         </form>
       ) : null}
 
       <div className="mt-6 space-y-2">
-        <h3 className="text-sm font-medium text-slate-800">{t("connectors.saved.title")}</h3>
+        <h3 className="text-sm font-medium text-fg">{t("connectors.saved.title")}</h3>
         {rows.length === 0 ? (
-          <p className="text-sm text-slate-500">{t("connectors.saved.empty")}</p>
+          <p className="text-sm text-fg-subtle">{t("connectors.saved.empty")}</p>
         ) : (
           <ul className="space-y-2">
             {rows.map((r) => {
@@ -652,11 +652,11 @@ export function ConnectorsSection() {
                 typeof r.meta === "object" && r.meta !== null && (r.meta as Record<string, unknown>).status === "needs_reauth";
               const syncList = syncRows[r.id] || [];
               return (
-                <li key={r.id} className="flex flex-col gap-2 rounded border border-slate-100 px-3 py-2 text-sm">
+                <li key={r.id} className="flex flex-col gap-2 rounded border border-border-subtle px-3 py-2 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span>
                       <span className="font-medium">{r.label}</span>{" "}
-                      <span className="text-slate-500">
+                      <span className="text-fg-subtle">
                         ({r.provider}) · #{r.id}
                       </span>
                       {needsReauth ? (
@@ -719,9 +719,9 @@ export function ConnectorsSection() {
                     </div>
                   </div>
                   {syncList.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-1 text-xs text-slate-600 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-1 text-xs text-fg-muted md:grid-cols-2">
                       {syncList.map((s) => (
-                        <div key={`${s.connection_id}-${s.resource}`} className="rounded bg-slate-50 px-2 py-1">
+                        <div key={`${s.connection_id}-${s.resource}`} className="rounded bg-surface-muted px-2 py-1">
                           <span className="font-mono">{s.resource}</span> · {s.status}
                           {s.last_delta_at
                             ? ` · ${t("connectors.saved.lastSync", { when: new Date(s.last_delta_at).toLocaleString() })}`

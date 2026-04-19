@@ -54,7 +54,7 @@ export function ThreadActionsMenu({
     <button
       type="button"
       aria-label="Acciones de la conversación"
-      className={`rounded-md ${triggerSize} text-slate-400 hover:bg-white/10 hover:text-slate-100`}
+      className={`rounded-md ${triggerSize} text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg`}
       onClick={(e) => e.stopPropagation()}
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -159,7 +159,7 @@ function RenameDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 bg-scrim"
         aria-label="Cerrar"
         onClick={onCancel}
         disabled={pending}
@@ -169,10 +169,10 @@ function RenameDialog({
           e.preventDefault();
           if (canSave) void onSubmit(trimmed);
         }}
-        className="relative z-10 w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-lg"
+        className="relative z-10 w-full max-w-md rounded-lg border border-border bg-surface-elevated p-4 text-fg shadow-lg"
       >
-        <h2 className="text-lg font-semibold text-slate-900">Renombrar conversación</h2>
-        <p className="mt-1 text-sm text-slate-600">
+        <h2 className="text-lg font-semibold">Renombrar conversación</h2>
+        <p className="mt-1 text-sm text-fg-muted">
           Elige un nombre que te ayude a reconocerla más tarde.
         </p>
         <input
@@ -181,7 +181,7 @@ function RenameDialog({
           onChange={(e) => setValue(e.target.value)}
           maxLength={255}
           disabled={pending}
-          className="mt-3 w-full rounded border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+          className="mt-3 w-full rounded border border-border bg-surface-inset px-3 py-2 text-sm text-fg focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
         />
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" className="border-dashed" onClick={onCancel} disabled={pending}>
@@ -189,7 +189,7 @@ function RenameDialog({
           </Button>
           <Button
             type="submit"
-            className="bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+            className="border-primary bg-primary text-primary-fg hover:opacity-90 disabled:opacity-50"
             disabled={!canSave}
           >
             {pending ? "…" : "Guardar"}
