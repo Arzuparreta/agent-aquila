@@ -20,127 +20,68 @@
 
 # Agent Aquila
 
-> A self-hosted agent harness focused on control and observability. Bring your own model, keep your own data, talk to your real services live.
+**Self-hosted agent cockpit** — your accounts, your keys, your machine. Chat with an agent that can work in **Gmail, Calendar, Drive, Outlook, and Teams** the same way you would: live data, no local copy of mail or files to keep in sync.
 
-Agent Aquila is a self-hosted cockpit for an AI agent that **operates your real
-accounts directly**. It pairs a deliberately bare ReAct loop with persistent
-agent memory, a markdown-driven skills folder, and live OAuth tools for Gmail,
-Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
+Persistent **memory** (what to remember across sessions) and **skills** (markdown recipes in `backend/skills/`) keep behaviour consistent. An optional **heartbeat** job can wake the agent on a schedule.
 
-## Features
+---
 
-- **Agent chat** — ReAct loop with tool calling.
-- **Live Gmail control** — list/search/get messages and threads, modify
-labels, archive, trash, mark read/unread, manage filters, **mute** /
-**move-to-spam senders**, send and reply (with approval).
-- **Live Google Calendar / Drive** — list/create/update/delete events, list
-files, share, move, trash. All auto-applied.
-- **Live Microsoft 365** — Outlook mail (read + write) and Teams messaging via
-Microsoft Graph. All auto-applied except sending email.
-- **Approval gate for sending email only.** Every other write executes
-immediately; only `email_send` and `email_reply` are staged as proposals.
-- **Persistent agent memory** — scratchpad with importance, tags and optional
-semantic recall.
-- **Skills folder** — markdown recipes the agent can list and load.
-- **Bring your own model** — OpenAI-compatible, Ollama, Google AI Studio,
-OpenRouter, Anthropic, Azure OpenAI, LiteLLM, or any OpenAI-shape custom
-endpoint.
-- **BYOK key storage** with envelope encryption.
-- **One-command deploy** — Docker Compose brings up everything.
-
-## Quick start
+### Run it
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Then open:
+| | URL |
+|--|--|
+| App | <http://localhost:3002> |
+| API | <http://localhost:8000/docs> |
+| Postgres | `localhost:5433` |
+| Redis | `localhost:6379` |
 
-- **App** — [http://localhost:3002](http://localhost:3002)
-- **API docs** — [http://localhost:8000/docs](http://localhost:8000/docs)
+Migrations run when the API starts. **First boot on an old database** may apply a destructive migration that drops legacy mirror/CRM tables — back up if you care about that data.
 
-The compose stack also exposes Postgres on `localhost:5433` and Redis on
-`localhost:6379`. Migrations run automatically when the API container starts;
-the destructive migration `0018` will drop all the legacy mirror/CRM tables on
-first boot of an existing install.
+Connect providers under **Settings → External connectors**. If you already had Gmail linked, you may need to reconnect once so the grant includes `gmail.settings.basic` (filters for mute/spam); the UI shows a banner when scopes are missing.
 
-To wire up Gmail, Outlook, Drive or Teams, go to **Settings → External
-connectors** in the app and follow the on-page steps.
+---
 
-> **Existing Gmail users must reconnect.** The agent now needs the
-> `https://www.googleapis.com/auth/gmail.settings.basic` scope to manage
-> filters (mute/spam). The Settings page shows a yellow **Reconnect Gmail**
-> banner whenever a stored grant is missing the scope.
+### What you get in the UI
 
-## Approval policy
+- **Chat** — agent turns with tools against your connected services.
+- **Inbox** — one list, Gmail search, pagination, actions wired to the real mailbox (including mute/spam via filters).
+- **Settings** — connectors, AI provider, memory viewer, skills list.
 
+---
 
-| Action                                              | Behaviour    |
-| --------------------------------------------------- | ------------ |
-| Send / reply email (Gmail or Outlook)               | **Proposal** |
-| Archive, trash, label, mark read/unread, mute, spam | Auto-apply   |
-| Create / update / delete calendar events            | Auto-apply   |
-| Move / share / trash Drive files                    | Auto-apply   |
-| Post to Teams chats / channels                      | Auto-apply   |
-| Read of any kind                                    | Auto-apply   |
+### Default gate on outbound mail
 
+Sending or replying **from the agent** is the only action that shows an approval card by default — everything else goes straight through OAuth to the provider. That policy is a few lines in [`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py) (`_PROPOSAL_TOOLS`) and [`backend/app/services/capability_registry.py`](backend/app/services/capability_registry.py); tighten or loosen it however you like.
 
-Approvals live at `/proposals` and arrive as a card in the chat.
+---
 
-## Choosing an AI model
+### Add a capability
 
-Agent Aquila is BYOK and provider-agnostic. Configure your model in
-**Settings → AI model**, picking from any OpenAI-compatible endpoint, Ollama,
-Google AI Studio, or OpenRouter.
+1. Describe the tool in [`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py) (`AGENT_TOOLS`).
+2. Handle it in [`backend/app/services/agent_service.py`](backend/app/services/agent_service.py) (`AgentService._DISPATCH` / `_dispatch_tool`).
 
-The harness ships zero model-compensating shims: the model has to honor
-`tools=` / `tool_choice="required"` and pick the right tool from its
-description. Pick a model that does tool-calling well — there are good free,
-local, and paid options.
+---
 
-For copy-pasteable setup per tier (free cloud / free local / paid frontier)
-and a smoke-test command that exercises the same code paths the agent uses,
-see `[docs/PROVIDERS.md](docs/PROVIDERS.md)`.
+### Repo map
 
-## Extending the harness
+| Path | Role |
+|------|------|
+| [`backend/`](backend/) | FastAPI, SQLAlchemy, Alembic, ARQ worker, `skills/` |
+| [`frontend/`](frontend/) | Next.js app |
+| [`docker-compose.yml`](docker-compose.yml) | `db`, `redis`, `backend`, `worker`, `frontend` |
+| [`.env.example`](.env.example) | Environment template |
 
-Adding a capability is a one-edit change:
+---
 
-1. Register a new entry in `AGENT_TOOLS` inside
-  `[backend/app/services/agent_tools.py](backend/app/services/agent_tools.py)`
-   with a clear description (when to use, when not to use, inputs, outputs).
-2. Wire its handler into `AgentService._dispatch_tool` in
-  `[backend/app/services/agent_service.py](backend/app/services/agent_service.py)`.
+### Docs
 
-That's it. The harness picks the new tool up on the next turn — no prompt
-edits, no router changes, no keyword maps. The tool description is the only
-knob the agent has for picking the right tool, so spend time on it.
-
-If your new capability is an external write that you want surfaced as a
-proposal (instead of auto-applied), add the tool name to `_PROPOSAL_TOOLS`
-in `agent_tools.py` and register the proposal kind in
-`backend/app/services/capability_registry.py`.
-
-## Project layout
-
-- `[backend/](backend/)` — FastAPI app, SQLAlchemy models, services, routes,
-Alembic migrations, ARQ worker, and the `skills/` markdown folder.
-- `[frontend/](frontend/)` — Next.js app (chat, simplified inbox, settings
-with memory + skills viewers).
-- `[docker-compose.yml](docker-compose.yml)` — local orchestration (`db`,
-`redis`, `backend`, `worker`, `frontend`).
-- `[.env.example](.env.example)` — environment template.
-- `[docs/](docs/)` — extra documentation.
-
-## Further reading
-
-- `[docs/PROVIDERS.md](docs/PROVIDERS.md)` — AI provider setup and smoke
-tests.
-- `[docs/MEMORY.md](docs/MEMORY.md)` — how agent persistent memory works.
-- `[docs/SKILLS.md](docs/SKILLS.md)` — how to author and load skills.
-- `[docs/testing.md](docs/testing.md)` — backend pytest and frontend lint.
-- `[docs/MANUAL_QA.md](docs/MANUAL_QA.md)` — manual UI checklist.
-- [http://localhost:8000/docs](http://localhost:8000/docs) — live OpenAPI reference (once the stack is
-up).
-
+- [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — models and provider setup  
+- [`docs/MEMORY.md`](docs/MEMORY.md) — persistent memory  
+- [`docs/SKILLS.md`](docs/SKILLS.md) — authoring skills  
+- [`docs/testing.md`](docs/testing.md) — tests  
+- [`docs/MANUAL_QA.md`](docs/MANUAL_QA.md) — manual checks  
