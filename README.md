@@ -1,209 +1,74 @@
-# CRM + AI Cockpit MVP
-
-Production-oriented MVP for a music artist CRM + future AI automation cockpit.
-
-## Tech stack
-
-- Backend: FastAPI + SQLAlchemy + Alembic
-- Database: PostgreSQL 16 (`pgvector` extension enabled)
-- Jobs: Redis7 + [ARQ](https://arq-docs.helpmanual.io/) worker (background Gmail / Calendar / Drive sync)
-- Frontend: Next.js (TypeScript, Tailwind, shadcn-style UI primitives)
-- Infra: Docker Compose (`db`, `redis`, `backend`, `worker`, `frontend`)
-
-## Features in this MVP
-
-- JWT auth (`/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/me`)
-- CRUD APIs for `contacts`, `emails`, `deals`, `events`
-- **Automations**: `/api/v1/automations` (user-defined rules + manual test run)
-- **OAuth connectors**: Google Workspace and Microsoft 365 (Graph) — register redirect URIs in each vendor console once, then paste app credentials under **Settings → External connectors** (stored in Postgres; no OAuth env vars required for normal use)
-- **Operations cockpit** (Next.js `/cockpit`): ReAct-style agent with hybrid RAG and **human-gated pending operations** — CRM create/update (contacts, deals, events) plus **connector actions** (email send, calendar create, file upload, Teams message) after approval (`POST /api/v1/agent/runs`, `/api/v1/agent/proposals/...` or list `/api/v1/agent/pending-operations`, preview `/api/v1/agent/pending-operations/{id}/preview`, capabilities `/api/v1/agent/capabilities`). Configure connectors via `/api/v1/connectors` (create, `GET/PATCH /connectors/{id}`, `POST /connectors/preview`, `POST /connectors/dry-run`).
-- **Chunked hybrid RAG**: per-entity text is split into labeled chunks, embedded, and searched with **dense vectors + PostgreSQL full-text (RRF fusion)**. Falls back to legacy single-vector row search if `rag_chunks` is empty. Rebuild indexes with `POST /api/v1/ai/rag/backfill`.
-- Per-user AI settings (OpenAI-compatible / Ollama / OpenRouter / Google AI Studio) and encrypted API keys
-- Deterministic email ingestion rule on `POST /api/v1/emails`:
-  - upsert contact by sender email
-  - create `new` deal when subject contains `concert|booking|show` (LLM triage can refine when configured)
-- Audit log table for create/update/delete tracking
-- Clean layering: `models/`, `schemas/`, `services/`, `routes/`
-
-## Project structure
-
-- `backend/` FastAPI app, SQLAlchemy models, services, routes, Alembic migrations, ARQ worker (`app/worker.py`)
-- `frontend/` Next.js dashboard app
-- `docker-compose.yml` local orchestration
-- `.env.example` environment template (Postgres, JWT, CORS, Redis, optional OAuth env fallbacks, agent limits)
-- `docs/testing.md` how to run backend pytest and frontend lint
-- `docs/MANUAL_QA.md` manual UI checklist (chat thread actions + inbox row menus)
-
-## Local run
-
-1. Copy env template:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Start all services:
-
-   ```bash
-   docker compose up --build
-   ```
-
-   This starts **Postgres**, **Redis**, the API (runs migrations on boot), the **worker** (sync jobs), and the **frontend**.
-
-3. Open:
-   - Frontend: `http://localhost:3002` (Compose maps this to the app in the container; avoids host port clashes on `3000`)
-   - The UI talks to the API via same-origin `/api/v1` (Next.js proxies to the backend), which avoids browser `NetworkError` / CORS when using `127.0.0.1` vs `localhost` or another host.
-   - Backend docs: `http://localhost:8000/docs`
-   - Postgres from your host (optional): `localhost:5433` → container `5432` (avoids clashing with a local PostgreSQL on `5432`)
-   - Redis from your host (optional): `localhost:6379`
-   - **OAuth** (Gmail, Outlook, etc.): **Settings → External connectors** — set the app’s public URL, then follow the on-page steps for Google and/or Microsoft. Migrations run when the API container starts (`docker compose up`).
-
-## API quickstart
-
-1. Register:
-
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/auth/register \
-     -H "Content-Type: application/json" \
-     -d '{"email":"admin@example.com","password":"password123","full_name":"Admin"}'
-   ```
-
-2. Login (use returned `access_token`):
-
-   ```bash
-   curl -X POST http://localhost:8000/api/v1/auth/login \
-     -H "Content-Type: application/json" \
-     -d '{"email":"admin@example.com","password":"password123"}'
-   ```
-
-## Agent harness
-
-The agent runtime is a deliberately bare ReAct loop in the OpenClaw style:
-plumbing belongs to the harness, every product decision (which tool to call,
-what arguments to pass, when to stop gathering, when to terminate) belongs to
-the model.
-
-### Contract
-
-- `AgentService.run_agent` sends the **full** `AGENT_TOOLS` palette on every
-  turn with `tool_choice="required"`.
-- Every turn ends in a tool call. `final_answer` is the universal terminator —
-  calling it persists the natural-language reply and ends the run. The loop
-  also stops if `settings.agent_max_tool_steps` is reached (universal step
-  cap; failure surfaces as `error="Step budget exceeded"`).
-- Tool names must match `AGENT_TOOL_NAMES` exactly. Argument shapes must match
-  the JSON schema. There is no alias map and no argument coercion: a wrong
-  call comes back as a terse `{"error": "unknown tool '<name>'"}` (or the
-  tool's own validation error) and the model is expected to retry inside the
-  step budget — exactly like any REST API.
-
-### Adding a tool
-
-Adding a capability is a **one-edit** change: register an entry in
-`backend/app/services/agent_tools.py::AGENT_TOOLS` with a rich description in
-the OpenClaw "when to use / when not to use / inputs / outputs" pattern and
-wire its handler into `AgentService._dispatch_tool`. The harness picks the
-new tool up automatically on the next turn — no prompt updates, no router
-edits, no keyword maps. The description is the **only** knob the agent has
-for picking the right tool, so spend time on it.
-
-### Extension seams
-
-Two pure functions in `agent_service.py` are called once per `run_agent`
-invocation; the loop only knows about their return values:
-
-- `get_tool_palette(user, *, tenant_hint=None) -> list[dict]` — today
-  returns `AGENT_TOOLS` for everyone. This is where per-tenant skill toggles
-  plug in (artists vs businesses, "starter" tier, custom bundles), without
-  touching the loop.
-- `build_system_prompt(user, *, thread_context_hint=None, tenant_hint=None) -> str` —
-  today returns the universal `AGENT_SYSTEM` plus an optional thread-context
-  line. This is where per-vertical personas (artist's ops manager, business
-  account manager) plug in.
-
-### Recommended models
-
-This harness deliberately ships zero model-compensating shims (no tool-name
-alias maps, no argument coercion, no consecutive-unknown-call breakers — see
-the docstring at the top of `app/services/agent_service.py`). That puts the
-entire burden on the model: it must honor `tools=` and `tool_choice="required"`
-on every turn, pick a tool by reading its description, and never invent tool
-names. If a weaker model misbehaves the run will exhaust the step budget and
-fail; swap the model rather than re-introducing compensations.
-
-For a single-user CRM cockpit (Spanish, tool-calling required) configure your
-models in **Settings → Modelo de IA**:
-
-| Slot                       | Recommended                       | Why                                                                                                |
-| -------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Agent (chat)               | `claude-sonnet-4-5` (Anthropic)   | Best-in-class tool-call accuracy, strong Spanish, reliable JSON args. ~$3/M in, $15/M out.         |
-| Agent (chat) — alternative | `gpt-5` or `gpt-4.1` (OpenAI)     | Drop-in via the existing OpenAI-compatible client, also excellent at tool-calling.                 |
-| Agent (chat) — free tier   | `gemini-2.5-flash` (Google)       | Free on AI Studio; honors `tools=` / `tool_choice="required"` reliably. Pick the **Google AI Studio (Gemini)** provider in Settings. |
-| Triage / classification    | `gemini-2.5-flash` (Google)       | Cheap (~$0.30/M in) and fast; good enough for inbox triage and the LLM stage of `InboundFilterService`. |
-| Embeddings                 | `text-embedding-3-large` (OpenAI) | What `pgvector(1536)` is sized for; works on any OpenAI-compatible endpoint.                       |
-| Embeddings — free tier     | `text-embedding-004` (Google)     | 768-dim; auto-padded to 1536 by `embedding_vector.pad_embedding`. Free on AI Studio.               |
-| Local fallback             | `qwen2.5:32b-instruct` (Ollama)   | Only if you have serious GPU. **Do not** use Gemma 3B/4B as the agent model in this harness.       |
-
-> The previous "Gemma 3B" warning was right but understated: with this
-> harness, Gemma 3B/4B will silently invent tool names, conflate unrelated
-> rows pulled from RAG, and hallucinate ids in its responses. Use it for
-> embeddings only (or not at all).
->
-> The **Google AI Studio (Gemini)** provider talks to Google's
-> OpenAI-compatible endpoint (`/v1beta/openai`) using the same chat /
-> embeddings clients as every other provider — no custom code path. Get a
-> free key at <https://aistudio.google.com/apikey>.
-
-For copy-pasteable setup steps for each tier (free cloud / free local /
-paid frontier) plus a **smoke-test command that exercises the same code
-paths the agent uses** (tool calling + JSON mode + embeddings), see
-[`docs/PROVIDERS.md`](docs/PROVIDERS.md).
-
-### Multi-provider settings & key persistence (BYOK)
-
-The settings UI keeps **every provider's config side-by-side** in
-`user_ai_provider_configs` (one row per `(user_id, provider_kind)`).
-Switching providers in the rail no longer overwrites the previously
-saved row, so an artist who stores both an Ollama base URL and a Google
-AI Studio key can swap between them without losing either.
-
-API keys use **envelope encryption**:
-
-- The **KEK** (key-encryption key) is read from `FERNET_ENCRYPTION_KEY`
-  or, if unset, from `backend/.secrets/fernet.key` (auto-generated and
-  gitignored on first boot — back this file up). The compose file
-  bind-mounts `./backend:/app`, so the file persists across container
-  rebuilds.
-- Each saved API key gets its own per-row **DEK**; the DEK encrypts the
-  key, and the KEK encrypts the DEK. Rotating the KEK is a small,
-  atomic operation — see below.
-- A failed decrypt produces a typed `KeyDecryptError` that the chat
-  surfaces as an actionable card asking the user to re-enter the key
-  for that single provider, instead of silently behaving as keyless.
-
-**Rotate the KEK:**
-
-```bash
-# Re-wrap every DEK with a fresh KEK and overwrite backend/.secrets/fernet.key
-docker compose exec backend python -m app.scripts.rotate_kek
-
-# Or generate a key and print it to stdout (for env-var-based deploys)
-docker compose exec backend python -m app.scripts.rotate_kek --print-only
+```
+        _.--.__                                _.--.
+    ./'       `--.__                   __.--'    \.
+   //__               `--.__       __.-'              \\
+  ///_ `--.._               `-._.-'              _..--' \\\
+ /////_      `--.._         _.-'         _..--'      \\\\
+//////_         `--.._   .-'    _..--'              \\\\\\
 ```
 
-**Verify every saved provider end-to-end:**
+# Agent Aquila
+
+> A self-hosted AI agent harness. Bring your own model, keep your own data.
+
+Agent Aquila is a self-hosted cockpit for an AI agent that actually does things on your behalf — but only after you say yes. It pairs a deliberately bare ReAct loop with a small CRM (contacts, deals, events, emails), hybrid RAG search over your own data, and OAuth connectors to Google Workspace and Microsoft 365. Every action the agent wants to take outside of pure reads is staged as a human-gated proposal you approve, edit, or discard.
+
+## Features
+
+- **Agent chat** — ReAct loop with tool-calling; every write is a proposal you must approve
+- **CRM** — contacts, deals, events, emails (full CRUD)
+- **Hybrid RAG** — dense vectors plus PostgreSQL full-text, fused with RRF
+- **Connectors** — Gmail, Google Calendar, Google Drive, Microsoft 365 / Outlook / Teams via OAuth
+- **Automations** — user-defined rules with manual test runs
+- **Bring your own model** — OpenAI-compatible, Ollama, Google AI Studio, OpenRouter
+- **BYOK key storage** — API keys protected with envelope encryption
+- **Background sync** — Gmail, Calendar, and Drive kept fresh by an ARQ worker on Redis
+- **One-command deploy** — Docker Compose brings up everything
+
+## Quick start
 
 ```bash
-# Tests the active provider (default)
-docker compose exec backend python -m app.scripts.smoke_ai_provider --email me@example.com
-
-# Iterates every saved provider and prints a per-provider table
-docker compose exec backend python -m app.scripts.smoke_ai_provider --email me@example.com --all
+cp .env.example .env
+docker compose up --build
 ```
 
-## Notes
+Then open:
 
-- Optional agent / ingest behavior is centralized in `.env.example` (`AGENT_*`, `EMAIL_INGEST_AUTO_CREATE_DEALS`, sync poll limits).
-- `services/` is the main extension point; the agent coordinator is `app/services/agent_service.py`.
-- `pgvector` is enabled in migration `0001_initial`; `0003_rag_agent` adds `rag_chunks` (HNSW + GIN fts), `agent_runs`, and `pending_proposals`.
-- For **JSON `response_format` on chat completions**, use an OpenAI-compatible provider; some local stacks omit this and may need a code-path change.
+- **App** — <http://localhost:3002>
+- **API docs** — <http://localhost:8000/docs>
+
+The compose stack also exposes Postgres on `localhost:5433` and Redis on `localhost:6379` if you want to poke at them from your host. Migrations run automatically when the API container starts.
+
+To wire up Gmail, Outlook, Drive, Teams, etc., go to **Settings → External connectors** in the app and follow the on-page steps.
+
+## Choosing an AI model
+
+Agent Aquila is BYOK and provider-agnostic. Configure your model in **Settings → AI model**, picking from any OpenAI-compatible endpoint, Ollama, Google AI Studio, or OpenRouter.
+
+The harness ships zero model-compensating shims: the model has to honor `tools=` / `tool_choice="required"` and pick the right tool from its description. Pick a model that does tool-calling well — there are good free, local, and paid options.
+
+For copy-pasteable setup per tier (free cloud / free local / paid frontier) and a smoke-test command that exercises the same code paths the agent uses, see [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
+
+## Extending the harness
+
+Adding a capability is a one-edit change:
+
+1. Register a new entry in `AGENT_TOOLS` inside [`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py) with a clear description (when to use, when not to use, inputs, outputs).
+2. Wire its handler into `AgentService._dispatch_tool` in [`backend/app/services/agent_service.py`](backend/app/services/agent_service.py).
+
+That's it. The harness picks the new tool up on the next turn — no prompt edits, no router changes, no keyword maps. The tool description is the only knob the agent has for picking the right tool, so spend time on it.
+
+## Project layout
+
+- [`backend/`](backend/) — FastAPI app, SQLAlchemy models, services, routes, Alembic migrations, ARQ worker
+- [`frontend/`](frontend/) — Next.js app (chat, inbox, automations, settings)
+- [`docker-compose.yml`](docker-compose.yml) — local orchestration (`db`, `redis`, `backend`, `worker`, `frontend`)
+- [`.env.example`](.env.example) — environment template
+- [`docs/`](docs/) — extra documentation
+
+## Further reading
+
+- [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — AI provider setup and smoke tests
+- [`docs/testing.md`](docs/testing.md) — backend pytest and frontend lint
+- [`docs/MANUAL_QA.md`](docs/MANUAL_QA.md) — manual UI checklist
+- <http://localhost:8000/docs> — live OpenAPI reference (once the stack is up)
