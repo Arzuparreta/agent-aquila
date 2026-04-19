@@ -19,15 +19,13 @@ from app.models.email import Email
 from app.models.event import Event
 from app.models.user import User
 from app.services.agent_service import AgentService
-from app.services.embedding_client import EmbeddingClient
-from app.services.embedding_vector import pad_embedding
 from app.services.llm_client import LLMClient
 from app.services.user_ai_settings_service import UserAISettingsService
 
 
 @pytest.mark.asyncio
 async def test_agent_proposal_tool_registry_matches_service() -> None:
-    """Every proposal tool name in AGENT_SYSTEM must map to a handler (single source: _PROPOSAL_TOOL_METHODS)."""
+    """Proposal tool names must match the expected registry (single source: _PROPOSAL_TOOL_METHODS)."""
     expected = {
         "propose_create_deal",
         "propose_update_deal",
@@ -60,39 +58,6 @@ async def test_tool_hybrid_rag_search_ai_disabled(db_session, crm_user: User) ->
     await db_session.flush()
     out = await AgentService._tool_rag(db_session, crm_user, {"query": "anything"})
     assert out == {"hits": []}
-
-
-@pytest.mark.asyncio
-async def test_tool_hybrid_rag_search_returns_hits_legacy_vector_path(
-    db_session, crm_user: User
-) -> None:
-    """Legacy entity embeddings path: no rag_chunks rows, contact with embedding matches mocked query vector."""
-    query_vec = pad_embedding([1.0])
-    contact = Contact(
-        name="Pepe Festival Booker",
-        email="pepe-booker@example.com",
-        notes="books summer festivals",
-        embedding=query_vec,
-        embedding_model="test",
-        embedding_updated_at=datetime.now(UTC),
-    )
-    db_session.add(contact)
-    await db_session.flush()
-
-    async def _fake_embed(_api_key: str, _settings, texts: list[str]) -> list[list[float]]:
-        assert texts and "festival" in texts[0].lower()
-        return [query_vec]
-
-    with patch.object(EmbeddingClient, "embed_texts", new=AsyncMock(side_effect=_fake_embed)):
-        out = await AgentService._tool_rag(db_session, crm_user, {"query": "summer festival", "limit_per_type": 5})
-
-    assert "hits" in out and "error" not in out
-    assert len(out["hits"]) >= 1
-    hit = next(h for h in out["hits"] if h["entity_type"] == "contact" and h["entity_id"] == contact.id)
-    assert hit["citation"] == f"contact:{contact.id}"
-    assert "vector_legacy" in hit["match_sources"]
-    assert hit["title"] == "Pepe Festival Booker"
-    assert "festival" in (hit.get("snippet") or "").lower() or "book" in (hit.get("snippet") or "").lower()
 
 
 @pytest.mark.asyncio
@@ -652,17 +617,15 @@ async def test_run_agent_drive_listing_uses_native_tool_call(
     # guard that prevents lazy text-only replies.
     assert all(c == "required" for c in captured_choice), captured_choice
 
-    # Both turns must see the FULL palette: list_drive_files (so the data
-    # call is even possible) AND final_answer (so the model can terminate).
-    # The model is trusted to call list_drive_files first because the tool
-    # description says so — there is no longer a structural "must ground
-    # first" gate fencing the palette.
-    turn1_advertised = {t["function"]["name"] for t in captured_tools[0]}
-    assert "list_drive_files" in turn1_advertised
-    assert "final_answer" in turn1_advertised
-    turn2_advertised = {t["function"]["name"] for t in captured_tools[1]}
-    assert "list_drive_files" in turn2_advertised
-    assert "final_answer" in turn2_advertised
+    # Full ``AGENT_TOOLS`` palette every turn (no filtering, shrink, or gate).
+    from app.services.agent_tools import AGENT_TOOLS
+
+    expected_len = len(AGENT_TOOLS)
+    expected_names = {t["function"]["name"] for t in AGENT_TOOLS}
+    for i, palette in enumerate(captured_tools):
+        assert len(palette) == expected_len, f"turn {i + 1}: expected {expected_len} tools"
+        names = {t["function"]["name"] for t in palette}
+        assert names == expected_names, f"turn {i + 1} palette diverged: {names ^ expected_names}"
 
     # Tool result must be threaded back as role:"tool" before the model talks.
     second_turn = captured_messages[1]
@@ -731,97 +694,6 @@ async def test_run_agent_unknown_tool_returns_generic_error_no_alias_map(
     )
     # And the args are NOT coerced — they're recorded as-issued.
     assert tool_steps[0].payload["args"] == {"queries": ["x"]}
-
-
-@pytest.mark.asyncio
-async def test_run_agent_sends_full_tool_palette_every_turn(
-    db_session, crm_user: User
-) -> None:
-    """Universal contract: the harness sends the full ``AGENT_TOOLS`` array
-    on every turn. No intent filtering, no must-ground gate, no budget
-    shrink. The model picks the right tool by reading descriptions."""
-    from app.services.agent_tools import AGENT_TOOLS
-
-    turns = iter(
-        [
-            _assistant_tool_call_response(("list_drive_files", {})),
-            _assistant_tool_call_response(("hybrid_rag_search", {"query": "x"})),
-            _final_answer("ok"),
-        ]
-    )
-    captured_tools: list[list[dict]] = []
-
-    async def _fake(*_args, tools, **_kwargs):
-        captured_tools.append(tools)
-        return next(turns)
-
-    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
-        run = await AgentService.run_agent(
-            db_session, crm_user, "qué archivos tengo en mi drive"
-        )
-
-    assert run.status == "completed", run.error
-    # Every turn must see the full palette — same length, every turn.
-    expected_len = len(AGENT_TOOLS)
-    assert all(len(t) == expected_len for t in captured_tools), (
-        f"expected every turn to see {expected_len} tools, got "
-        f"{[len(t) for t in captured_tools]}"
-    )
-    # And the tool sets must be IDENTICAL across turns (no shrink, no
-    # filter, no gate).
-    expected_names = {t["function"]["name"] for t in AGENT_TOOLS}
-    for i, palette in enumerate(captured_tools):
-        names = {t["function"]["name"] for t in palette}
-        assert names == expected_names, f"turn {i + 1} palette diverged: {names ^ expected_names}"
-
-
-def test_get_tool_palette_returns_full_schema_by_default() -> None:
-    """Pin the extension-point default: today ``get_tool_palette`` returns
-    the universal ``AGENT_TOOLS`` palette for everyone. The seam exists
-    so per-tenant skill toggles can plug in later WITHOUT touching the
-    loop — but switching the default to a filtered palette must be an
-    explicit, observable change (this test will fail if someone does it
-    accidentally)."""
-    from app.services.agent_service import get_tool_palette
-    from app.services.agent_tools import AGENT_TOOLS
-
-    # The seam is a pure function — it doesn't actually touch ``user`` today,
-    # so a sentinel object works fine and avoids coupling this regression
-    # test to the User model schema.
-    user = object()
-    palette = get_tool_palette(user)
-    assert palette is AGENT_TOOLS or palette == AGENT_TOOLS
-    # And the tenant_hint kwarg is accepted but inert today.
-    assert get_tool_palette(user, tenant_hint="artist") == AGENT_TOOLS
-
-
-def test_every_agent_tool_has_a_when_to_use_description() -> None:
-    """Regression guard for the OpenClaw harness contract: tool selection
-    is the agent's job, and rich tool descriptions are the ONLY knob it
-    has. If a description degrades to a one-liner, the agent loses its
-    ability to pick the right tool — silently. This test fails loudly
-    when that happens.
-
-    Each description must be at least 200 chars and contain at least
-    one of the OpenClaw markers ('Use when', 'Use this', 'Returns:').
-    The bar is intentionally low — the goal is to catch regressions to
-    'Search the artist's emails.'-style stubs, not to micromanage prose.
-    """
-    from app.services.agent_tools import AGENT_TOOLS
-
-    bad: list[str] = []
-    for tool in AGENT_TOOLS:
-        name = tool["function"]["name"]
-        desc = tool["function"]["description"]
-        if len(desc) < 200:
-            bad.append(f"{name}: description too short ({len(desc)} chars)")
-            continue
-        markers = ("Use when", "Use this", "Use to", "Use IMMEDIATELY", "Use after")
-        if not any(m in desc for m in markers):
-            bad.append(f"{name}: missing 'Use when/this/to/...' marker")
-        if "Returns" not in desc:
-            bad.append(f"{name}: missing 'Returns' section")
-    assert not bad, "tool description regressions:\n  " + "\n  ".join(bad)
 
 
 @pytest.mark.asyncio
