@@ -32,12 +32,6 @@ Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
 - **Live, no mirror.** Inbox, calendar, drive and Teams views call the upstream
 API on every request. No `emails`, `events`, `drive_files`,
 `connection_sync_state` or RAG-chunks tables; no background sync workers.
-- **Single tab inbox.** Email is shown as one chronological list with free-form
-Gmail search (`q=is:unread from:bob`), keyboard-friendly pagination, and
-per-row **Mute / Spam / Reply** actions wired straight into Gmail.
-- **Mute / Spam are real Gmail actions.** "Silenciar" creates a Gmail filter
-for that sender (skip-inbox + mark-read), "Spam" creates a filter and moves
-the current thread to SPAM. The chat agent has the same tools.
 - **Persistent memory.** A small key/value scratchpad (with optional
 embeddings) the agent reads, writes and recalls across runs.
 See `[docs/MEMORY.md](docs/MEMORY.md)`.
