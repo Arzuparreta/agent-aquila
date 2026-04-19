@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import type {
@@ -26,7 +26,57 @@ type SilenceTarget = {
   senderName?: string | null;
 };
 
-const PAGE_SIZE = 25;
+type LoadError =
+  | { kind: "rate_limited"; retryAfter: number; message: string }
+  | { kind: "needs_reauth"; message: string }
+  | { kind: "no_connection"; message: string }
+  | { kind: "generic"; message: string };
+
+/**
+ * Default page size kept intentionally small. Each row hits Gmail's
+ * `messages.get(format=metadata)` once because `messages.list` only returns
+ * `{id, threadId}`; on the free Gmail tier the per-user QPS cap is tight,
+ * so 10 rows + an in-process metadata cache (see `routes/gmail.py`) keeps
+ * us comfortably below the limit even on rapid back/forward navigation.
+ */
+const PAGE_SIZE = 10;
+
+function parseLoadError(err: unknown): LoadError {
+  if (err instanceof ApiError) {
+    const detail = err.detail as Record<string, unknown> | undefined;
+    const kind = detail && typeof detail === "object" ? detail.kind : undefined;
+    if (kind === "gmail_rate_limited") {
+      const retry = Number(detail?.retry_after_seconds);
+      return {
+        kind: "rate_limited",
+        retryAfter: Number.isFinite(retry) && retry > 0 ? retry : 30,
+        message: err.message,
+      };
+    }
+    if (kind === "needs_reauth" || err.status === 401) {
+      return {
+        kind: "needs_reauth",
+        message:
+          "Gmail necesita reconectarse. Ve a Ajustes → Conectores y vuelve a autorizar.",
+      };
+    }
+    if (
+      err.status === 400 &&
+      err.message.toLowerCase().includes("no gmail connection")
+    ) {
+      return {
+        kind: "no_connection",
+        message:
+          "Aún no has conectado Gmail. Ve a Ajustes → Conectores para vincularlo.",
+      };
+    }
+    return { kind: "generic", message: err.message };
+  }
+  return {
+    kind: "generic",
+    message: err instanceof Error ? err.message : "No se pudieron cargar los correos.",
+  };
+}
 
 /**
  * Inbox surface, post-OpenClaw refactor. There is no local mirror anymore —
@@ -54,15 +104,20 @@ export function InboxPage() {
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [pageStack, setPageStack] = useState<(string | null)[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<LoadError | null>(null);
   const [activeId, setActiveId] = useState<string | null>(initialMessageId);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [silenceTarget, setSilenceTarget] = useState<SilenceTarget | null>(null);
+  // Tracks the most recent fetch so React Strict Mode's double-fire (or a
+  // user spamming search) doesn't issue overlapping Gmail calls — only the
+  // newest call is allowed to write back into state.
+  const loadSeq = useRef(0);
 
   const loadPage = useCallback(
     async (opts?: { q?: string; pageToken?: string | null }) => {
       const q = opts?.q ?? submittedQuery;
       const token = opts?.pageToken ?? null;
+      const seq = ++loadSeq.current;
       setLoading(true);
       try {
         const qs = new URLSearchParams();
@@ -73,25 +128,17 @@ export function InboxPage() {
         const data = await apiFetch<GmailMessagesPage>(
           `/gmail/messages?${qs.toString()}`,
         );
+        if (seq !== loadSeq.current) return;
         setMessages(data.messages);
         setNextPageToken(data.next_page_token);
-        setError(null);
+        setLoadError(null);
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          setError(
-            "Gmail necesita reconectarse. Ve a Ajustes → Conectores y vuelve a autorizar.",
-          );
-        } else {
-          setError(
-            err instanceof ApiError
-              ? err.message
-              : "No se pudieron cargar los correos.",
-          );
-        }
+        if (seq !== loadSeq.current) return;
+        setLoadError(parseLoadError(err));
         setMessages([]);
         setNextPageToken(null);
       } finally {
-        setLoading(false);
+        if (seq === loadSeq.current) setLoading(false);
       }
     },
     [submittedQuery],
@@ -103,6 +150,23 @@ export function InboxPage() {
     setPageStack([]);
     void loadPage({ pageToken: null });
   }, [loadPage]);
+
+  // When the inbox is rate-limited, count down on the visible banner so the
+  // user has a clear sense of when retrying is worthwhile (instead of
+  // refreshing a few times and burning the rest of the QPS budget).
+  const rateLimitRemaining =
+    loadError?.kind === "rate_limited" ? loadError.retryAfter : 0;
+  useEffect(() => {
+    if (rateLimitRemaining <= 0) return;
+    const id = window.setInterval(() => {
+      setLoadError((prev) =>
+        prev?.kind === "rate_limited"
+          ? { ...prev, retryAfter: Math.max(0, prev.retryAfter - 1) }
+          : prev,
+      );
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [rateLimitRemaining]);
 
   useEffect(() => {
     if (!status) return;
@@ -395,11 +459,17 @@ export function InboxPage() {
             onSubmit={onSubmitSearch}
             disabled={loading}
           />
+          {loadError ? (
+            <LoadErrorBanner
+              error={loadError}
+              onRetry={() => void loadPage({ pageToken })}
+            />
+          ) : null}
           <InboxList
             messages={messages}
             activeId={activeId}
             loading={loading}
-            error={error}
+            error={null}
             onPick={onPick}
             onMarkRead={onMarkRead}
             onArchive={onArchive}
@@ -493,6 +563,61 @@ function SearchBar({
         </button>
       </label>
     </form>
+  );
+}
+
+function LoadErrorBanner({
+  error,
+  onRetry,
+}: {
+  error: LoadError;
+  onRetry: () => void;
+}) {
+  if (error.kind === "rate_limited") {
+    const waiting = error.retryAfter > 0;
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        <span>
+          Gmail está limitando tus peticiones.
+          {waiting
+            ? ` Reintenta en ${error.retryAfter}s.`
+            : " Ya puedes reintentar."}
+        </span>
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={waiting}
+          className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+  if (error.kind === "needs_reauth" || error.kind === "no_connection") {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+        <span>{error.message}</span>
+        <a
+          href="/settings"
+          className="rounded bg-sky-500/20 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/30"
+        >
+          Ir a Ajustes
+        </a>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+      <span className="min-w-0 flex-1 break-words">{error.message}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded bg-rose-500/20 px-2 py-0.5 font-medium text-rose-100 hover:bg-rose-500/30"
+      >
+        Reintentar
+      </button>
+    </div>
   );
 }
 

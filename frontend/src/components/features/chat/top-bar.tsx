@@ -40,9 +40,18 @@ export function ChatTopBar({
   // Live unread count via the Gmail proxy. We deliberately use Gmail's own
   // ``q=is:unread`` so the badge always agrees with what the user sees in
   // gmail.com — no local mirror, no triage filter.
+  //
+  // Gentle polling: every 5 minutes is plenty for a count that's mostly
+  // visual decoration. We also pause while the tab is hidden so background
+  // tabs don't burn through the user's per-user Gmail QPS quota (the inbox
+  // surface has a much hotter loop and competes for the same budget).
+  // Failures (rate-limit, no-connection, network) silently freeze the
+  // current count rather than zeroing it out — flipping a "5" to "0"
+  // because of one transient 429 reads as data loss to the user.
   useEffect(() => {
     let cancelled = false;
     const fetchUnread = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await apiFetch<{
           messages?: unknown[];
@@ -58,14 +67,19 @@ export function ChatTopBar({
             : (res.messages?.length ?? 0);
         setUnread(estimate);
       } catch {
-        if (!cancelled) setUnread(0);
+        // Keep the previous count on failure (see comment above).
       }
     };
     void fetchUnread();
-    const id = window.setInterval(fetchUnread, 60_000);
+    const id = window.setInterval(fetchUnread, 5 * 60 * 1000);
+    const onVisible = () => {
+      if (!document.hidden) void fetchUnread();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

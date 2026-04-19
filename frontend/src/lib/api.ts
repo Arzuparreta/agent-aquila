@@ -5,11 +5,20 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, ""
 
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * The structured ``detail`` object FastAPI returned, when one is present.
+   * Backend routes use this to ship machine-readable hints (e.g.
+   * ``{kind:"gmail_rate_limited", retry_after_seconds:30, message:"…"}`` or
+   * ``{kind:"needs_reauth", connection_id:1}``). Components branch on
+   * ``detail?.kind`` to render a tailored UI.
+   */
+  readonly detail: unknown;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, detail?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -44,33 +53,45 @@ function messageFromFastApiDetail(detail: unknown): string | null {
     return parts.length ? parts.join("; ") : null;
   }
   if (detail && typeof detail === "object") {
-    return JSON.stringify(detail);
+    // Backend convention: structured details always carry a human-friendly
+    // ``message`` string. Pluck that out instead of dumping JSON at the user.
+    const message = (detail as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+    return null;
   }
   return null;
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readErrorPayload(
+  response: Response,
+): Promise<{ message: string; detail: unknown }> {
   const raw = (await response.text()).trim();
 
   if (!raw || raw === "Internal Server Error" || looksLikeHtml(raw)) {
-    return fallbackMessage(response.status);
+    return { message: fallbackMessage(response.status), detail: undefined };
   }
 
   try {
     const parsed = JSON.parse(raw) as { detail?: unknown };
-    const fromDetail = parsed.detail !== undefined ? messageFromFastApiDetail(parsed.detail) : null;
+    const detail = parsed.detail;
+    const fromDetail = detail !== undefined ? messageFromFastApiDetail(detail) : null;
     if (fromDetail) {
-      return fromDetail;
+      return { message: fromDetail, detail };
+    }
+    if (detail !== undefined) {
+      return { message: fallbackMessage(response.status), detail };
     }
   } catch {
-    // not JSON — use short text if reasonable
+    // not JSON — fall through and use short text if reasonable
   }
 
   if (raw.length > 500) {
-    return fallbackMessage(response.status);
+    return { message: fallbackMessage(response.status), detail: undefined };
   }
 
-  return raw;
+  return { message: raw, detail: undefined };
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -85,15 +106,25 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     }
   });
 
-  if (response.status === 401 && typeof window !== "undefined") {
-    localStorage.removeItem("token");
-    window.location.href = "/login";
-    throw new ApiError("Unauthorized", 401);
-  }
-
   if (!response.ok) {
-    const message = await readErrorMessage(response);
-    throw new ApiError(message, response.status);
+    const { message, detail } = await readErrorPayload(response);
+    // 401s normally mean the *session* expired — log out and bounce to login.
+    // But the backend also returns 401 with ``{kind:"needs_reauth"}`` when a
+    // *connector* (e.g. Gmail) needs reauthorising; that should not log the
+    // user out of the app, just let the caller render a "Reconnect" CTA.
+    const isConnectorReauth =
+      response.status === 401 &&
+      detail !== undefined &&
+      typeof detail === "object" &&
+      detail !== null &&
+      (detail as Record<string, unknown>).kind === "needs_reauth";
+
+    if (response.status === 401 && !isConnectorReauth && typeof window !== "undefined") {
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+      throw new ApiError("Unauthorized", 401, detail);
+    }
+    throw new ApiError(message, response.status, detail);
   }
 
   if (response.status === 204) {
