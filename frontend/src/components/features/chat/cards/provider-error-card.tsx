@@ -5,12 +5,14 @@ import Link from "next/link";
 type Card = {
   card_kind: "provider_error";
   provider: string;
+  provider_label?: string | null;
   status_code?: number | null;
   message: string;
   hint?: string | null;
   detail?: string | null;
   model?: string | null;
   settings_url?: string | null;
+  transient?: boolean | null;
 };
 
 /**
@@ -21,17 +23,29 @@ type Card = {
  */
 export function ProviderErrorCard({ card }: { card: Card }) {
   const settingsHref = card.settings_url ?? "/settings";
+  const label = card.provider_label || card.provider;
   return (
     <div className="rounded-2xl border border-rose-400/40 bg-rose-950/40 p-3 text-sm text-rose-50">
       <div className="mb-1 flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-rose-300">
         <span>
-          Error de proveedor · {card.provider}
+          Error de proveedor · {label}
           {card.status_code ? ` · HTTP ${card.status_code}` : ""}
         </span>
+        {card.transient ? (
+          <span className="rounded-full bg-rose-900/60 px-2 py-0.5 text-[10px] font-semibold normal-case tracking-normal text-rose-200">
+            Temporal
+          </span>
+        ) : null}
       </div>
       <div className="mb-1 font-semibold">{card.message}</div>
       {card.hint ? (
         <p className="mb-2 whitespace-pre-wrap text-rose-100/90">{card.hint}</p>
+      ) : null}
+      {card.transient ? (
+        <p className="mb-2 text-xs text-rose-200/80">
+          Es un problema temporal del proveedor. Vuelve a enviar el mensaje en unos
+          segundos.
+        </p>
       ) : null}
       {card.model ? (
         <p className="mb-2 text-xs text-rose-200/80">

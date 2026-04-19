@@ -372,13 +372,29 @@ async def send_message(
         thread_context_hint=await _build_thread_context_hint(db, thread),
     )
 
-    assistant_text = run.assistant_reply or (run.error or "")
     cards = _agent_run_to_attachments(run)
+    # When the agent loop already produced a structured error card
+    # (provider_error / key_decrypt_error), don't *also* dump `run.error` text
+    # into the message bubble or the top-of-thread banner — the card already
+    # shows message + actionable hint + a CTA, and duplicating it just clutters
+    # the conversation. Any partial assistant_reply produced before the failure
+    # is still rendered (preserving useful context).
+    has_error_card = any(
+        isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
+        for c in cards
+    )
+    if run.assistant_reply:
+        assistant_text = run.assistant_reply
+    elif has_error_card:
+        assistant_text = ""
+    else:
+        assistant_text = run.error or ""
+
     asst_msg = await append_message(
         db,
         thread,
         role="assistant" if run.status == "completed" else "system",
-        content=assistant_text or "",
+        content=assistant_text,
         attachments=cards or None,
         agent_run_id=run.id,
     )
@@ -390,5 +406,5 @@ async def send_message(
         thread=thread_to_read(thread),
         user_message=message_to_read(user_msg),
         assistant_message=message_to_read(asst_msg),
-        error=run.error if run.status != "completed" else None,
+        error=run.error if (run.status != "completed" and not has_error_card) else None,
     )

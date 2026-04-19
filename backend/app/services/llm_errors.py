@@ -64,24 +64,31 @@ class LLMProviderError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.provider = provider
+        canonical = normalize_provider_id(provider)
+        definition = get_provider(canonical)
+        self.provider_label = definition.label if definition else provider
         self.status_code = status_code
         self.message = message
         self.hint = hint or ""
         self.detail = detail
         self.body_excerpt = (detail or "")[:400]
         self.model = model
-        self.settings_url = f"/settings#ai-{provider}"
+        self.settings_url = f"/settings#ai-{canonical}"
+        # Transient = upstream is overloaded / rate-limiting; user can just retry.
+        self.transient = bool(status_code and (status_code in (408, 429) or 500 <= status_code < 600))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": "provider_error",
             "provider": self.provider,
+            "provider_label": self.provider_label,
             "status_code": self.status_code,
             "message": self.message,
             "hint": self.hint,
             "detail": self.body_excerpt or None,
             "model": self.model,
             "settings_url": self.settings_url,
+            "transient": self.transient,
         }
 
 
@@ -142,10 +149,13 @@ def from_http_status_error(
 ) -> LLMProviderError:
     body = (exc.response.text or "").strip()
     status = exc.response.status_code
+    canonical = normalize_provider_id(provider)
+    definition = get_provider(canonical)
+    label = definition.label if definition else provider
     return LLMProviderError(
         provider=provider,
         status_code=status,
-        message=f"{provider} responded HTTP {status}.",
+        message=f"{label} responded HTTP {status}.",
         hint=hint_for_http_error(provider=provider, status_code=status, model=model, body=body),
         detail=body or None,
         model=model,

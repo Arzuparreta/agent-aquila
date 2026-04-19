@@ -1421,6 +1421,12 @@ class AgentService:
             # Provider-side failure (404 model not found, 401 bad key, network down...).
             # Record the structured detail as a step so the chat route can render an
             # inline "provider_error" card instead of leaking raw httpx text.
+            #
+            # We deliberately do NOT also write the same text into assistant_reply:
+            # the card already shows message + hint + technical detail + a "Settings"
+            # CTA, and writing it here would duplicate the same line as a plain
+            # bubble above the card. Any partial assistant_reply produced before the
+            # failure is preserved (so e.g. "I started looking… <CARD>" still works).
             step_idx += 1
             db.add(
                 AgentRunStep(
@@ -1433,7 +1439,6 @@ class AgentService:
             )
             run.status = "failed"
             run.error = f"{exc.message} {exc.hint}".strip()[:2000]
-            run.assistant_reply = run.assistant_reply or run.error
         except KeyDecryptError as exc:
             step_idx += 1
             db.add(
@@ -1455,7 +1460,7 @@ class AgentService:
                 "An API key for the active provider exists but cannot be decrypted. "
                 "Re-enter it in Settings → AI to recover."
             )
-            run.assistant_reply = run.error
+            # No assistant_reply: the key_decrypt_error card already explains it.
         except NoActiveProviderError as exc:
             run.status = "failed"
             run.error = str(exc) or "No AI provider is selected as active."

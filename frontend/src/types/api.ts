@@ -327,12 +327,14 @@ export type ChatCard =
   | {
       card_kind: "provider_error";
       provider: string;
+      provider_label?: string | null;
       status_code?: number | null;
       message: string;
       hint?: string | null;
       detail?: string | null;
       model?: string | null;
       settings_url?: string | null;
+      transient?: boolean | null;
     }
   | {
       card_kind: "key_decrypt_error";
