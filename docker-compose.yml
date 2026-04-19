@@ -1,3 +1,5 @@
+name: agent-aquila
+
 services:
   db:
     image: pgvector/pgvector:pg16
