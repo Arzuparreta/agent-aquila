@@ -32,6 +32,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 - `docker-compose.yml` local orchestration
 - `.env.example` environment template (Postgres, JWT, CORS, Redis, optional OAuth env fallbacks, agent limits)
 - `docs/testing.md` how to run backend pytest and frontend lint
+- `docs/MANUAL_QA.md` manual UI checklist (chat thread actions + inbox row menus)
 
 ## Local run
 

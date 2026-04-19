@@ -93,6 +93,12 @@ npm run lint
 
 ---
 
+## Manual UI QA
+
+There is no Playwright/Cypress suite for the chat or inbox yet. After changing those surfaces, run through the checklist in **[`MANUAL_QA.md`](MANUAL_QA.md)** (thread kebab: rename / pin / archive / delete; inbox kebab: read state, promote, silence, start chat).
+
+---
+
 ## Summary
 
 | Area | Runner | Needs DB |
