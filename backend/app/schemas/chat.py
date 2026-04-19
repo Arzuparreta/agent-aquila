@@ -19,7 +19,7 @@ class EntityRef(BaseModel):
     """Lightweight @mention chip the artist drops into the composer by tapping a library item."""
 
     type: EntityType
-    id: int
+    id: int | str
     label: str | None = None
 
 

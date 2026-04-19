@@ -21,7 +21,15 @@ type Card = {
  * addition to) the assistant's normal reply so the artist can act on it
  * without diving into the agent_run JSON.
  */
-export function ProviderErrorCard({ card }: { card: Card }) {
+export function ProviderErrorCard({
+  card,
+  onRetry,
+  retryDisabled
+}: {
+  card: Card;
+  onRetry?: () => void;
+  retryDisabled?: boolean;
+}) {
   const settingsHref = card.settings_url ?? "/settings";
   const label = card.provider_label || card.provider;
   return (
@@ -60,12 +68,24 @@ export function ProviderErrorCard({ card }: { card: Card }) {
           </pre>
         </details>
       ) : null}
-      <Link
-        href={settingsHref}
-        className="inline-block rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-500"
-      >
-        Abrir ajustes de IA
-      </Link>
+      <div className="flex flex-wrap gap-2">
+        {onRetry ? (
+          <button
+            type="button"
+            disabled={retryDisabled}
+            onClick={onRetry}
+            className="rounded-full bg-rose-500 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Reintentar
+          </button>
+        ) : null}
+        <Link
+          href={settingsHref}
+          className="inline-block rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-500"
+        >
+          Abrir ajustes de IA
+        </Link>
+      </div>
     </div>
   );
 }

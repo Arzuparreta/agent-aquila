@@ -13,7 +13,7 @@ side-effect-only over Postgres; LLM and tool execution belong to the agent.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 from sqlalchemy import desc, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -260,6 +260,79 @@ def message_to_read(msg: ChatMessage) -> MessageRead:
         agent_run_id=msg.agent_run_id,
         created_at=msg.created_at,
     )
+
+
+def attachments_as_entity_refs(raw: list[dict[str, Any]] | None) -> list[EntityRef]:
+    """Parse user @reference chips from ``attachments`` (assistant rows use ``card_kind`` cards)."""
+    if not raw:
+        return []
+    out: list[EntityRef] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        if item.get("card_kind") is not None:
+            continue
+        t = item.get("type")
+        eid = item.get("id")
+        if t is None or eid is None:
+            continue
+        eid_norm: int | str
+        if isinstance(eid, (int, str)):
+            eid_norm = eid
+        else:
+            eid_norm = str(eid)
+        lbl = item.get("label")
+        label = None if lbl is None else str(lbl)
+        out.append(EntityRef(type=str(t), id=eid_norm, label=label))
+    return out
+
+
+async def get_thread_message(
+    db: AsyncSession, thread: ChatThread, message_id: int
+) -> ChatMessage | None:
+    stmt = select(ChatMessage).where(
+        ChatMessage.id == message_id,
+        ChatMessage.thread_id == thread.id,
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def latest_prior_user_message(
+    db: AsyncSession, thread: ChatThread, before_message_id: int
+) -> ChatMessage | None:
+    stmt = (
+        select(ChatMessage)
+        .where(
+            ChatMessage.thread_id == thread.id,
+            ChatMessage.id < before_message_id,
+            ChatMessage.role == "user",
+        )
+        .order_by(ChatMessage.id.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def thread_latest_message_id(db: AsyncSession, thread: ChatThread) -> int | None:
+    stmt = (
+        select(ChatMessage.id)
+        .where(ChatMessage.thread_id == thread.id)
+        .order_by(ChatMessage.id.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+def message_is_retriable_failed_turn(msg: ChatMessage) -> bool:
+    """Whether the row is a failed agent reply the artist can re-run from the prior user turn."""
+    if msg.role not in ("assistant", "system"):
+        return False
+    if msg.attachments:
+        for c in msg.attachments:
+            if isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error"):
+                return True
+        return False
+    return msg.role == "system"
 
 
 def render_user_message(content: str, references: Iterable[EntityRef]) -> str:

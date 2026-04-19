@@ -15,7 +15,15 @@ type Card = {
  * unwrap it (KEK rotated without re-wrap, ciphertext corrupted, etc.).
  * The fix is always "re-enter the API key", so we deep-link to settings.
  */
-export function KeyDecryptErrorCard({ card }: { card: Card }) {
+export function KeyDecryptErrorCard({
+  card,
+  onRetry,
+  retryDisabled
+}: {
+  card: Card;
+  onRetry?: () => void;
+  retryDisabled?: boolean;
+}) {
   const settingsHref = card.settings_url ?? "/settings";
   return (
     <div className="rounded-2xl border border-amber-400/40 bg-amber-950/40 p-3 text-sm text-amber-50">
@@ -37,12 +45,24 @@ export function KeyDecryptErrorCard({ card }: { card: Card }) {
           </pre>
         </details>
       ) : null}
-      <Link
-        href={settingsHref}
-        className="inline-block rounded-full bg-amber-600 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-500"
-      >
-        Reintroducir clave
-      </Link>
+      <div className="flex flex-wrap gap-2">
+        {onRetry ? (
+          <button
+            type="button"
+            disabled={retryDisabled}
+            onClick={onRetry}
+            className="rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Reintentar
+          </button>
+        ) : null}
+        <Link
+          href={settingsHref}
+          className="inline-block rounded-full bg-amber-600 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-500"
+        >
+          Reintroducir clave
+        </Link>
+      </div>
     </div>
   );
 }

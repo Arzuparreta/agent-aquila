@@ -10,6 +10,9 @@ Endpoints:
 - ``POST   /threads/{id}/messages`` — append a user message and run the agent in this
   thread context. Persists both messages, returns the assistant reply with any inline
   cards (approval / setup) attached as ``attachments``.
+- ``POST   /threads/{id}/messages/{message_id}/retry`` — delete a failed assistant/system
+  reply (provider/decrypt error or plain system failure) and re-run the agent from the
+  preceding user turn without duplicating the user bubble.
 """
 from __future__ import annotations
 
@@ -34,12 +37,17 @@ from app.services.agent_service import AgentService
 from app.services.capability_policy import risk_tier_for_kind
 from app.services.chat_service import (
     append_message,
+    attachments_as_entity_refs,
     get_or_create_entity_thread,
     get_or_create_general_thread,
     get_thread,
+    get_thread_message,
     history_for_agent,
+    latest_prior_user_message,
     list_messages,
     list_threads,
+    message_is_retriable_failed_turn,
+    thread_latest_message_id,
     message_to_read,
     render_user_message,
     thread_to_read,
@@ -276,6 +284,97 @@ async def send_message(
     # shows message + actionable hint + a CTA, and duplicating it just clutters
     # the conversation. Any partial assistant_reply produced before the failure
     # is still rendered (preserving useful context).
+    has_error_card = any(
+        isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
+        for c in cards
+    )
+    if run.assistant_reply:
+        assistant_text = run.assistant_reply
+    elif has_error_card:
+        assistant_text = ""
+    else:
+        assistant_text = run.error or ""
+
+    asst_msg = await append_message(
+        db,
+        thread,
+        role="assistant" if run.status == "completed" else "system",
+        content=assistant_text,
+        attachments=cards or None,
+        agent_run_id=run.id,
+    )
+    await db.commit()
+    await db.refresh(asst_msg)
+    await db.refresh(thread)
+
+    return MessageSendResult(
+        thread=thread_to_read(thread),
+        user_message=message_to_read(user_msg),
+        assistant_message=message_to_read(asst_msg),
+        error=run.error if (run.status != "completed" and not has_error_card) else None,
+    )
+
+
+@router.post("/{thread_id}/messages/{message_id}/retry", response_model=MessageSendResult)
+async def retry_failed_message(
+    thread_id: int,
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MessageSendResult:
+    """Re-run the agent for the user turn that produced this failed reply.
+
+    Deletes the failed assistant/system row (provider error, decrypt error, or plain
+    system failure), then appends a fresh assistant message — no duplicate user bubble.
+    """
+    thread = await get_thread(db, current_user, thread_id)
+    if not thread:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
+
+    failed = await get_thread_message(db, thread, message_id)
+    if not failed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+    if not message_is_retriable_failed_turn(failed):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This message cannot be retried",
+        )
+
+    latest_id = await thread_latest_message_id(db, thread)
+    if latest_id is not None and latest_id != failed.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only the latest message in the thread can be retried",
+        )
+
+    user_msg = await latest_prior_user_message(db, thread, failed.id)
+    if not user_msg:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No user message found to retry from",
+        )
+
+    AgentRateLimitService.check(current_user.id)
+
+    await db.delete(failed)
+    await db.commit()
+
+    refs = attachments_as_entity_refs(user_msg.attachments)
+    rendered = render_user_message(user_msg.content, refs)
+    prior = await history_for_agent(db, thread)
+    if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == user_msg.content:
+        prior = prior[:-1]
+
+    run = await AgentService.run_agent(
+        db,
+        current_user,
+        rendered,
+        prior_messages=prior,
+        thread_id=thread.id,
+        thread_context_hint=await _build_thread_context_hint(db, thread),
+    )
+
+    cards = _agent_run_to_attachments(run)
     has_error_card = any(
         isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
         for c in cards

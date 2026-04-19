@@ -62,6 +62,31 @@ export function ChatThreadView({
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, sending]);
 
+  const retryFailedMessage = useCallback(
+    async (failedMessageId: number) => {
+      setSending(true);
+      setError(null);
+      try {
+        const result = await apiFetch<ChatSendResult>(
+          `/threads/${thread.id}/messages/${failedMessageId}/retry`,
+          { method: "POST" }
+        );
+        setMessages((prev) => {
+          const without = prev.filter((m) => m.id !== failedMessageId);
+          return [...without, result.assistant_message];
+        });
+        onThreadUpdated(result.thread);
+        if (result.error) setError(result.error);
+        else setError(null);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "El reintento falló.");
+      } finally {
+        setSending(false);
+      }
+    },
+    [thread.id, onThreadUpdated]
+  );
+
   const onSend = useCallback(
     async (content: string, references: EntityRef[]) => {
       const optimisticId = (optimisticIdRef.current -= 1);
@@ -121,7 +146,13 @@ export function ChatThreadView({
         ) : null}
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
           {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} onMessageUpdate={updateMessage} />
+            <MessageBubble
+              key={m.id}
+              message={m}
+              onMessageUpdate={updateMessage}
+              onRetryFailedMessage={retryFailedMessage}
+              retryDisabled={sending}
+            />
           ))}
           {sending ? (
             <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted">
