@@ -28,61 +28,49 @@ agent memory, a markdown-driven skills folder, and live OAuth tools for Gmail,
 Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
 
 There is no local mirror, no CRM, no triage classifier, no inbox machine
-learning. Every read goes straight to the upstream API and every write — label,
-archive, trash, mute, spam, create/update/delete calendar events, move/share
-Drive files, post to Teams chats, etc. — runs immediately against the live
-provider.
-
-The harness ships **one** approval gate out of the box, on outbound email
-(`email_send` / `email_reply`). That isn't because send is the only destructive
-thing the agent can do — it can already trash messages, delete events, post to
-channels, and so on without asking. It's because outbound email is the one
-write that's **visible to third parties and your reputation**, and an undo
-won't take it back. Everything else is auto-applied. If you don't want even
-that one gate, drop the entry from `_PROPOSAL_TOOLS` in
-[`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py).
-If you want more gates (e.g. delete-anything, post-to-Teams), add them the
-same way. The harness doesn't have a fixed opinion — you do.
+learning. Every read goes straight to the upstream API; every write is either
+auto-applied (archive, label, mute, move to spam, calendar edits, file moves,
+Teams messages…) or —  —
+staged as a one-click human approval.
 
 ## How it works
 
 - **Live, no mirror.** Inbox, calendar, drive and Teams views call the upstream
-  API on every request. No `emails`, `events`, `drive_files`,
-  `connection_sync_state` or RAG-chunks tables; no background sync workers.
+API on every request. No `emails`, `events`, `drive_files`,
+`connection_sync_state` or RAG-chunks tables; no background sync workers.
 - **Single tab inbox.** Email is shown as one chronological list with free-form
-  Gmail search (`q=is:unread from:bob`), keyboard-friendly pagination, and
-  per-row **Mute / Spam / Reply** actions wired straight into Gmail.
+Gmail search (`q=is:unread from:bob`), keyboard-friendly pagination, and
+per-row **Mute / Spam / Reply** actions wired straight into Gmail.
 - **Mute / Spam are real Gmail actions.** "Silenciar" creates a Gmail filter
-  for that sender (skip-inbox + mark-read), "Spam" creates a filter and moves
-  the current thread to SPAM. The chat agent has the same tools.
+for that sender (skip-inbox + mark-read), "Spam" creates a filter and moves
+the current thread to SPAM. The chat agent has the same tools.
 - **Persistent memory.** A small key/value scratchpad (with optional
-  embeddings) the agent reads, writes and recalls across runs.
-  See [`docs/MEMORY.md`](docs/MEMORY.md).
+embeddings) the agent reads, writes and recalls across runs.
+See `[docs/MEMORY.md](docs/MEMORY.md)`.
 - **Skills folder.** Drop a markdown file in `backend/skills/` and the agent
-  can list and load it as a recipe ("how do I…?"). Three seed skills ship in
-  the repo. See [`docs/SKILLS.md`](docs/SKILLS.md).
+can list and load it as a recipe ("how do I…?"). Three seed skills ship in
+the repo. See `[docs/SKILLS.md](docs/SKILLS.md)`.
 - **Heartbeat instead of sync.** A single ARQ cron (off by default) wakes the
-  agent every N minutes with a tiny prompt. Per-user rate-limited.
+agent every N minutes with a tiny prompt. Per-user rate-limited.
 
 ## Features
 
 - **Agent chat** — ReAct loop with OpenAI-style tool calling.
 - **Live Gmail control** — list/search/get messages and threads, modify
-  labels, archive, trash, mark read/unread, manage filters, **mute** /
-  **move-to-spam senders**, send and reply (with approval).
+labels, archive, trash, mark read/unread, manage filters, **mute** /
+**move-to-spam senders**, send and reply (with approval).
 - **Live Google Calendar / Drive** — list/create/update/delete events, list
-  files, share, move, trash. All auto-applied.
+files, share, move, trash. All auto-applied.
 - **Live Microsoft 365** — Outlook mail (read + write) and Teams messaging via
-  Microsoft Graph. All auto-applied except sending email.
-- **One approval gate, on outbound email.** `email_send` and `email_reply`
-  produce a one-click approval card; every other write — trash, delete event,
-  post to channel, share file, etc. — auto-applies. Configurable per-tool.
+Microsoft Graph. All auto-applied except sending email.
+- **Approval gate for sending email only.** Every other write executes
+immediately; only `email_send` and `email_reply` are staged as proposals.
 - **Persistent agent memory** — scratchpad with importance, tags and optional
-  semantic recall.
+semantic recall.
 - **Skills folder** — markdown recipes the agent can list and load.
 - **Bring your own model** — OpenAI-compatible, Ollama, Google AI Studio,
-  OpenRouter, Anthropic, Azure OpenAI, LiteLLM, or any OpenAI-shape custom
-  endpoint.
+OpenRouter, Anthropic, Azure OpenAI, LiteLLM, or any OpenAI-shape custom
+endpoint.
 - **BYOK key storage** with envelope encryption.
 - **One-command deploy** — Docker Compose brings up everything.
 
@@ -95,8 +83,8 @@ docker compose up --build
 
 Then open:
 
-- **App** — <http://localhost:3002>
-- **API docs** — <http://localhost:8000/docs>
+- **App** — [http://localhost:3002](http://localhost:3002)
+- **API docs** — [http://localhost:8000/docs](http://localhost:8000/docs)
 
 The compose stack also exposes Postgres on `localhost:5433` and Redis on
 `localhost:6379`. Migrations run automatically when the API container starts;
@@ -113,21 +101,18 @@ connectors** in the app and follow the on-page steps.
 
 ## Approval policy
 
-| Action                                              | Behaviour     |
-| --------------------------------------------------- | ------------- |
-| Send / reply email (Gmail or Outlook)               | **Proposal**  |
-| Archive, trash, label, mark read/unread, mute, spam | Auto-apply    |
-| Create / update / delete calendar events            | Auto-apply    |
-| Move / share / trash Drive files                    | Auto-apply    |
-| Post to Teams chats / channels                      | Auto-apply    |
-| Read of any kind                                    | Auto-apply    |
 
-Approvals live at `/proposals` and arrive as a card in the chat. The gate set
-isn't load-bearing — it's a one-line policy in
-[`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py)
-(`_PROPOSAL_TOOLS`) plus a matching kind in
-[`backend/app/services/capability_registry.py`](backend/app/services/capability_registry.py).
-Add or drop entries to make the agent more cautious or more autonomous.
+| Action                                              | Behaviour    |
+| --------------------------------------------------- | ------------ |
+| Send / reply email (Gmail or Outlook)               | **Proposal** |
+| Archive, trash, label, mark read/unread, mute, spam | Auto-apply   |
+| Create / update / delete calendar events            | Auto-apply   |
+| Move / share / trash Drive files                    | Auto-apply   |
+| Post to Teams chats / channels                      | Auto-apply   |
+| Read of any kind                                    | Auto-apply   |
+
+
+Approvals live at `/proposals` and arrive as a card in the chat.
 
 ## Choosing an AI model
 
@@ -142,17 +127,17 @@ local, and paid options.
 
 For copy-pasteable setup per tier (free cloud / free local / paid frontier)
 and a smoke-test command that exercises the same code paths the agent uses,
-see [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
+see `[docs/PROVIDERS.md](docs/PROVIDERS.md)`.
 
 ## Extending the harness
 
 Adding a capability is a one-edit change:
 
 1. Register a new entry in `AGENT_TOOLS` inside
-   [`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py)
+  `[backend/app/services/agent_tools.py](backend/app/services/agent_tools.py)`
    with a clear description (when to use, when not to use, inputs, outputs).
 2. Wire its handler into `AgentService._dispatch_tool` in
-   [`backend/app/services/agent_service.py`](backend/app/services/agent_service.py).
+  `[backend/app/services/agent_service.py](backend/app/services/agent_service.py)`.
 
 That's it. The harness picks the new tool up on the next turn — no prompt
 edits, no router changes, no keyword maps. The tool description is the only
@@ -165,22 +150,23 @@ in `agent_tools.py` and register the proposal kind in
 
 ## Project layout
 
-- [`backend/`](backend/) — FastAPI app, SQLAlchemy models, services, routes,
-  Alembic migrations, ARQ worker, and the `skills/` markdown folder.
-- [`frontend/`](frontend/) — Next.js app (chat, simplified inbox, settings
-  with memory + skills viewers).
-- [`docker-compose.yml`](docker-compose.yml) — local orchestration (`db`,
-  `redis`, `backend`, `worker`, `frontend`).
-- [`.env.example`](.env.example) — environment template.
-- [`docs/`](docs/) — extra documentation.
+- `[backend/](backend/)` — FastAPI app, SQLAlchemy models, services, routes,
+Alembic migrations, ARQ worker, and the `skills/` markdown folder.
+- `[frontend/](frontend/)` — Next.js app (chat, simplified inbox, settings
+with memory + skills viewers).
+- `[docker-compose.yml](docker-compose.yml)` — local orchestration (`db`,
+`redis`, `backend`, `worker`, `frontend`).
+- `[.env.example](.env.example)` — environment template.
+- `[docs/](docs/)` — extra documentation.
 
 ## Further reading
 
-- [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — AI provider setup and smoke
-  tests.
-- [`docs/MEMORY.md`](docs/MEMORY.md) — how agent persistent memory works.
-- [`docs/SKILLS.md`](docs/SKILLS.md) — how to author and load skills.
-- [`docs/testing.md`](docs/testing.md) — backend pytest and frontend lint.
-- [`docs/MANUAL_QA.md`](docs/MANUAL_QA.md) — manual UI checklist.
-- <http://localhost:8000/docs> — live OpenAPI reference (once the stack is
-  up).
+- `[docs/PROVIDERS.md](docs/PROVIDERS.md)` — AI provider setup and smoke
+tests.
+- `[docs/MEMORY.md](docs/MEMORY.md)` — how agent persistent memory works.
+- `[docs/SKILLS.md](docs/SKILLS.md)` — how to author and load skills.
+- `[docs/testing.md](docs/testing.md)` — backend pytest and frontend lint.
+- `[docs/MANUAL_QA.md](docs/MANUAL_QA.md)` — manual UI checklist.
+- [http://localhost:8000/docs](http://localhost:8000/docs) — live OpenAPI reference (once the stack is
+up).
+
