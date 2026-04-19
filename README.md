@@ -9,7 +9,7 @@
 
 # Agent Aquila
 
-> A self-hosted, OpenClaw-style agent harness. Bring your own model, keep your own data, talk to your real services live.
+> A self-hosted agent harness focused on control and observability. Bring your own model, keep your own data, talk to your real services live.
 
 Agent Aquila is a self-hosted cockpit for an AI agent that **operates your real
 accounts directly**. It pairs a deliberately bare ReAct loop with persistent
