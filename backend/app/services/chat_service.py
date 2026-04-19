@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Iterable
 
 from sqlalchemy import desc, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat_message import ChatMessage
@@ -35,25 +36,39 @@ def _entity_label_default(entity_type: str | None, entity_id: int | None) -> str
 
 
 async def get_or_create_general_thread(db: AsyncSession, user: User) -> ChatThread:
-    """One ``general`` thread per user (no entity binding)."""
-    stmt = select(ChatThread).where(
+    """Return the user's *default* general thread, creating it on first call.
+
+    Identified by ``is_default = TRUE`` (not by the broader
+    ``kind='general' AND entity IS NULL`` predicate, which also matches
+    free-form "Nueva conversación" threads). Uses Postgres
+    ``INSERT ... ON CONFLICT DO NOTHING`` against the partial unique index
+    ``uq_chat_threads_user_default`` so two concurrent requests can race
+    safely — the loser falls through to the SELECT and returns the winner's
+    row.
+    """
+    select_default = select(ChatThread).where(
         ChatThread.user_id == user.id,
-        ChatThread.kind == "general",
-        ChatThread.entity_type.is_(None),
-        ChatThread.entity_id.is_(None),
+        ChatThread.is_default.is_(True),
     )
-    row = (await db.execute(stmt)).scalar_one_or_none()
+    row = (await db.execute(select_default)).scalar_one_or_none()
     if row:
         return row
-    row = ChatThread(
-        user_id=user.id,
-        kind="general",
-        entity_type=None,
-        entity_id=None,
-        title="General",
+
+    insert_stmt = (
+        pg_insert(ChatThread)
+        .values(
+            user_id=user.id,
+            kind="general",
+            entity_type=None,
+            entity_id=None,
+            title="General",
+            is_default=True,
+        )
+        .on_conflict_do_nothing(index_elements=["user_id"], index_where=ChatThread.is_default.is_(True))
     )
-    db.add(row)
+    await db.execute(insert_stmt)
     await db.flush()
+    row = (await db.execute(select_default)).scalar_one()
     return row
 
 
