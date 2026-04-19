@@ -11,15 +11,11 @@ from app.services.ai_providers import PROVIDER_IDS, resolve_known_provider_id
 # models against the saved key without re-transmitting it.
 STORED_API_KEY_SENTINEL = "__stored__"
 
-ProviderId = Literal[
-    "openai",
-    "anthropic",
-    "ollama",
-    "openrouter",
-    "litellm",
-    "azure_openai",
-    "openai_compatible",
-]
+# NOTE: do NOT hardcode the provider list here. The registry
+# (``app.services.ai_providers.registry``) is the single source of truth
+# and is exposed as ``PROVIDER_IDS``. Schemas that accept a provider id
+# validate against ``PROVIDER_IDS`` via the validator below, so adding a
+# new provider to the registry auto-flows everywhere without schema edits.
 
 
 class UserAISettingsRead(BaseModel):
@@ -98,10 +94,20 @@ class ProviderConfigRequest(BaseModel):
     user's saved key. ``base_url`` may be blank if the provider has a default.
     """
 
-    provider_id: ProviderId
+    provider_id: str
     api_key: str | None = None
     base_url: str | None = None
     extras: dict[str, Any] | None = None
+
+    @field_validator("provider_id")
+    @classmethod
+    def _normalize_provider_id(cls, value: str) -> str:
+        normalized = resolve_known_provider_id(value)
+        if normalized is None or normalized not in PROVIDER_IDS:
+            raise ValueError(
+                f"Unknown provider_id: {value!r}. Known: {', '.join(PROVIDER_IDS)}."
+            )
+        return normalized
 
 
 class TestConnectionResult(BaseModel):
