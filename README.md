@@ -20,7 +20,7 @@
 
 # Agent Aquila
 
-**Self-hosted agent focused on observability and control** — your accounts, your keys, your machine. Chat with an agent that can work in **Gmail, Calendar, Drive, Outlook, and Teams** the same way you would.
+**Self-hosted agentic harness delivered as a personal assistant, focused on observability and control** — your accounts, your keys, your machine. Chat with an agent that can work in **Gmail, Calendar, Drive, Outlook, and Teams** the same way you would.
 
 Persistent **memory** (what to remember across sessions) and **skills** (markdown recipes in `backend/skills/`) keep behaviour consistent. An optional **heartbeat** job can wake the agent on a schedule.
 
