@@ -10,14 +10,24 @@ Docs: https://developers.google.com/gmail/api/reference/rest
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 logger = logging.getLogger(__name__)
+
+# Gmail user-rate 429 bodies look like:
+# "User-rate limit exceeded.  Retry after 2026-04-19T23:39:25.148Z"
+_GMAIL_RETRY_AFTER_ISO = re.compile(
+    r"Retry\s+after\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)",
+    re.IGNORECASE,
+)
 
 
 class GmailAPIError(Exception):
@@ -50,9 +60,10 @@ class GmailClient:
     cut as ECONNRESET and surface as an opaque 500. Now:
 
     - 5xx: one quick retry with jittered ~0.7 s backoff.
-    - 429: surface **immediately** as :class:`GmailRateLimited` carrying the
-      ``Retry-After`` Gmail gave us, so the route can return a clean 429 to
-      the frontend and the UI can render a countdown. Sitting on the socket
+    - 429: surface **immediately** as :class:`GmailRateLimited` carrying a
+      retry hint: prefer the ISO deadline in the JSON body (``Retry after …Z``)
+      when present, else the ``Retry-After`` header, else 30 s. The route
+      returns a clean 429 so the UI can render a countdown. Sitting on the socket
       doesn't help — Gmail's per-user quota refills in wall-clock time
       regardless of whether we're blocking on it.
     """
@@ -73,6 +84,59 @@ class GmailClient:
         except ValueError:
             return None
 
+    @staticmethod
+    def _seconds_until_gmail_retry_deadline(body: str) -> float | None:
+        """Parse ``Retry after <ISO8601>Z`` from Gmail's JSON error body.
+
+        Returns seconds from *now* (UTC) until that instant, or ``None`` if
+        no deadline was found. Minimum 1 s so the UI never shows ``0s``.
+        """
+        texts: list[str] = []
+        raw = (body or "").strip()
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            texts.append(raw)
+        else:
+            if isinstance(data, dict):
+                err = data.get("error")
+                if isinstance(err, dict):
+                    m = err.get("message")
+                    if isinstance(m, str):
+                        texts.append(m)
+                    for item in err.get("errors") or []:
+                        if isinstance(item, dict):
+                            em = item.get("message")
+                            if isinstance(em, str):
+                                texts.append(em)
+            if not texts:
+                texts.append(raw)
+
+        deadline_iso: str | None = None
+        for t in texts:
+            match = _GMAIL_RETRY_AFTER_ISO.search(t)
+            if match:
+                deadline_iso = match.group(1)
+                break
+        if not deadline_iso:
+            return None
+
+        s = deadline_iso.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            deadline = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = (deadline - now).total_seconds()
+        # Slight clock skew or same-second retry → still show a short wait.
+        return max(1.0, delta)
+
     async def _request(
         self, method: str, path: str, *, params: dict[str, Any] | None = None, json: Any | None = None
     ) -> dict[str, Any]:
@@ -92,18 +156,24 @@ class GmailClient:
                 raise GmailAPIError(504, f"Gmail timeout: {exc}") from exc
 
             if resp.status_code == 429:
-                retry_after = self._parse_retry_after(resp.headers.get("Retry-After"))
+                text = resp.text or ""
+                retry_from_body = self._seconds_until_gmail_retry_deadline(text)
+                retry_header = self._parse_retry_after(resp.headers.get("Retry-After"))
+                if retry_from_body is not None:
+                    retry_after = retry_from_body
+                elif retry_header is not None:
+                    retry_after = retry_header
+                else:
+                    retry_after = 30.0
                 # Log the upstream body so operators can confirm this really is
                 # Google's quota/rate response (vs a mistaken 429 from a proxy).
                 logger.warning(
-                    "Gmail API returned HTTP 429 (Retry-After=%r): %s",
+                    "Gmail API returned HTTP 429 (Retry-After=%r, computed_s=%s): %s",
                     resp.headers.get("Retry-After"),
-                    (resp.text or "")[:800],
+                    retry_after,
+                    text[:800],
                 )
-                # Gmail's body sometimes carries a wall-clock retry hint; we
-                # don't try to parse it because Retry-After (when present) is
-                # canonical, and otherwise we just suggest a short pause.
-                raise GmailRateLimited(resp.text, retry_after or 30.0)
+                raise GmailRateLimited(text, retry_after)
             if resp.status_code >= 500:
                 if attempt == 0:
                     await asyncio.sleep(0.5 + random.uniform(0, 0.3))
