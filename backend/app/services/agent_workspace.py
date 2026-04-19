@@ -70,11 +70,11 @@ _PROMPTED_TOOL_INSTRUCTIONS = """# Tool calling (prompted mode)
 The API may not expose tools separately. You **must** invoke tools by emitting one or more blocks in this exact shape (JSON object inside the tags, valid JSON only):
 
 <tool_call>
-{"name": "TOOL_NAME", "arguments": { ... }}
+{{"name": "TOOL_NAME", "arguments": {{ ... }}}}
 </tool_call>
 
 - Use only tool names from the **Available tools (JSON)** section below.
-- To show the user your reply, call the tool named `final_answer` with `arguments` like `{"text": "...", "citations": []}`.
+- To show the user your reply, call the tool named `final_answer` with `arguments` like `{{"text": "...", "citations": []}}`.
 - You may emit multiple `<tool_call>` blocks in one assistant message if the host allows multiple steps; otherwise emit one at a time.
 - Do not wrap JSON in markdown code fences inside `<tool_call>`.
 
