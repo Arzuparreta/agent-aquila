@@ -27,20 +27,6 @@ accounts directly**. It pairs a deliberately bare ReAct loop with persistent
 agent memory, a markdown-driven skills folder, and live OAuth tools for Gmail,
 Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
 
-## How it works
-
-- **Live, no mirror.** Inbox, calendar, drive and Teams views call the upstream
-API on every request. No `emails`, `events`, `drive_files`,
-`connection_sync_state` or RAG-chunks tables; no background sync workers.
-- **Persistent memory.** A small key/value scratchpad (with optional
-embeddings) the agent reads, writes and recalls across runs.
-See `[docs/MEMORY.md](docs/MEMORY.md)`.
-- **Skills folder.** Drop a markdown file in `backend/skills/` and the agent
-can list and load it as a recipe ("how do I…?"). Three seed skills ship in
-the repo. See `[docs/SKILLS.md](docs/SKILLS.md)`.
-- **Heartbeat instead of sync.** A single ARQ cron (off by default) wakes the
-agent every N minutes with a tiny prompt. Per-user rate-limited.
-
 ## Features
 
 - **Agent chat** — ReAct loop with OpenAI-style tool calling.
