@@ -55,7 +55,7 @@ export function ChatTopBar({
   }, []);
 
   return (
-    <header className="pt-safe flex items-center gap-2 border-b border-white/5 bg-slate-900 px-3 py-2">
+    <header className="relative z-10 pt-safe flex items-center gap-2 border-b border-white/5 bg-slate-900 px-3 py-2">
       <button
         onClick={onOpenDrawer}
         className="rounded-md p-2 text-slate-300 hover:bg-white/5 md:hidden"

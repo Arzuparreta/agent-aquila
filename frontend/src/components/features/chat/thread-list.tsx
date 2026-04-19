@@ -110,16 +110,14 @@ export function ChatThreadList({
                       </span>
                     </span>
                     {t.unread > 0 ? (
-                      <span className="rounded-full bg-indigo-500 px-2 py-0.5 text-xs">{t.unread}</span>
+                      <span className="shrink-0 rounded-full bg-indigo-500 px-2 py-0.5 text-xs">{t.unread}</span>
                     ) : null}
                   </button>
-                  <span
-                    className={
-                      menuOpen
-                        ? "ml-1 inline-flex"
-                        : "ml-1 hidden group-hover/row:inline-flex group-focus-within/row:inline-flex"
-                    }
-                  >
+                  {/* Fixed width so the title `truncate` ellipsis ends left of the ⋯ control.
+                      Previously the menu wrapper was `display: none` until hover, so the row button
+                      spanned the full width and CSS “…” looked like a three-dot menu — clicks
+                      selected the thread instead of opening actions. */}
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-end">
                     <ThreadActionsMenu
                       thread={t}
                       variant="row"
@@ -130,7 +128,7 @@ export function ChatThreadList({
                       onToggleArchive={onToggleArchiveThread}
                       onDelete={onDeleteThread}
                     />
-                  </span>
+                  </div>
                 </div>
               </li>
             );

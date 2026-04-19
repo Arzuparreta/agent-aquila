@@ -69,6 +69,14 @@ export function DropdownMenu({
 
   const wrapRef = React.useRef<HTMLSpanElement | null>(null);
 
+  const onTriggerClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      if (stopPropagation) e.stopPropagation();
+      setOpen(!open);
+    },
+    [open, setOpen, stopPropagation]
+  );
+
   React.useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
@@ -87,18 +95,31 @@ export function DropdownMenu({
     };
   }, [open, close]);
 
+  // Merge toggle into the trigger's click handler. Wrapping the trigger in a parent
+  // ``<span onClick>`` breaks when the trigger calls ``stopPropagation()`` (used on
+  // row menus so the row's own click does not fire): the event never reaches the
+  // wrapper, so the menu never opens.
+  const triggerNode = React.isValidElement(trigger)
+    ? React.cloneElement(
+        trigger as React.ReactElement<{ onClick?: React.MouseEventHandler<HTMLElement> }>,
+        {
+          onClick: (e: React.MouseEvent<HTMLElement>) => {
+            (trigger as React.ReactElement<{ onClick?: React.MouseEventHandler<HTMLElement> }>).props.onClick?.(
+              e
+            );
+            onTriggerClick(e as React.MouseEvent);
+          },
+        }
+      )
+    : (
+        <span className="inline-flex cursor-pointer" role="presentation" onClick={onTriggerClick}>
+          {trigger}
+        </span>
+      );
+
   return (
     <span ref={wrapRef} className={cn("relative inline-flex", className)}>
-      <span
-        onClick={(e) => {
-          if (stopPropagation) e.stopPropagation();
-          setOpen(!open);
-        }}
-        // Keyboard focus reaches the underlying trigger; we only need to
-        // intercept its click to toggle.
-      >
-        {trigger}
-      </span>
+      {triggerNode}
       {open ? (
         <DropdownMenuContext.Provider value={{ close }}>
           <div
