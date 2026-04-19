@@ -12,7 +12,7 @@ database of your emails — it's a private notebook the agent owns.
 
 | Layer       | Location                                                            |
 | ----------- | ------------------------------------------------------------------- |
-| Database    | `agent_memories` table (created by Alembic `0018_openclaw_destructive`) |
+| Database    | `agent_memories` table (created by Alembic migration `0018`)        |
 | Model       | `backend/app/models/agent_memory.py`                                |
 | Service     | `backend/app/services/agent_memory_service.py`                      |
 | HTTP API    | `backend/app/routes/memory.py` — `GET/POST/DELETE /memory`          |

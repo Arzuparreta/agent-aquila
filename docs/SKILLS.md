@@ -4,9 +4,9 @@ A **skill** is a markdown file in [`backend/skills/`](../backend/skills/) that
 describes a recipe the agent can follow: what it's for, what tools it needs,
 and the step-by-step.
 
-Skills are the OpenClaw-style answer to "how do I make the agent do X
-consistently?" without baking X into the system prompt forever. The system
-prompt mentions that skills exist; the agent decides on its own whether to
+Skills are the answer to "how do I make the agent do X consistently?"
+without baking X into the system prompt forever. The system prompt mentions
+that skills exist; the agent decides on its own whether to
 list and load one for the current request.
 
 ## Where they live

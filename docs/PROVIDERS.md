@@ -18,9 +18,9 @@ After configuring any tier, run the smoke test below to confirm the agent
 loop and embeddings (used by [agent persistent memory](MEMORY.md))
 work against your configured provider.
 
-> The OpenClaw refactor removed the inbox triage classifier and the RAG
-> chunk index. Embeddings are now used solely by the agent's persistent
-> memory; if you don't care about semantic memory recall you can leave the
+> The harness no longer ships an inbox triage classifier or a RAG chunk
+> index. Embeddings are now used solely by the agent's persistent memory;
+> if you don't care about semantic memory recall you can leave the
 > embedding model unset.
 
 ---

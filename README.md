@@ -33,7 +33,7 @@ auto-applied (archive, label, mute, move to spam, calendar edits, file moves,
 Teams messages…) or — for the one truly destructive case, **sending email** —
 staged as a one-click human approval.
 
-## What changed (OpenClaw refactor)
+## How it works
 
 - **Live, no mirror.** Inbox, calendar, drive and Teams views call the upstream
   API on every request. No `emails`, `events`, `drive_files`,
@@ -52,8 +52,6 @@ staged as a one-click human approval.
   the repo. See [`docs/SKILLS.md`](docs/SKILLS.md).
 - **Heartbeat instead of sync.** A single ARQ cron (off by default) wakes the
   agent every N minutes with a tiny prompt. Per-user rate-limited.
-- **One destructive Alembic migration.** `0018_openclaw_destructive` drops all
-  the legacy tables and creates `agent_memories`. The downgrade is a no-op.
 
 ## Features
 
@@ -90,8 +88,8 @@ Then open:
 
 The compose stack also exposes Postgres on `localhost:5433` and Redis on
 `localhost:6379`. Migrations run automatically when the API container starts;
-the destructive `0018_openclaw_destructive` migration will drop all the legacy
-mirror/CRM tables on first boot of an existing install.
+the destructive migration `0018` will drop all the legacy mirror/CRM tables on
+first boot of an existing install.
 
 To wire up Gmail, Outlook, Drive or Teams, go to **Settings → External
 connectors** in the app and follow the on-page steps.

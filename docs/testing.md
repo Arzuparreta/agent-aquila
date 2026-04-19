@@ -78,7 +78,7 @@ Useful variants:
 | `test_capability_registry.py` | No | Registry keys for the only two proposal kinds the agent can produce (`email_send`, `email_reply`) and their preview helpers |
 | `test_ai_providers.py` | No | AI provider adapters (OpenAI, Ollama, Anthropic, OpenRouter, Azure, LiteLLM, custom OpenAI-compatible): URLs, headers, parsing, error codes — HTTP mocked via `httpx.AsyncClient` patches |
 | `test_ai_routes.py` | No | Provider registry enumeration, API key sentinel resolution, Pydantic normalization for user AI settings |
-| `test_agent_tools.py` | Mostly yes | OpenClaw tool catalogue invariants: every tool is in exactly one bucket (auto-apply or proposal), every tool is dispatched, and `propose_email_send` / `propose_email_reply` are the only proposal tools |
+| `test_agent_tools.py` | Mostly yes | Agent tool catalogue invariants: every tool is in exactly one bucket (auto-apply or proposal), every tool is dispatched, and `propose_email_send` / `propose_email_reply` are the only proposal tools |
 
 ---
 
