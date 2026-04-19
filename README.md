@@ -29,7 +29,7 @@ Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
 
 ## Features
 
-- **Agent chat** — ReAct loop with OpenAI-style tool calling.
+- **Agent chat** — ReAct loop with tool calling.
 - **Live Gmail control** — list/search/get messages and threads, modify
 labels, archive, trash, mark read/unread, manage filters, **mute** /
 **move-to-spam senders**, send and reply (with approval).
