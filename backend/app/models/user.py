@@ -16,3 +16,8 @@ class User(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     ai_settings = relationship("UserAISettings", back_populates="user", uselist=False)
+    ai_provider_configs = relationship(
+        "UserAIProviderConfig",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

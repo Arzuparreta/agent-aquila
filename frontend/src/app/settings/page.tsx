@@ -1,20 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { ProtectedPage } from "@/components/features/protected-page";
-import { AdvancedSection } from "@/components/features/ai-settings/advanced-section";
-import { ModelSelector } from "@/components/features/ai-settings/model-selector";
-import { ProviderFields } from "@/components/features/ai-settings/provider-fields";
-import { ProviderPicker } from "@/components/features/ai-settings/provider-picker";
-import { TestConnectionButton } from "@/components/features/ai-settings/test-connection-button";
-import { useSettingsForm } from "@/components/features/ai-settings/use-settings-form";
+import { ProviderForm } from "@/components/features/ai-settings/provider-form";
+import { ProviderList } from "@/components/features/ai-settings/provider-list";
+import { useProviderConfigs } from "@/components/features/ai-settings/use-provider-configs";
 import { ConnectorsSection } from "@/components/features/connectors/connectors-section";
 import { LanguageSection } from "@/components/features/language/language-section";
 import { MaintenanceSection } from "@/components/features/maintenance/maintenance-section";
+import { ProtectedPage } from "@/components/features/protected-page";
 import { ThemeSection } from "@/components/features/theme/theme-section";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
 import { useTranslation } from "@/lib/i18n";
@@ -22,22 +18,19 @@ import { useTranslation } from "@/lib/i18n";
 /**
  * Technical / advanced settings.
  *
- * Hidden behind the top-bar dropdown menu intentionally — the artist should never
- * need to come here in normal use; the agent does the heavy lifting. Layout is
- * minimal and uses the existing AI / connector / language components verbatim,
- * just rearranged to be much less visually busy than the previous tabs page.
+ * Hidden behind the top-bar menu; the artist should rarely come here.
+ *
+ * The AI section is now a list-rail + form-pane layout that owns every
+ * saved provider for the user (`/ai/providers/configs`). Switching the
+ * rail selection no longer overwrites the previously-saved row, so keys
+ * survive seamlessly when toggling between e.g. Google AI Studio and
+ * Ollama.
  */
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { providers, loading: providersLoading } = useProviderRegistry();
-  const form = useSettingsForm({ providers, providersLoading });
-  const [savedToast, setSavedToast] = useState<string | null>(null);
-
-  const onSave = async () => {
-    const result = await form.save();
-    if (result) setSavedToast(result.message);
-    setTimeout(() => setSavedToast(null), 3000);
-  };
+  const api = useProviderConfigs({ providers, providersLoading });
+  const [aiToggleSaving, setAiToggleSaving] = useState(false);
 
   return (
     <ProtectedPage>
@@ -51,94 +44,60 @@ export default function SettingsPage() {
           </Link>
           <h1 className="text-base font-semibold">Ajustes técnicos</h1>
         </header>
-        <main className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-4">
+        <main className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-4">
           <Card>
-            <h2 className="mb-1 text-base font-semibold">Modelo de IA</h2>
-            <p className="mb-3 text-xs text-fg-subtle">
-              Trae tu propia clave (BYOK). Puedes elegir un modelo distinto para cada tarea.
-            </p>
-            <div className="grid gap-3">
-              <ProviderPicker
-                providers={providers}
-                value={form.form.providerId}
-                onChange={form.setProviderId}
-                disabled={providersLoading}
-              />
-              {form.provider ? (
-                <>
-                  <ProviderFields
-                    provider={form.provider}
-                    storedApiKey={Boolean(form.settings?.has_api_key)}
-                    value={{
-                      apiKey: form.form.apiKey,
-                      baseUrl: form.form.baseUrl,
-                      extras: form.form.extras
-                    }}
-                    onChange={(next) =>
-                      form.setFieldsValue({
-                        apiKey: next.apiKey,
-                        baseUrl: next.baseUrl,
-                        extras: next.extras
-                      })
-                    }
-                  />
-                  <TestConnectionButton
-                    onTest={form.test}
-                    pending={form.testing}
-                    result={form.tested}
-                  />
-                  <ModelSelector
-                    label="Modelo de chat"
-                    value={form.form.chatModel}
-                    onChange={(v) => form.setField("chatModel", v)}
-                    models={form.models}
-                    loading={form.loadingModels}
-                    capability="chat"
-                  />
-                  <ModelSelector
-                    label="Modelo de embeddings (búsqueda semántica)"
-                    value={form.form.embeddingModel}
-                    onChange={(v) => form.setField("embeddingModel", v)}
-                    models={form.models}
-                    loading={form.loadingModels}
-                    capability="embedding"
-                  />
-                  <AdvancedSection summary="Avanzado">
-                    <ModelSelector
-                      label="Modelo de clasificación (opcional)"
-                      value={form.form.classifyModel}
-                      onChange={(v) => form.setField("classifyModel", v)}
-                      models={form.models}
-                      loading={form.loadingModels}
-                    />
-                    <label className="mt-2 flex items-center gap-2 text-sm text-fg">
-                      <input
-                        type="checkbox"
-                        checked={form.form.aiDisabled}
-                        onChange={(e) => form.setField("aiDisabled", e.target.checked)}
-                      />
-                      Desactivar IA temporalmente
-                    </label>
-                    {form.settings?.has_api_key ? (
-                      <Button className="mt-3" onClick={form.clearKey}>
-                        Borrar clave guardada
-                      </Button>
-                    ) : null}
-                  </AdvancedSection>
-                </>
-              ) : null}
-              <div className="mt-2 flex items-center gap-3">
-                <Button
-                  onClick={onSave}
-                  className="border-primary bg-primary text-primary-fg hover:opacity-90"
-                >
-                  Guardar
-                </Button>
-                {savedToast ? (
-                  <span className="text-sm text-emerald-600">{savedToast}</span>
-                ) : null}
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold">Modelos de IA</h2>
+                <p className="mt-1 text-xs text-fg-subtle">
+                  Trae tu propia clave (BYOK). Guarda varios proveedores y cambia el activo
+                  cuando quieras — tus claves se conservan cifradas por separado.
+                </p>
               </div>
+              <label className="inline-flex items-center gap-2 text-sm text-fg">
+                <input
+                  type="checkbox"
+                  checked={api.aiDisabled}
+                  disabled={aiToggleSaving}
+                  onChange={async (e) => {
+                    setAiToggleSaving(true);
+                    try {
+                      await api.setAIDisabled(e.target.checked);
+                    } finally {
+                      setAiToggleSaving(false);
+                    }
+                  }}
+                />
+                Desactivar IA temporalmente
+              </label>
             </div>
+
+            {api.loadError ? (
+              <p
+                role="alert"
+                className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200"
+              >
+                {api.loadError}
+              </p>
+            ) : null}
+
+            {api.loading && providers.length === 0 ? (
+              <p className="text-sm text-fg-subtle">Cargando proveedores…</p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
+                <ProviderList
+                  providers={providers}
+                  configs={api.configs}
+                  activeKind={api.activeKind}
+                  selectedKind={api.selectedKind}
+                  onSelect={api.selectKind}
+                  onStartNew={api.startNew}
+                />
+                <ProviderForm api={api} />
+              </div>
+            )}
+
+            <Toast message={api.toast} />
           </Card>
 
           <Card>
@@ -167,5 +126,21 @@ export default function SettingsPage() {
         </main>
       </div>
     </ProtectedPage>
+  );
+}
+
+function Toast({ message }: { message: string | null }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!message) return;
+    setVisible(true);
+    const id = window.setTimeout(() => setVisible(false), 2400);
+    return () => window.clearTimeout(id);
+  }, [message]);
+  if (!message || !visible) return null;
+  return (
+    <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-lg">
+      {message}
+    </div>
   );
 }

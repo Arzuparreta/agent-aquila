@@ -60,6 +60,9 @@ Useful flags:
 - `--email someone@example.com` — pick a specific user (default: the only user).
 - `--user-id 1` — pick by id.
 - `--skip embeddings` — skip a check if you haven't set an embedding model yet.
+- `--all` — iterate **every** saved provider config for the user and print a
+  per-provider results table. Useful after a KEK rotation or when you want
+  to confirm both an Ollama fallback **and** a cloud key still work.
 
 If a check fails it prints the upstream error verbatim so you can tell apart
 "wrong API key" from "tool_choice not supported" from "model emitted invalid

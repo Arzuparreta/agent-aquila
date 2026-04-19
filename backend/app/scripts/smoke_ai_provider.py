@@ -46,6 +46,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.models.user import User
+from app.models.user_ai_provider_config import UserAIProviderConfig
+from app.services.ai_provider_config_service import AIProviderConfigService
 from app.services.ai_providers import get_provider, normalize_provider_id
 from app.services.embedding_client import EmbeddingClient
 from app.services.llm_client import LLMClient
@@ -315,7 +317,128 @@ async def _resolve_user(db: AsyncSession, *, email: str | None, user_id: int | N
     raise SystemExit("Multiple users exist; pick one with --email or --user-id.")
 
 
+def _row_as_settings_proxy(row: UserAIProviderConfig) -> Any:
+    """Adapt a ``UserAIProviderConfig`` to the duck-typed settings shape the
+    LLM/Embedding clients expect (``provider_kind``, ``base_url``,
+    ``chat_model``, ``embedding_model``, ``classify_model``, ``extras``).
+    Cheap and dependency-free so the smoke script doesn't need to mutate
+    the live ``user_ai_settings`` mirror.
+    """
+
+    class _Proxy:
+        provider_kind = row.provider_kind
+        base_url = row.base_url
+        chat_model = row.chat_model
+        embedding_model = row.embedding_model
+        classify_model = row.classify_model
+        ai_disabled = False
+        extras = row.extras or {}
+
+    return _Proxy()
+
+
+async def _smoke_one_config(
+    row: UserAIProviderConfig, *, skipped: set[str]
+) -> dict[str, bool | None]:
+    """Run all three checks against a single saved config row."""
+    try:
+        api_key = AIProviderConfigService.decrypt_api_key(row) or ""
+    except Exception as exc:  # noqa: BLE001
+        _fail("could not decrypt stored API key", str(exc))
+        return {"tools": False, "json": False, "embeddings": False}
+
+    settings_row = _row_as_settings_proxy(row)
+    results: dict[str, bool | None] = {"tools": None, "json": None, "embeddings": None}
+    if "tools" not in skipped:
+        _section("[1/3] Tool calling")
+        results["tools"] = await _check_tool_calling(api_key, settings_row)
+    if "json" not in skipped:
+        _section("[2/3] JSON mode")
+        results["json"] = await _check_json_mode(api_key, settings_row)
+    if "embeddings" not in skipped:
+        _section("[3/3] Embeddings")
+        results["embeddings"] = await _check_embeddings(api_key, settings_row)
+    return results
+
+
+def _print_table(rows: list[tuple[str, str, dict[str, bool | None]]]) -> None:
+    header = ("Provider", "Chat model", "Tools", "JSON", "Embed")
+    widths = [len(h) for h in header]
+    fmt_rows: list[tuple[str, str, str, str, str]] = []
+    for kind, chat_model, results in rows:
+        rendered = (
+            kind,
+            chat_model or "—",
+            _pretty(results.get("tools")),
+            _pretty(results.get("json")),
+            _pretty(results.get("embeddings")),
+        )
+        fmt_rows.append(rendered)
+        for i, cell in enumerate(rendered):
+            widths[i] = max(widths[i], _visible_len(cell))
+
+    line = " | ".join(h.ljust(widths[i]) for i, h in enumerate(header))
+    sep = "-+-".join("-" * widths[i] for i in range(len(widths)))
+    print()
+    print(line)
+    print(sep)
+    for r in fmt_rows:
+        print(" | ".join(_ljust_visible(r[i], widths[i]) for i in range(len(r))))
+    print()
+
+
+def _pretty(v: bool | None) -> str:
+    if v is True:
+        return f"{_GREEN}OK{_RESET}"
+    if v is False:
+        return f"{_RED}FAIL{_RESET}"
+    return f"{_DIM}—{_RESET}"
+
+
+def _visible_len(text: str) -> int:
+    out = 0
+    in_esc = False
+    for ch in text:
+        if ch == "\033":
+            in_esc = True
+            continue
+        if in_esc:
+            if ch == "m":
+                in_esc = False
+            continue
+        out += 1
+    return out
+
+
+def _ljust_visible(text: str, width: int) -> str:
+    return text + " " * max(0, width - _visible_len(text))
+
+
 async def main_async(args: argparse.Namespace) -> int:
+    skipped = set(args.skip or [])
+    if args.all:
+        async with AsyncSessionLocal() as db:
+            user = await _resolve_user(db, email=args.email, user_id=args.user_id)
+            configs = await AIProviderConfigService.list_configs(db, user)
+            active = await AIProviderConfigService.get_active(db, user)
+            print(f"User: {user.email} (id={user.id})  ·  {len(configs)} saved provider(s)")
+            results_table: list[tuple[str, str, dict[str, bool | None]]] = []
+            for cfg in configs:
+                marker = "  [active]" if active and active.id == cfg.id else ""
+                _section(f"== {cfg.provider_kind}{marker} ==")
+                results = await _smoke_one_config(cfg, skipped=skipped)
+                results_table.append((cfg.provider_kind + marker, cfg.chat_model, results))
+        if not configs:
+            print(f"{_YELLOW}No saved provider configs for this user yet.{_RESET}")
+            return 2
+        _print_table(results_table)
+        any_failed = any(v is False for _, _, r in results_table for v in r.values())
+        if any_failed:
+            print(f"{_RED}Smoke test FAILED for at least one provider.{_RESET}")
+            return 1
+        print(f"{_GREEN}All saved providers passed smoke tests.{_RESET}")
+        return 0
+
     async with AsyncSessionLocal() as db:
         user = await _resolve_user(db, email=args.email, user_id=args.user_id)
         settings_row = await UserAISettingsService.get_or_create(db, user)
@@ -345,7 +468,6 @@ async def main_async(args: argparse.Namespace) -> int:
         print(f"\n{_RED}No API key on file for this provider.{_RESET}")
         return 2
 
-    skipped = set(args.skip or [])
     results: dict[str, bool | None] = {"tools": None, "json": None, "embeddings": None}
 
     if "tools" not in skipped:
@@ -376,6 +498,11 @@ def main() -> None:
         action="append",
         choices=["tools", "json", "embeddings"],
         help="Skip a specific check. Repeatable.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Iterate every saved provider config for this user and print a results table.",
     )
     args = parser.parse_args()
     sys.exit(asyncio.run(main_async(args)))

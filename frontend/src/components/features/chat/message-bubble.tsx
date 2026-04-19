@@ -4,7 +4,9 @@ import type { ChatCard, ChatMessage } from "@/types/api";
 
 import { ApprovalCard } from "./cards/approval-card";
 import { ConnectorSetupCard } from "./cards/connector-setup-card";
+import { KeyDecryptErrorCard } from "./cards/key-decrypt-error-card";
 import { OAuthCard } from "./cards/oauth-card";
+import { ProviderErrorCard } from "./cards/provider-error-card";
 import { RuleLearnedCard } from "./cards/rule-learned-card";
 import { UndoCard } from "./cards/undo-card";
 
@@ -80,6 +82,10 @@ function CardRouter({
       return <OAuthCard card={card as never} />;
     case "rule_learned":
       return <RuleLearnedCard card={card as never} />;
+    case "provider_error":
+      return <ProviderErrorCard card={card as never} />;
+    case "key_decrypt_error":
+      return <KeyDecryptErrorCard card={card as never} />;
     default:
       return null;
   }

@@ -22,8 +22,10 @@ from app.services.agent_tools import (
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
 )
+from app.core.envelope_crypto import KeyDecryptError
 from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
+from app.services.llm_errors import LLMProviderError, NoActiveProviderError
 from app.services.proposal_service import proposal_to_read
 from app.services.semantic_search_service import SemanticSearchService
 from app.services.user_ai_settings_service import UserAISettingsService
@@ -1415,6 +1417,49 @@ class AgentService:
                 run.status = "failed"
                 run.error = "Step budget exceeded"
 
+        except LLMProviderError as exc:
+            # Provider-side failure (404 model not found, 401 bad key, network down...).
+            # Record the structured detail as a step so the chat route can render an
+            # inline "provider_error" card instead of leaking raw httpx text.
+            step_idx += 1
+            db.add(
+                AgentRunStep(
+                    run_id=run.id,
+                    step_index=step_idx,
+                    kind="provider_error",
+                    name=exc.provider,
+                    payload=exc.to_dict(),
+                )
+            )
+            run.status = "failed"
+            run.error = f"{exc.message} {exc.hint}".strip()[:2000]
+            run.assistant_reply = run.assistant_reply or run.error
+        except KeyDecryptError as exc:
+            step_idx += 1
+            db.add(
+                AgentRunStep(
+                    run_id=run.id,
+                    step_index=step_idx,
+                    kind="key_decrypt_error",
+                    name=exc.scope,
+                    payload={
+                        "kind": "key_decrypt_error",
+                        "scope": exc.scope,
+                        "reason": exc.reason,
+                        "settings_url": "/settings#ai",
+                    },
+                )
+            )
+            run.status = "failed"
+            run.error = (
+                "An API key for the active provider exists but cannot be decrypted. "
+                "Re-enter it in Settings → AI to recover."
+            )
+            run.assistant_reply = run.error
+        except NoActiveProviderError as exc:
+            run.status = "failed"
+            run.error = str(exc) or "No AI provider is selected as active."
+            run.assistant_reply = run.error
         except Exception as exc:
             run.status = "failed"
             run.error = str(exc)[:2000]

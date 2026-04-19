@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { ChatThread } from "@/types/api";
 
+import { AIStatusBadge } from "./ai-status-badge";
 import { ThreadActionsMenu } from "./thread-actions-menu";
 
 /**
@@ -76,6 +77,7 @@ export function ChatTopBar({
           onDelete={onDeleteThread}
         />
       ) : null}
+      <AIStatusBadge />
       <Link
         href="/inbox"
         className="relative rounded-md p-2 text-fg-muted hover:bg-interactive-hover"

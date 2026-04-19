@@ -8,7 +8,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, SQLAlchemyError
 
 from app.core.config import settings
+from app.core.envelope_crypto import KeyDecryptError
 from app.routes import api_router
+from app.services.llm_errors import LLMProviderError, NoActiveProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,66 @@ async def sqlalchemy_exception_handler(request, exc: SQLAlchemyError):
         status_code=500,
         content={"detail": "Internal server error — see backend logs for details."},
     )
+
+@app.exception_handler(LLMProviderError)
+async def llm_provider_exception_handler(request, exc: LLMProviderError):
+    """Translate upstream provider failures into a structured 502 response.
+
+    The chat UI looks at ``detail.kind == "provider_error"`` and renders an
+    inline card with the hint + a "Probar conexión" / "Abrir ajustes"
+    affordance instead of dropping the raw httpx error string into the
+    assistant turn.
+    """
+    logger.warning(
+        "LLM provider error on %s: provider=%s status=%s model=%s",
+        request.url.path,
+        exc.provider,
+        exc.status_code,
+        exc.model,
+    )
+    return JSONResponse(status_code=502, content={"detail": exc.to_dict()})
+
+
+@app.exception_handler(NoActiveProviderError)
+async def no_active_provider_handler(request, exc: NoActiveProviderError):
+    """Returned when the agent loop has no provider config selected as active."""
+    return JSONResponse(
+        status_code=412,
+        content={
+            "detail": {
+                "kind": "no_active_provider",
+                "message": str(exc) or "No AI provider is selected as active.",
+                "settings_url": "/settings#ai",
+            }
+        },
+    )
+
+
+@app.exception_handler(KeyDecryptError)
+async def key_decrypt_exception_handler(request, exc: KeyDecryptError):
+    """A stored API key could not be decrypted with the current KEK.
+
+    Surfaces a precise message so the user can re-enter the key, instead of
+    silently behaving as keyless.
+    """
+    logger.warning("Key decrypt error on %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": {
+                "kind": "key_decrypt_error",
+                "scope": exc.scope,
+                "reason": exc.reason,
+                "message": (
+                    "An API key for this provider exists but cannot be decrypted "
+                    "(the encryption key has changed). Re-enter the key in "
+                    "Settings → AI to recover."
+                ),
+                "settings_url": "/settings#ai",
+            }
+        },
+    )
+
 
 app.add_middleware(
     CORSMiddleware,

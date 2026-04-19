@@ -159,6 +159,48 @@ paid frontier) plus a **smoke-test command that exercises the same code
 paths the agent uses** (tool calling + JSON mode + embeddings), see
 [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
 
+### Multi-provider settings & key persistence (BYOK)
+
+The settings UI keeps **every provider's config side-by-side** in
+`user_ai_provider_configs` (one row per `(user_id, provider_kind)`).
+Switching providers in the rail no longer overwrites the previously
+saved row, so an artist who stores both an Ollama base URL and a Google
+AI Studio key can swap between them without losing either.
+
+API keys use **envelope encryption**:
+
+- The **KEK** (key-encryption key) is read from `FERNET_ENCRYPTION_KEY`
+  or, if unset, from `backend/.secrets/fernet.key` (auto-generated and
+  gitignored on first boot — back this file up). The compose file
+  bind-mounts `./backend:/app`, so the file persists across container
+  rebuilds.
+- Each saved API key gets its own per-row **DEK**; the DEK encrypts the
+  key, and the KEK encrypts the DEK. Rotating the KEK is a small,
+  atomic operation — see below.
+- A failed decrypt produces a typed `KeyDecryptError` that the chat
+  surfaces as an actionable card asking the user to re-enter the key
+  for that single provider, instead of silently behaving as keyless.
+
+**Rotate the KEK:**
+
+```bash
+# Re-wrap every DEK with a fresh KEK and overwrite backend/.secrets/fernet.key
+docker compose exec backend python -m app.scripts.rotate_kek
+
+# Or generate a key and print it to stdout (for env-var-based deploys)
+docker compose exec backend python -m app.scripts.rotate_kek --print-only
+```
+
+**Verify every saved provider end-to-end:**
+
+```bash
+# Tests the active provider (default)
+docker compose exec backend python -m app.scripts.smoke_ai_provider --email me@example.com
+
+# Iterates every saved provider and prints a per-provider table
+docker compose exec backend python -m app.scripts.smoke_ai_provider --email me@example.com --all
+```
+
 ## Notes
 
 - Optional agent / ingest behavior is centralized in `.env.example` (`AGENT_*`, `EMAIL_INGEST_AUTO_CREATE_DEALS`, sync poll limits).

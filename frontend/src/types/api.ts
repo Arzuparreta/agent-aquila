@@ -133,6 +133,52 @@ export type ListModelsResponse = {
  */
 export const STORED_API_KEY_SENTINEL = "__stored__";
 
+export type ProviderTestStatus = {
+  ok: boolean | null;
+  at: string | null;
+  message: string | null;
+};
+
+export type ProviderConfig = {
+  provider_kind: string;
+  base_url: string | null;
+  chat_model: string;
+  embedding_model: string;
+  classify_model: string | null;
+  extras: Record<string, unknown> | null;
+  has_api_key: boolean;
+  is_active: boolean;
+  last_test: ProviderTestStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProviderConfigsResponse = {
+  active_provider_kind: string | null;
+  ai_disabled: boolean;
+  configs: ProviderConfig[];
+};
+
+export type ProviderConfigUpsertRequest = {
+  base_url?: string | null;
+  chat_model?: string | null;
+  embedding_model?: string | null;
+  classify_model?: string | null;
+  extras?: Record<string, unknown> | null;
+  /** Send "" to clear, omit/null to keep, anything else to replace. */
+  api_key?: string | null;
+};
+
+export type AIHealth = {
+  ai_disabled: boolean;
+  active_provider_kind: string | null;
+  has_api_key: boolean;
+  chat_model: string | null;
+  last_test: ProviderTestStatus;
+  needs_setup: boolean;
+  message: string | null;
+};
+
 export type SemanticSearchHit = {
   entity_type: string;
   entity_id: number;
@@ -270,6 +316,23 @@ export type ChatCard =
       automation_id: number;
       title: string;
       instruction_natural_language: string;
+    }
+  | {
+      card_kind: "provider_error";
+      provider: string;
+      status_code?: number | null;
+      message: string;
+      hint?: string | null;
+      detail?: string | null;
+      model?: string | null;
+      settings_url?: string | null;
+    }
+  | {
+      card_kind: "key_decrypt_error";
+      scope: string;
+      reason?: string | null;
+      message?: string | null;
+      settings_url?: string | null;
     }
   | {
       card_kind: string;

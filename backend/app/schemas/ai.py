@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -152,3 +153,87 @@ class SemanticSearchHit(BaseModel):
 class EmailDraftResponse(BaseModel):
     draft: str
     model: str
+
+
+# --- Multi-provider configs (new in 0016) ----------------------------------
+
+
+class ProviderTestStatus(BaseModel):
+    """Outcome of the most recent connection test for a saved config."""
+
+    ok: bool | None = None
+    at: datetime | None = None
+    message: str | None = None
+
+
+class ProviderConfigRead(BaseModel):
+    """One persisted ``user_ai_provider_configs`` row, as seen by the UI."""
+
+    provider_kind: str
+    base_url: str | None = None
+    chat_model: str = ""
+    embedding_model: str = ""
+    classify_model: str | None = None
+    extras: dict[str, Any] | None = None
+    has_api_key: bool = False
+    is_active: bool = False
+    last_test: ProviderTestStatus = Field(default_factory=ProviderTestStatus)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProviderConfigsResponse(BaseModel):
+    """Top-level shape returned by ``GET /ai/providers/configs``."""
+
+    active_provider_kind: str | None = None
+    ai_disabled: bool = False
+    configs: list[ProviderConfigRead] = Field(default_factory=list)
+
+
+class ProviderConfigUpsertRequest(BaseModel):
+    """Payload for ``PUT /ai/providers/configs/{kind}``.
+
+    Field semantics mirror :class:`UserAISettingsUpdate`:
+
+    - Unset fields are ignored (partial update).
+    - ``api_key`` of ``""`` clears the stored key; any other non-null value
+      replaces it; ``None`` (the default) leaves it untouched.
+    - ``classify_model`` of ``""`` clears the value.
+    """
+
+    base_url: str | None = None
+    chat_model: str | None = None
+    embedding_model: str | None = None
+    classify_model: str | None = None
+    extras: dict[str, Any] | None = None
+    api_key: str | None = Field(
+        default=None,
+        description=(
+            "Send a non-empty string to replace the stored key; an empty "
+            "string clears it; omit/null to keep the existing key."
+        ),
+    )
+
+
+class SetActiveProviderRequest(BaseModel):
+    provider_kind: str
+
+    @field_validator("provider_kind")
+    @classmethod
+    def _normalize(cls, value: str) -> str:
+        normalized = resolve_known_provider_id(value)
+        if normalized is None or normalized not in PROVIDER_IDS:
+            raise ValueError(f"Unknown provider_kind: {value!r}")
+        return normalized
+
+
+class AIHealthResponse(BaseModel):
+    """Light-weight status payload for the chat top-bar indicator."""
+
+    ai_disabled: bool = False
+    active_provider_kind: str | None = None
+    has_api_key: bool = False
+    chat_model: str | None = None
+    last_test: ProviderTestStatus = Field(default_factory=ProviderTestStatus)
+    needs_setup: bool = True
+    message: str | None = None

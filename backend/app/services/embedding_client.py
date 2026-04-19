@@ -6,6 +6,11 @@ import httpx
 
 from app.models.user_ai_settings import UserAISettings
 from app.services.ai_providers import get_provider, normalize_provider_id
+from app.services.llm_errors import (
+    LLMProviderError,
+    from_http_status_error,
+    from_transport_error,
+)
 
 
 def _api_root(settings_row: UserAISettings) -> str:
@@ -57,10 +62,28 @@ class EmbeddingClient:
         root = _api_root(settings_row)
         url = f"{root}/embeddings"
         headers: dict[str, str] = {**_auth_headers(api_key, settings_row), **_extra_headers(settings_row)}
-        payload = {"model": settings_row.embedding_model, "input": texts}
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data: dict[str, Any] = response.json()
+        provider = normalize_provider_id(settings_row.provider_kind)
+        model = settings_row.embedding_model
+        payload = {"model": model, "input": texts}
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data: dict[str, Any] = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise from_http_status_error(exc, provider=provider, model=model) from exc
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise from_transport_error(exc, provider=provider, model=model) from exc
+        except LLMProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise LLMProviderError(
+                provider=provider,
+                status_code=None,
+                message=f"Unexpected error talking to {provider}.",
+                hint="Check the backend logs for the full traceback.",
+                detail=str(exc),
+                model=model,
+            ) from exc
         items = sorted(data.get("data", []), key=lambda x: x.get("index", 0))
         return [item["embedding"] for item in items]

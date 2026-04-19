@@ -17,6 +17,7 @@ from app.models.pending_proposal import PendingProposal
 from app.models.push_subscription import PushSubscription
 from app.models.rag_chunk import RagChunk
 from app.models.user import User
+from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_ai_settings import UserAISettings
 
 __all__ = [
@@ -41,5 +42,6 @@ __all__ = [
     "PushSubscription",
     "RagChunk",
     "User",
+    "UserAIProviderConfig",
     "UserAISettings",
 ]

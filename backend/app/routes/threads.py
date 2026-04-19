@@ -97,7 +97,22 @@ def _agent_run_to_attachments(run) -> list[dict[str, Any]]:
         )
     # Surface any tool results that look like setup cards (connector_setup / oauth_authorize).
     for step in run.steps or []:
-        if step.kind != "tool" or not step.payload:
+        if not step.payload:
+            continue
+        # Provider-error / key-decrypt steps emitted by the agent loop become
+        # inline chat cards so the UI can render the "Probar conexión" /
+        # "Abrir ajustes" affordances instead of dumping raw httpx text.
+        if step.kind == "provider_error" and isinstance(step.payload, dict):
+            payload = dict(step.payload)
+            payload.setdefault("card_kind", "provider_error")
+            out.append(payload)
+            continue
+        if step.kind == "key_decrypt_error" and isinstance(step.payload, dict):
+            payload = dict(step.payload)
+            payload.setdefault("card_kind", "key_decrypt_error")
+            out.append(payload)
+            continue
+        if step.kind != "tool":
             continue
         result = step.payload.get("result") if isinstance(step.payload, dict) else None
         if isinstance(result, dict) and result.get("card_kind") in {

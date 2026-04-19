@@ -53,6 +53,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # Bind-mount the backend dir for live-reload AND so backend/.secrets/fernet.key
+      # (the auto-generated KEK) survives `docker compose down -v` rebuilds. If you
+      # ever switch this to an image-only deployment, replace this with a dedicated
+      # named volume mounted at /app/.secrets and keep that volume out of CI cleanups.
       - ./backend:/app
 
   worker:
