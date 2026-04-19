@@ -15,8 +15,13 @@ clients — no provider-specific code paths. The differences are entirely in the
 `backend/app/services/ai_providers/registry.py`).
 
 After configuring any tier, run the smoke test below to confirm the agent
-loop, the inbox triage classifier, and RAG embeddings all work against your
-configured provider.
+loop and embeddings (used by [agent persistent memory](MEMORY.md))
+work against your configured provider.
+
+> The OpenClaw refactor removed the inbox triage classifier and the RAG
+> chunk index. Embeddings are now used solely by the agent's persistent
+> memory; if you don't care about semantic memory recall you can leave the
+> embedding model unset.
 
 ---
 
@@ -45,11 +50,11 @@ Tool calling (agent contract)
   OK   all tool-call arguments parsed as dicts
 
 [2/3] JSON mode
-JSON mode (triage / classifier contract)
-  OK   parsed JSON, category='actionable'
+JSON mode (structured output contract)
+  OK   parsed JSON
 
 [3/3] Embeddings
-Embeddings (RAG / semantic-search contract)
+Embeddings (agent memory recall contract)
   OK   got 2 vectors of dim 768; pad_embedding() will zero-pad to 1536. Compatible with pgvector(1536).
 
 Smoke test PASSED — provider is fully wired for the agent harness.
@@ -103,9 +108,9 @@ note that `pad_embedding()` will pad to 1536 — that's expected and harmless.
 
 ### Try it from the chat UI
 
-- Open `/`, ask: **"Hazme un resumen de mis correos accionables sin
-  responder"**. The agent should call `search_emails` (or
-  `semantic_search`), then `final_answer`.
+- Open `/`, ask: **"Resume mis correos no leídos"**. The agent should call
+  `gmail_list_messages` (with `q="is:unread"`), follow up with
+  `gmail_get_message` as needed, and end with `final_answer`.
 - Open `/inbox`, click any email, then **Iniciar chat sobre este correo**.
   The agent should NOT auto-run; you type the first message yourself, then
   the agent answers using tool calls.
@@ -115,14 +120,13 @@ note that `pad_embedding()` will pad to 1536 — that's expected and harmless.
 - Free tier is **generous but rate-limited** (currently ~10 RPM / 250 RPD on
   `gemini-2.5-flash`). For one user that is plenty; if you hit a 429 the run
   fails fast with a readable error.
-- `text-embedding-004` is 768-dim; if you later switch to OpenAI embeddings
-  the existing RAG vectors stay valid (they were padded to 1536) but searches
-  will mix scales until you re-index. To re-index from scratch:
+- `text-embedding-004` is 768-dim; embeddings are only used by agent memory
+  recall, so switching providers later just means recall quality changes —
+  there is no RAG index to rebuild. To wipe the embeddings the agent stored
+  for itself:
 
   ```bash
-  docker compose exec backend python -m app.scripts.seed --reindex   # if available
-  # or just delete rag_chunks and let the background indexer rebuild:
-  docker compose exec db psql -U app -d app -c "TRUNCATE rag_chunks;"
+  docker compose exec db psql -U app -d app -c "UPDATE agent_memories SET embedding=NULL, embedding_model=NULL;"
   ```
 
 ---
@@ -228,10 +232,14 @@ emulating OpenAI's `/chat/completions` shape.
      `gpt-4o` *(any GPT-4 family model with tool calling works; avoid the
      `o1` reasoning models for the agent loop — they don't return tool calls
      in the OpenAI tool-calling format)*.
-   - Classify model: `gpt-4o-mini` (cheap, fast, plenty for inbox triage).
+   - Classify model: `gpt-4o-mini` (used for any structured-output helper
+     calls; can stay equal to the chat model if you don't want a second
+     row).
    - Embedding model: `text-embedding-3-large` (3072-dim, truncated to
      1536 by `pad_embedding`) **or** `text-embedding-3-small` (1536-dim
-     exactly — recommended; no truncation, half the cost).
+     exactly — recommended; no truncation, half the cost). Used only for
+     [agent memory recall](MEMORY.md) — leave unset if you don't need
+     semantic recall.
 5. Paste the API key.
 6. **Probar conexión** → **Guardar**.
 
@@ -245,11 +253,13 @@ All three checks should be `OK` in well under a second total.
 
 ### Cost guardrails
 
-- Inbox triage runs once per inbound email. With `gpt-4o-mini` that's
-  ≈ $0.0001 / email. Even 10k emails / month is ~$1.
+- There is no inbox triage classifier any more — the agent only spends
+  tokens when *you* talk to it (or when the optional `agent_heartbeat`
+  cron is enabled).
 - Agent runs cost the chat-model price × turns. `gpt-4o` is ~$2.50/M in,
-  ~$10/M out. Each turn carries the full tool palette (~6k tokens), so a
-  3-turn answer is ~20k input tokens ≈ $0.05. Budget accordingly.
+  ~$10/M out. Each turn carries the full tool palette (~8k tokens after
+  adding the live Gmail / Calendar / Drive / Outlook / Teams tools), so
+  a 3-turn answer is ~25k input tokens ≈ $0.07. Budget accordingly.
 
 ---
 
@@ -282,7 +292,7 @@ Caveats:
   `backend/app/services/ai_providers/adapters.py`
 - The chat client the agent uses:
   `backend/app/services/llm_client.py` (`chat_with_tools`, `chat_completion`)
-- The embedding client RAG uses:
+- The embedding client agent memory uses:
   `backend/app/services/embedding_client.py`
 - Auto-padding to pgvector's 1536 dims:
   `backend/app/services/embedding_vector.py`

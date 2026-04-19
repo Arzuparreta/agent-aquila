@@ -11,6 +11,18 @@ from app.core.crypto import decrypt_secret, encrypt_secret
 from app.models.connector_connection import ConnectorConnection
 from app.models.user import User
 from app.schemas.connector import ConnectorConnectionCreate, ConnectorConnectionPatch, ConnectorConnectionRead
+from app.services.oauth.google_oauth import GMAIL_REQUIRED_SCOPES
+
+
+# Per-provider required-scope sets. When ``oauth_scopes`` on the connection
+# row no longer cover this set, the connection is flagged ``needs_reauth``
+# and the frontend nags the user to reconnect. We deliberately only check
+# Gmail today — Calendar/Drive haven't grown new scopes — but the table
+# format makes it trivial to extend later.
+_REQUIRED_SCOPES_BY_PROVIDER: dict[str, frozenset[str]] = {
+    "google_gmail": GMAIL_REQUIRED_SCOPES,
+    "gmail": GMAIL_REQUIRED_SCOPES,
+}
 
 
 # Single source of truth: provider id -> (resource, initial-sync job name).
@@ -152,6 +164,20 @@ class ConnectorService:
         scopes = row.oauth_scopes
         if scopes is not None and not isinstance(scopes, list):
             scopes = None
+        # Compute reauth status: any required scope missing from the granted
+        # set means the user has to walk through OAuth again. We treat
+        # missing/null scope arrays as "needs reauth" only when the provider
+        # actually has a required-scope set registered, so pure email/IMAP
+        # connections (no oauth_scopes) aren't falsely flagged.
+        required = _REQUIRED_SCOPES_BY_PROVIDER.get(row.provider)
+        needs_reauth = False
+        missing: list[str] | None = None
+        if required is not None:
+            granted = set(scopes or [])
+            missing_set = required - granted
+            if missing_set:
+                needs_reauth = True
+                missing = sorted(missing_set)
         return ConnectorConnectionRead(
             id=row.id,
             provider=row.provider,
@@ -159,6 +185,8 @@ class ConnectorService:
             meta=row.meta,
             token_expires_at=row.token_expires_at,
             oauth_scopes=scopes,
+            needs_reauth=needs_reauth,
+            missing_scopes=missing,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

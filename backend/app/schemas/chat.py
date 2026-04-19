@@ -6,7 +6,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 ThreadKind = Literal["general", "entity"]
-EntityType = Literal["contact", "deal", "event", "email", "drive_file", "attachment"]
+# After the OpenClaw refactor we don't mirror external resources locally —
+# Gmail messages, calendar events and Drive files are referenced inside chat
+# message attachments using their provider IDs. Threads are therefore almost
+# always ``general``; ``EntityType`` is left as a free-form string so future
+# entity kinds can be added without a schema migration.
+EntityType = str
 MessageRole = Literal["user", "assistant", "system", "event"]
 
 
@@ -57,7 +62,6 @@ class MessageRead(BaseModel):
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=16000)
     references: list[EntityRef] = Field(default_factory=list)
-    attachment_ids: list[int] = Field(default_factory=list)
 
 
 class MessageSendResult(BaseModel):

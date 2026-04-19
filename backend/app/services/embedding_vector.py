@@ -1,4 +1,9 @@
-"""Vector padding for pgvector dimensions — kept separate to avoid circular imports with embedding_service ↔ rag_index_service."""
+"""Vector padding helper for pgvector dimensions.
+
+Embedding providers (OpenAI, Ollama, Cohere, …) all return float lists
+that may not match our pgvector column dimension (1536). This helper
+pads/truncates a vector to the expected size before INSERT/UPDATE.
+"""
 
 from __future__ import annotations
 

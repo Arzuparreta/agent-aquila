@@ -4,9 +4,12 @@ Two kinds:
 - ``general``: free-form chat. The artist always has exactly one *default*
   general thread (``is_default = TRUE``) auto-created on first use, plus any
   number of additional manual general threads ("Nueva conversación").
-- ``entity``: bound to a specific CRM entity (contact/deal/event/email). The
-  agent reuses the same thread for ongoing activity about that entity, so the
-  artist sees one continuous conversation per topic.
+- ``entity``: bound to a specific local entity. After the OpenClaw refactor
+  no first-class entity kinds remain in our DB; external resources (Gmail
+  messages, calendar events, Drive files) are referenced inside chat
+  message attachments using their provider IDs rather than being mirrored.
+  The ``entity_type`` / ``entity_id`` columns stay so future entity kinds
+  can be reintroduced without a migration.
 
 Two DB-level uniqueness guarantees keep idempotency races safe:
 - ``(user_id, entity_type, entity_id)`` for the entity case (NULLs are

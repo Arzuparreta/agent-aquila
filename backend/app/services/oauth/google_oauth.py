@@ -19,9 +19,20 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 # Google Workspace scope groups. Request as a flat space-separated list.
+#
+# ``gmail.modify`` covers nearly every Gmail mutation the agent runs (label,
+# trash/untrash, mark read/unread, send). ``gmail.settings.basic`` is the
+# extra grant required by the new "create / list / delete filter" tools —
+# without it the filter endpoints return 403 even though everything else
+# keeps working. Existing connections from before this scope was added need
+# to re-authorize once; the frontend surfaces that via a banner driven by
+# ``GET /connectors`` (each row carries a ``needs_reauth`` flag derived
+# from the comparison below).
 SCOPES_GMAIL = [
     "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
+GMAIL_REQUIRED_SCOPES: frozenset[str] = frozenset(SCOPES_GMAIL)
 SCOPES_CALENDAR = [
     "https://www.googleapis.com/auth/calendar",
 ]

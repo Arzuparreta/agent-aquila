@@ -43,18 +43,6 @@ class PendingOperationPreviewRead(BaseModel):
 PendingOperationRead = PendingProposalRead
 
 
-class ExecutedActionRead(BaseModel):
-    id: int
-    kind: str
-    summary: str | None = None
-    status: str
-    payload: dict[str, Any]
-    result: dict[str, Any] | None = None
-    reversible_until: datetime | None = None
-    reversed_at: datetime | None = None
-    created_at: datetime
-
-
 class AgentRunRead(BaseModel):
     id: int
     status: str
@@ -63,12 +51,7 @@ class AgentRunRead(BaseModel):
     error: str | None = None
     steps: list[AgentStepRead]
     pending_proposals: list[PendingProposalRead]
-    executed_actions: list[ExecutedActionRead] = []
 
 
 class ProposalResolve(BaseModel):
     note: str | None = Field(default=None, max_length=500)
-
-
-class RagBackfillRequest(BaseModel):
-    limit_per_table: int = Field(default=40, ge=1, le=500)

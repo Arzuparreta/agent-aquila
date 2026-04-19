@@ -10,14 +10,12 @@ from app.models.user import User
 from app.schemas.agent import (
     AgentRunCreate,
     AgentRunRead,
-    ExecutedActionRead,
     PendingOperationPreviewRead,
     PendingOperationRead,
     PendingProposalRead,
 )
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
-from app.services.auto_apply_service import undo_action
 from app.services.capability_policy import risk_tier_for_kind
 from app.services.capability_registry import describe_capabilities
 from app.services.pending_execution_service import preview_for_proposal_kind
@@ -121,30 +119,3 @@ async def reject_proposal(
 ) -> PendingProposalRead:
     prop = await ProposalService.reject(db, current_user, proposal_id, note)
     return proposal_to_read(prop)
-
-
-@router.post("/actions/{action_id}/undo", response_model=ExecutedActionRead)
-async def undo_executed_action(
-    action_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> ExecutedActionRead:
-    """Reverse an auto-applied agent action within its undo window.
-
-    The chat UI fires this when the artist taps the UNDO button on an action card.
-    Returns the updated row (``reversed_at`` set) or HTTP 410 if the window has passed.
-    """
-    row = await undo_action(db, current_user, action_id)
-    await db.commit()
-    await db.refresh(row)
-    return ExecutedActionRead(
-        id=row.id,
-        kind=row.kind,
-        summary=row.summary,
-        status=row.status,
-        payload=dict(row.payload),
-        result=dict(row.result) if row.result else None,
-        reversible_until=row.reversible_until,
-        reversed_at=row.reversed_at,
-        created_at=row.created_at,
-    )

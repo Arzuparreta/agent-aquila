@@ -5,41 +5,38 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import type { Email, TriageCategory } from "@/types/api";
+import type { GmailMessageRow } from "@/types/api";
 
 /**
- * Row-level overflow menu for an email.
+ * Row / detail-bar overflow menu for a Gmail message.
  *
- * Mirrors the chat ``ThreadActionsMenu`` pattern:
- * - hover-revealed kebab on a list row (``variant="row"``).
- * - always-visible kebab in the detail header (``variant="bar"``) so mobile
- *   users without hover can still reach these actions.
- *
- * Mutation handlers are passed in so the page-level component can do
- * optimistic updates and show inline status feedback in one place.
+ * Every action talks straight to the Gmail proxy on the backend (no local
+ * mirror), via the handlers passed in from the page component which owns
+ * optimistic updates and inline status feedback.
  */
 export function EmailActionsMenu({
-  email,
+  message,
   onMarkRead,
-  onPromote,
-  onSuppress,
+  onArchive,
+  onTrash,
+  onSilence,
   onStartChat,
   variant = "row",
   open,
   onOpenChange,
 }: {
-  email: Email;
-  onMarkRead: (id: number, next: boolean) => Promise<void> | void;
-  onPromote: (id: number) => Promise<void> | void;
-  onSuppress: (id: number) => Promise<void> | void;
-  onStartChat: (id: number) => Promise<void> | void;
+  message: GmailMessageRow;
+  onMarkRead: (msg: GmailMessageRow, next: boolean) => void;
+  onArchive: (msg: GmailMessageRow) => void;
+  onTrash: (msg: GmailMessageRow) => void;
+  onSilence: (msg: GmailMessageRow) => void;
+  onStartChat: (msg: GmailMessageRow) => void;
   variant?: "row" | "bar";
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
   const triggerSize = variant === "bar" ? "p-2" : "p-1";
-  const cat: TriageCategory = (email.triage_category ?? "unknown") as TriageCategory;
-  const isRead = !!email.is_read;
+  const isUnread = message.is_unread;
 
   const trigger = (
     <button
@@ -48,7 +45,13 @@ export function EmailActionsMenu({
       className={`rounded-md ${triggerSize} text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg`}
       onClick={(e) => e.stopPropagation()}
     >
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
+      <svg
+        viewBox="0 0 24 24"
+        className="h-4 w-4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
         <circle cx="5" cy="12" r="1.5" />
         <circle cx="12" cy="12" r="1.5" />
         <circle cx="19" cy="12" r="1.5" />
@@ -58,23 +61,23 @@ export function EmailActionsMenu({
 
   return (
     <DropdownMenu trigger={trigger} align="end" open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuItem onSelect={() => void onMarkRead(email.id, !isRead)}>
-        {isRead ? "Marcar como no leído" : "Marcar como leído"}
+      <DropdownMenuItem onSelect={() => onMarkRead(message, isUnread)}>
+        {isUnread ? "Marcar como leído" : "Marcar como no leído"}
       </DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => void onStartChat(email.id)}>
+      <DropdownMenuItem onSelect={() => onStartChat(message)}>
         Iniciar chat sobre este correo
       </DropdownMenuItem>
       <DropdownMenuSeparator />
-      {cat !== "actionable" ? (
-        <DropdownMenuItem onSelect={() => void onPromote(email.id)}>
-          Promover a accionable
-        </DropdownMenuItem>
-      ) : null}
-      {cat !== "noise" ? (
-        <DropdownMenuItem destructive onSelect={() => void onSuppress(email.id)}>
-          Silenciar remitente
-        </DropdownMenuItem>
-      ) : null}
+      <DropdownMenuItem onSelect={() => onArchive(message)}>
+        Archivar
+      </DropdownMenuItem>
+      <DropdownMenuItem destructive onSelect={() => onTrash(message)}>
+        Mover a papelera
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem destructive onSelect={() => onSilence(message)}>
+        Silenciar remitente…
+      </DropdownMenuItem>
     </DropdownMenu>
   );
 }

@@ -48,7 +48,7 @@ class ProposalService:
         if prop.status != "pending":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Proposal is not pending")
 
-        if prop.kind == "connector_email_send":
+        if prop.kind in ("email_send", "email_reply"):
             enforce_email_recipients_allowed(dict(prop.payload))
 
         try:

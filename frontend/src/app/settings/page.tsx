@@ -9,7 +9,9 @@ import { useProviderConfigs } from "@/components/features/ai-settings/use-provid
 import { ConnectorsSection } from "@/components/features/connectors/connectors-section";
 import { LanguageSection } from "@/components/features/language/language-section";
 import { MaintenanceSection } from "@/components/features/maintenance/maintenance-section";
+import { MemorySection } from "@/components/features/memory/memory-section";
 import { ProtectedPage } from "@/components/features/protected-page";
+import { SkillsSection } from "@/components/features/skills/skills-section";
 import { ThemeSection } from "@/components/features/theme/theme-section";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
@@ -117,6 +119,16 @@ export default function SettingsPage() {
               desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.
             </p>
             <ConnectorsSection />
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold">Memoria del agente</h2>
+            <MemorySection />
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold">Habilidades del agente</h2>
+            <SkillsSection />
           </Card>
 
           <Card>

@@ -1,9 +1,16 @@
-"""ARQ worker entrypoint: background sync for Gmail / Calendar / Drive.
+"""ARQ worker entrypoint — OpenClaw-style heartbeat only.
 
-Run with:
+Run with::
+
     arq app.worker.WorkerSettings
 
-The worker shares the app's SQLAlchemy engine and DB URL (via `settings.database_url`).
+After the OpenClaw refactor we no longer ingest Gmail / Calendar / Drive
+mirrors. The worker exists solely to give the agent a periodic
+heartbeat — a tiny prompt that wakes the agent up so it can check its
+inbox, recall recent memories, and decide if anything needs to be
+followed up. The heartbeat is **off by default** so freshly cloned dev
+setups never spawn surprise LLM calls; flip ``AGENT_HEARTBEAT_ENABLED``
+to enable it.
 """
 from __future__ import annotations
 
@@ -12,9 +19,13 @@ from typing import Any
 
 from arq import cron  # type: ignore[import-not-found]
 from arq.connections import RedisSettings  # type: ignore[import-not-found]
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.user import User
+from app.services.agent_rate_limit_service import AgentRateLimitService
+from app.services.agent_service import AgentService
 
 logger = logging.getLogger(__name__)
 
@@ -23,218 +34,77 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.redis_url or "redis://localhost:6379/0")
 
 
-async def gmail_initial_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.gmail_sync_service import run_initial_sync
+HEARTBEAT_PROMPT = (
+    "Heartbeat tick. Take a quick look at the user's inbox using your "
+    "Gmail tools. If anything obviously needs the user's attention "
+    "(a real reply or a decision), record a short note via "
+    "``upsert_memory`` so it surfaces in the next chat. If nothing is "
+    "urgent, simply reply 'nothing to do'."
+)
 
+
+async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Tiny periodic agent run.
+
+    For every active user, run a one-shot agent turn with the heartbeat
+    prompt. The run can call any tool (Gmail, memory, skills) but
+    cannot send email without an approval (so even a misbehaving
+    heartbeat can't auto-send replies).
+    """
+    if not settings.agent_heartbeat_enabled:
+        return {"skipped": True, "reason": "AGENT_HEARTBEAT_ENABLED=false"}
+
+    del ctx
+    summaries: list[dict[str, Any]] = []
     async with AsyncSessionLocal() as db:
-        return await run_initial_sync(db, connection_id)
-
-
-async def gmail_delta_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.gmail_sync_service import run_delta_sync
-
-    async with AsyncSessionLocal() as db:
-        return await run_delta_sync(db, connection_id)
-
-
-async def gmail_tick(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Cron tick: enqueue a delta sync for every active Gmail connection."""
-    from app.services.gmail_sync_service import list_active_gmail_connections
-
-    redis = ctx["redis"]
-    enqueued: list[int] = []
-    async with AsyncSessionLocal() as db:
-        conns = await list_active_gmail_connections(db)
-    for c in conns:
-        await redis.enqueue_job("gmail_delta_sync", c.id, _job_id=f"gmail-delta-{c.id}")
-        enqueued.append(c.id)
-    return {"enqueued": enqueued}
-
-
-async def calendar_initial_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.calendar_sync_service import run_initial_sync
-
-    async with AsyncSessionLocal() as db:
-        return await run_initial_sync(db, connection_id)
-
-
-async def calendar_delta_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.calendar_sync_service import run_delta_sync
-
-    async with AsyncSessionLocal() as db:
-        return await run_delta_sync(db, connection_id)
-
-
-async def calendar_tick(ctx: dict[str, Any]) -> dict[str, Any]:
-    from app.services.calendar_sync_service import list_active_calendar_connections
-
-    redis = ctx["redis"]
-    enqueued: list[int] = []
-    async with AsyncSessionLocal() as db:
-        conns = await list_active_calendar_connections(db)
-    for c in conns:
-        await redis.enqueue_job("calendar_delta_sync", c.id, _job_id=f"calendar-delta-{c.id}")
-        enqueued.append(c.id)
-    return {"enqueued": enqueued}
-
-
-async def drive_initial_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.drive_sync_service import run_initial_sync
-
-    async with AsyncSessionLocal() as db:
-        return await run_initial_sync(db, connection_id)
-
-
-async def drive_delta_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.drive_sync_service import run_delta_sync
-
-    async with AsyncSessionLocal() as db:
-        return await run_delta_sync(db, connection_id)
-
-
-async def drive_extract_text(ctx: dict[str, Any], file_id: int) -> dict[str, Any]:
-    from app.services.drive_sync_service import run_extract_text
-
-    async with AsyncSessionLocal() as db:
-        return await run_extract_text(db, file_id)
-
-
-async def drive_tick(ctx: dict[str, Any]) -> dict[str, Any]:
-    from app.services.drive_sync_service import list_active_drive_connections
-
-    redis = ctx["redis"]
-    enqueued: list[int] = []
-    async with AsyncSessionLocal() as db:
-        conns = await list_active_drive_connections(db)
-    for c in conns:
-        await redis.enqueue_job("drive_delta_sync", c.id, _job_id=f"drive-delta-{c.id}")
-        enqueued.append(c.id)
-    return {"enqueued": enqueued}
-
-
-async def graph_mail_initial_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.graph_sync_service import run_mail_initial
-
-    async with AsyncSessionLocal() as db:
-        return await run_mail_initial(db, connection_id)
-
-
-async def graph_mail_delta_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.graph_sync_service import run_mail_delta
-
-    async with AsyncSessionLocal() as db:
-        return await run_mail_delta(db, connection_id)
-
-
-async def graph_calendar_initial_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.graph_sync_service import run_calendar_initial
-
-    async with AsyncSessionLocal() as db:
-        return await run_calendar_initial(db, connection_id)
-
-
-async def graph_calendar_delta_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.graph_sync_service import run_calendar_delta
-
-    async with AsyncSessionLocal() as db:
-        return await run_calendar_delta(db, connection_id)
-
-
-async def graph_drive_initial_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.graph_sync_service import run_drive_initial
-
-    async with AsyncSessionLocal() as db:
-        return await run_drive_initial(db, connection_id)
-
-
-async def graph_drive_delta_sync(ctx: dict[str, Any], connection_id: int) -> dict[str, Any]:
-    from app.services.graph_sync_service import run_drive_delta
-
-    async with AsyncSessionLocal() as db:
-        return await run_drive_delta(db, connection_id)
-
-
-async def graph_tick(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Cron tick: enqueue a delta sync for every active Microsoft Graph connection."""
-    from app.services.graph_sync_service import list_active_connections
-
-    redis = ctx["redis"]
-    enqueued: list[tuple[str, int]] = []
-    async with AsyncSessionLocal() as db:
-        mail = await list_active_connections(db, {"graph_mail"})
-        cal = await list_active_connections(db, {"graph_calendar"})
-        drv = await list_active_connections(db, {"graph_onedrive"})
-    for c in mail:
-        await redis.enqueue_job("graph_mail_delta_sync", c.id, _job_id=f"graph-mail-delta-{c.id}")
-        enqueued.append(("mail", c.id))
-    for c in cal:
-        await redis.enqueue_job("graph_calendar_delta_sync", c.id, _job_id=f"graph-calendar-delta-{c.id}")
-        enqueued.append(("calendar", c.id))
-    for c in drv:
-        await redis.enqueue_job("graph_drive_delta_sync", c.id, _job_id=f"graph-drive-delta-{c.id}")
-        enqueued.append(("drive", c.id))
-    return {"enqueued": enqueued}
-
-
-async def run_automation(ctx: dict[str, Any], automation_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-    from app.services.automation_service import execute_automation
-
-    async with AsyncSessionLocal() as db:
-        return await execute_automation(db, automation_id, payload)
+        users = list(
+            (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+        )
+        for user in users:
+            if not AgentRateLimitService.try_consume_heartbeat(user.id):
+                summaries.append({"user_id": user.id, "status": "rate_limited"})
+                continue
+            try:
+                run = await AgentService.run_agent(db, user, HEARTBEAT_PROMPT)
+                summaries.append(
+                    {
+                        "user_id": user.id,
+                        "run_id": run.id,
+                        "status": run.status,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 — heartbeat must keep going
+                logger.exception("heartbeat failed for user %s: %s", user.id, exc)
+                summaries.append({"user_id": user.id, "status": "failed", "error": str(exc)[:200]})
+    return {"runs": summaries}
 
 
 async def startup(ctx: dict[str, Any]) -> None:
-    logger.info("worker started; redis=%s db=%s", settings.redis_url, settings.database_url.split("@")[-1])
+    del ctx
+    logger.info(
+        "worker started; redis=%s heartbeat=%s every=%dm",
+        settings.redis_url,
+        settings.agent_heartbeat_enabled,
+        settings.agent_heartbeat_minutes,
+    )
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    del ctx
     logger.info("worker shutdown")
 
 
-class WorkerSettings:
-    """ARQ discovers this class. Referenced as `app.worker.WorkerSettings`."""
+def _heartbeat_minutes() -> set[int]:
+    step = max(1, min(60, settings.agent_heartbeat_minutes))
+    return set(range(0, 60, step))
 
-    functions = [
-        gmail_initial_sync,
-        gmail_delta_sync,
-        gmail_tick,
-        calendar_initial_sync,
-        calendar_delta_sync,
-        calendar_tick,
-        drive_initial_sync,
-        drive_delta_sync,
-        drive_extract_text,
-        drive_tick,
-        graph_mail_initial_sync,
-        graph_mail_delta_sync,
-        graph_calendar_initial_sync,
-        graph_calendar_delta_sync,
-        graph_drive_initial_sync,
-        graph_drive_delta_sync,
-        graph_tick,
-        run_automation,
-    ]
+
+class WorkerSettings:
+    """ARQ discovers this class. Referenced as ``app.worker.WorkerSettings``."""
+
+    functions = [agent_heartbeat]
     cron_jobs = [
-        cron(
-            gmail_tick,
-            minute=set(range(0, 60, max(1, settings.gmail_delta_poll_seconds // 60) or 2)),
-            run_at_startup=True,
-        ),
-        cron(
-            calendar_tick,
-            minute=set(range(0, 60, max(1, settings.calendar_delta_poll_seconds // 60) or 5)),
-            run_at_startup=True,
-        ),
-        cron(
-            drive_tick,
-            minute=set(range(0, 60, max(1, settings.drive_delta_poll_seconds // 60) or 5)),
-            run_at_startup=True,
-        ),
-        cron(
-            graph_tick,
-            minute=set(range(0, 60, max(1, settings.gmail_delta_poll_seconds // 60) or 2)),
-            run_at_startup=True,
-        ),
+        cron(agent_heartbeat, minute=_heartbeat_minutes(), run_at_startup=False),
     ]
     on_startup = startup
     on_shutdown = shutdown

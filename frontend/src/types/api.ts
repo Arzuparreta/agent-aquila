@@ -1,60 +1,49 @@
-export type Contact = {
-  id: number;
-  name: string;
-  email: string | null;
-  phone: string | null;
-  role: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type TriageCategory = "actionable" | "informational" | "noise" | "unknown";
-export type TriageSource = "heuristic" | "llm" | "known_contact" | "manual";
-
-export type Email = {
-  id: number;
-  contact_id: number | null;
-  sender_email: string;
-  sender_name: string | null;
+/**
+ * Live Gmail message row as returned by the `/gmail/messages?detail=metadata`
+ * proxy. There is no local mirror anymore — every field comes from the Gmail
+ * REST API at request time. `internal_date` is Gmail's millisecond epoch as a
+ * string; the inbox renders relative timestamps from it.
+ */
+export type GmailMessageRow = {
+  id: string;
+  thread_id: string;
+  snippet: string;
   subject: string;
-  body: string;
-  snippet?: string | null;
-  received_at: string;
-  is_read?: boolean;
-  created_at: string;
-  triage_category?: TriageCategory | null;
-  triage_reason?: string | null;
-  triage_source?: TriageSource | null;
-  triage_at?: string | null;
+  sender_name: string | null;
+  sender_email: string;
+  to: string;
+  internal_date: string | null;
+  label_ids: string[];
+  is_unread: boolean;
 };
 
-export type Deal = {
-  id: number;
-  contact_id: number;
-  title: string;
-  status: string;
-  amount: string | null;
-  currency: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
+export type GmailMessagesPage = {
+  messages: GmailMessageRow[];
+  next_page_token: string | null;
+  result_size_estimate?: number | null;
 };
 
-export type CalendarEvent = {
-  id: number;
-  deal_id: number | null;
-  venue_name: string;
-  event_date: string;
-  city: string | null;
-  status: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-  triage_category?: TriageCategory | null;
-  triage_reason?: string | null;
-  triage_source?: TriageSource | null;
-  triage_at?: string | null;
+/**
+ * Full Gmail message payload (`format=full`). Untyped beyond the ids because
+ * the inbox detail simply renders headers + a best-effort plain-text body via
+ * a shared decoder utility.
+ */
+export type GmailMessageFull = {
+  id: string;
+  threadId: string;
+  labelIds?: string[];
+  snippet?: string;
+  internalDate?: string;
+  payload?: GmailMessagePart;
+};
+
+export type GmailMessagePart = {
+  partId?: string;
+  mimeType?: string;
+  filename?: string;
+  headers?: { name: string; value: string }[];
+  body?: { size?: number; data?: string; attachmentId?: string };
+  parts?: GmailMessagePart[];
 };
 
 export type UserAISettings = {
@@ -218,6 +207,13 @@ export type ConnectorConnection = {
   meta: Record<string, unknown> | null;
   token_expires_at?: string | null;
   oauth_scopes?: string[] | null;
+  /**
+   * Set by the backend whenever the stored OAuth grant is missing scopes the
+   * agent now requires (e.g. ``gmail.settings.basic`` after the OpenClaw
+   * refactor). The Settings UI shows a "Reconnect Gmail" banner when true.
+   */
+  needs_reauth?: boolean;
+  missing_scopes?: string[] | null;
   created_at: string;
   updated_at: string;
 };
@@ -246,24 +242,19 @@ export type AgentRun = {
   pending_proposals: PendingProposal[];
 };
 
-export type EmailDraftResponse = {
-  draft: string;
-  model: string;
-};
-
 export type ChatThreadKind = "general" | "entity";
-export type ChatEntityType =
-  | "contact"
-  | "deal"
-  | "event"
-  | "email"
-  | "drive_file"
-  | "attachment";
+/**
+ * After the OpenClaw refactor the backend no longer mirrors CRM/email
+ * entities; threads can pin to any opaque external resource (Gmail message id,
+ * Calendar event id, Drive file id, etc.) so the type is a free-form string.
+ */
+export type ChatEntityType = string;
 export type ChatMessageRole = "user" | "assistant" | "system" | "event";
 
 export type EntityRef = {
   type: ChatEntityType;
-  id: number;
+  /** Numeric for legacy DB rows; Gmail/Calendar/Drive use string provider ids. */
+  id: number | string;
   label?: string | null;
 };
 
@@ -282,8 +273,10 @@ export type ChatThread = {
 };
 
 /**
- * Inline cards live inside `ChatMessage.attachments`. Each card is rendered specially
- * by the chat view (approval / undo / connector setup / oauth).
+ * Inline cards live inside `ChatMessage.attachments`. After the OpenClaw
+ * refactor only the approval card (for email send/reply gating), connector
+ * setup / oauth, and provider/key error cards remain — every other agent
+ * write auto-applies and never produces a card.
  */
 export type ChatCard =
   | {
@@ -293,15 +286,6 @@ export type ChatCard =
       summary: string | null;
       risk_tier: string;
       preview: Record<string, unknown>;
-    }
-  | {
-      card_kind: "undo";
-      action_id: number;
-      kind: string;
-      summary: string | null;
-      status: string;
-      reversible_until: string | null;
-      result: Record<string, unknown> | null;
     }
   | {
       card_kind: "connector_setup";
@@ -317,12 +301,6 @@ export type ChatCard =
       provider: string;
       authorize_url: string;
       label?: string | null;
-    }
-  | {
-      card_kind: "rule_learned";
-      automation_id: number;
-      title: string;
-      instruction_natural_language: string;
     }
   | {
       card_kind: "provider_error";
@@ -361,7 +339,6 @@ export type ChatMessage = {
 export type ChatMessageCreate = {
   content: string;
   references?: EntityRef[];
-  attachment_ids?: number[];
 };
 
 export type ChatSendResult = {
@@ -369,15 +346,4 @@ export type ChatSendResult = {
   user_message: ChatMessage;
   assistant_message: ChatMessage;
   error: string | null;
-};
-
-export type AttachmentMeta = {
-  id: number;
-  filename: string;
-  mime_type: string;
-  size_bytes: number;
-  thread_id: number | null;
-  created_at: string;
-  embedded: boolean;
-  has_text: boolean;
 };

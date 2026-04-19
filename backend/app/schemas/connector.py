@@ -22,6 +22,13 @@ class ConnectorConnectionRead(BaseModel):
     meta: dict[str, Any] | None
     token_expires_at: datetime | None = None
     oauth_scopes: list[str] | None = None
+    # True when the granted ``oauth_scopes`` no longer cover the scopes the
+    # backend now requires for this provider (e.g. Gmail gained
+    # ``gmail.settings.basic`` for the filter tools). The frontend uses this
+    # to render a "Reconnect Gmail" banner; everything else keeps working
+    # on the older grant.
+    needs_reauth: bool = False
+    missing_scopes: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 

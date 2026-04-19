@@ -1,5 +1,31 @@
+"""ReAct loop + tool dispatch for the OpenClaw-style agent.
+
+After the refactor the agent has *no* local mirrors to read from — every
+read tool talks straight to the upstream provider (Gmail, Calendar,
+Drive, Outlook, Teams). Most writes auto-execute; only outbound email
+(send + reply) goes through the human-approval ``PendingProposal``
+flow. Memory and skills are the agent's own state.
+
+Harness contract (intentionally tiny):
+
+1. Send the FULL tool palette + the conversation to the LLM.
+2. ``tool_choice="required"`` — every turn must end in a tool call.
+3. Execute every tool call the model issued, feed results back as
+   ``role:"tool"`` messages.
+4. Stop when the model calls ``final_answer`` (the universal
+   terminator) OR when ``settings.agent_max_tool_steps`` is reached.
+
+The agent picks tools by reading their ``description`` fields. There is
+NO model-compensating logic: no tool-name aliasing, no argument coercion,
+no "must-ground" gates, no consecutive-unknown-call loop breakers. Those
+were band-aids for weak local models and they actively harm scalability;
+when a tool is misused the model gets a structured error back and is
+expected to retry.
+"""
+
 from __future__ import annotations
 
+import base64
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -8,72 +34,60 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.envelope_crypto import KeyDecryptError
 from app.models.agent_run import AgentRun, AgentRunStep
-from app.models.contact import Contact
-from app.models.deal import Deal
-from app.models.drive_file import DriveFile
-from app.models.email import Email
-from app.models.event import Event
+from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import AgentRunRead, AgentStepRead, PendingProposalRead
+from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
 )
-from app.core.envelope_crypto import KeyDecryptError
 from app.services.ai_providers import provider_kind_requires_api_key
+from app.services.connectors.calendar_adapters import (
+    create_calendar_event,
+    delete_calendar_event,
+    update_calendar_event,
+)
+from app.services.connectors.file_adapters import share_file, upload_file
+from app.services.connectors.gcal_client import CalendarAPIError, GoogleCalendarClient
+from app.services.connectors.gmail_client import GmailAPIError, GmailClient
+from app.services.connectors.drive_client import DriveAPIError, GoogleDriveClient
+from app.services.connectors.graph_client import GraphAPIError, GraphClient
 from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
+from app.services.oauth import TokenManager
+from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
 from app.services.proposal_service import proposal_to_read
-from app.services.semantic_search_service import SemanticSearchService
+from app.services.skills_service import list_skills as _list_skills
+from app.services.skills_service import load_skill as _load_skill
 from app.services.user_ai_settings_service import UserAISettingsService
 
-# ---------------------------------------------------------------------------
-# Harness contract (OpenClaw-style: agent decides, code only plumbs)
-# ---------------------------------------------------------------------------
-# This module deliberately contains NO model-compensating logic — no tool-name
-# alias maps, no argument-shape coercion, no intent-keyword routing, no
-# "must-ground" gates, no consecutive-unknown-call loop breakers, no
-# data-tool-call budget shrinks. Those were all band-aids for weak local
-# models (Gemma 3B, Qwen 2.5 small) and they actively harm scalability:
-# every future tool would have to reason about each band-aid's interactions.
-#
-# The harness is now a bare ReAct loop:
-#   1. Send the FULL tool palette + the conversation to the LLM.
-#   2. tool_choice="required" — every turn must end in a tool call.
-#   3. Execute every tool call the model issued, feed results back as
-#      role:"tool" messages.
-#   4. Stop when the model calls ``final_answer`` (the universal terminator)
-#      OR when ``settings.agent_max_tool_steps`` is reached.
-#
-# The agent picks tools by reading their ``description`` fields. Rich
-# descriptions are the ONLY knob for "the agent picks the right tool";
-# adding a tool is one edit (register it in ``AGENT_TOOLS`` with a
-# rich description) and the harness picks it up automatically.
-#
-# Two extension seams (see ``get_tool_palette`` and ``build_system_prompt``
-# below) are pure functions called once per ``run_agent`` invocation. Today
-# they return the universal default; tomorrow they're where per-tenant skill
-# toggles (artists vs businesses) and per-vertical personas plug in.
+# Provider id sets used by ``_resolve_connection``.
+_GMAIL_PROVIDERS = ("google_gmail", "gmail")
+_CAL_PROVIDERS = ("google_calendar", "gcal")
+_DRIVE_PROVIDERS = ("google_drive", "gdrive")
+_OUTLOOK_PROVIDERS = ("graph_mail",)
+_TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
 
-# Universal ReAct contract — tool-agnostic. The model reads each tool's
-# ``description`` (set in ``app.services.agent_tools``) to know WHEN to use
-# it; this prompt only carries persona, language preference, and the four
-# rules of engagement that any harness needs.
-AGENT_SYSTEM = """You are the artist's personal operations manager (live music: festivals, concerts, venues, promoters). The artist is NON-TECHNICAL — never mention APIs, OAuth, RAG, embeddings, JSON, model names, or any internal implementation. Speak like a friendly colleague.
 
-You operate inside a chat app. The artist may be talking to you about a specific contact, deal, event or email (the thread title indicates this). When proactive notifications arrive ("Nuevo correo entrante de X"), continue the conversation in that same thread.
+AGENT_SYSTEM = """You are the user's personal operations agent. The user is NON-TECHNICAL — never mention APIs, OAuth, JSON, model names, or any internal implementation. Speak like a friendly colleague.
+
+You operate inside a chat app and have full live access to the user's Gmail, Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams via the tools listed in this turn. You also have a small persistent memory (key/value scratchpad) for things the user wants you to remember across sessions, and a folder of skills (markdown recipes for common workflows).
 
 # Rules of engagement
 
-1. Every assistant turn MUST end in a tool call. The tools available to you this turn are listed in the ``tools`` array — pick from that list, using the exact name spelled in the schema.
-2. ``final_answer`` is the terminator: call it (exactly once) to deliver the user-facing reply. After ``final_answer`` the turn ends. Never write a free-form text reply outside ``final_answer`` — the artist will not see it.
-3. Ground factual claims with a tool BEFORE answering. For any question about the artist's data (files, contacts, deals, events, emails, calendar), or any preference / action the artist asks you to remember or perform, first call the tool whose ``description`` matches the request, then summarize its result in ``final_answer.text``. Never invent data that did not come from a tool result; never paraphrase what a previous turn said about that data — re-check with a tool every time.
-4. Reply in the same language the artist uses (default: Spanish). Be concise. Cite bare ids inline in ``final_answer.text`` (e.g. "(drive_file:7)") and/or in ``final_answer.citations``.
+1. Every assistant turn MUST end in a tool call. The tools available to you this turn are listed in the ``tools`` array — pick from that list using the exact name spelled in the schema.
+2. ``final_answer`` is the terminator: call it (exactly once) to deliver the user-facing reply. After ``final_answer`` the turn ends. Never write a free-form text reply outside ``final_answer`` — the user will not see it.
+3. Ground factual claims with a tool BEFORE answering. For any question about the user's data (mail, calendar, files, Teams), or any preference / action the user asks you to remember or perform, first call the tool whose ``description`` matches the request, then summarize its result in ``final_answer.text``. Never invent data; never paraphrase what a previous turn said about that data — re-check with a tool every time.
+4. Reply in the same language the user uses (default: Spanish). Be concise. Cite bare ids inline in ``final_answer.text`` (e.g. "(gmail:msg_xyz)") and/or in ``final_answer.citations``.
 
-When a tool result includes a ``sync_health`` field with ``ok: false``, tell the artist what is broken in plain language (use the ``summary`` field) and that the data they are seeing may be stale or incomplete.
+Almost every action runs immediately (label, mute, spam, archive, calendar, Drive). The ONLY exception is outbound email: ``propose_email_send`` and ``propose_email_reply`` create approval cards the user must tap before anything is sent. Never describe a sent reply as if it had already gone out.
+
+When you discover a stable preference or a useful fact about the user, save it via ``upsert_memory`` so future turns benefit. When facing a multi-step workflow you've handled before, check ``list_skills`` and ``load_skill`` for a matching recipe.
 """
 
 
@@ -87,149 +101,36 @@ def get_tool_palette(
     Today: returns the full ``AGENT_TOOLS`` palette for everyone. The agent
     picks the right tool by reading each tool's ``description``.
 
-    Tomorrow: this is where per-tenant skill toggles plug in (e.g. artists
-    get the Drive/calendar/email connector tools; businesses get a CRM-only
-    palette; a "starter" tier gets read-only tools). The function signature
-    accepts ``user`` and ``tenant_hint`` so per-user/per-vertical filtering
-    is a one-function change with no impact on the loop.
+    Tomorrow: this is where per-tenant skill toggles plug in (e.g. "starter"
+    tier gets only read-only tools, B2B vertical gets a CRM-flavored
+    palette). The signature accepts ``user`` and ``tenant_hint`` so
+    per-user/per-vertical filtering is a one-function change.
     """
     del user, tenant_hint  # explicit: today the palette is universal
     return AGENT_TOOLS
 
 
-def build_system_prompt(
+async def build_system_prompt(
+    db: AsyncSession,
     user: User,
     *,
     thread_context_hint: str | None = None,
     tenant_hint: str | None = None,
 ) -> str:
-    """Extension seam: assemble the system prompt for this run.
+    """Assemble the system prompt: persona + memory warmup + thread hint.
 
-    Today: returns the universal ``AGENT_SYSTEM`` plus an optional
-    thread-context line.
-
-    Tomorrow: per-vertical personas (artists vs businesses, English vs
-    Spanish defaults, B2B-formal vs B2C-friendly tone) can replace
-    ``AGENT_SYSTEM`` here without touching the loop.
+    The memory warmup (top N rows from ``agent_memories``) is appended so
+    the model starts each turn knowing what it has already learned. This
+    is the OpenClaw-style "scratchpad in the prompt" trick.
     """
-    del user, tenant_hint  # explicit: today the persona is universal
+    del tenant_hint  # explicit: today the persona is universal
+    parts: list[str] = [AGENT_SYSTEM]
+    memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
+    if memory_blob:
+        parts.append(memory_blob)
     if thread_context_hint:
-        return f"{AGENT_SYSTEM}\n\nThread context: {thread_context_hint.strip()}"
-    return AGENT_SYSTEM
-
-
-# ---------------------------------------------------------------------------
-# Connector sync-health surfacing
-# ---------------------------------------------------------------------------
-# The agent's read tools (list_drive_files, search_emails, list_calendar_events)
-# all read from the local mirror tables. When the upstream sync is broken
-# (API disabled, token revoked, scope missing, rate limit), those tables are
-# stale or empty — and previously the agent had no way to know that. The
-# helper below reads `connection_sync_state` for the relevant
-# (provider, resource) and returns a small structured payload that we attach
-# to every read-tool result so the model can warn the artist instead of
-# silently reporting "you have no files".
-
-# Map a logical "domain" → (connector_connections.provider values, sync resource label)
-_SYNC_HEALTH_DOMAINS: dict[str, tuple[tuple[str, ...], str]] = {
-    "drive": (
-        ("google_drive", "google", "microsoft", "graph_onedrive", "onedrive"),
-        "drive",
-    ),
-    "email": (
-        ("google_gmail", "google", "microsoft", "graph_mail"),
-        "gmail",  # gmail_sync_service writes resource="gmail"
-    ),
-    "calendar": (
-        ("google_calendar", "google", "microsoft", "graph_calendar"),
-        "calendar",
-    ),
-}
-
-
-async def _get_sync_health(
-    db: AsyncSession, user: User, domain: str
-) -> dict[str, Any]:
-    """Return a small dict describing the sync-health for the connectors of a
-    given ``domain`` ("drive" / "email" / "calendar") for ``user``. Always
-    safe to call (returns ``{"ok": True, ...}`` when nothing is wrong or when
-    the user has no relevant connectors). The shape is stable so the system
-    prompt can teach the model how to interpret it.
-    """
-    from app.models.connection_sync_state import ConnectionSyncState
-    from app.models.connector_connection import ConnectorConnection
-
-    providers, resource = _SYNC_HEALTH_DOMAINS.get(domain, ((), ""))
-    if not providers:
-        return {"ok": True, "checked": False}
-
-    stmt = (
-        select(ConnectionSyncState, ConnectorConnection)
-        .join(
-            ConnectorConnection,
-            ConnectorConnection.id == ConnectionSyncState.connection_id,
-        )
-        .where(
-            ConnectorConnection.user_id == user.id,
-            ConnectorConnection.provider.in_(providers),
-            ConnectionSyncState.resource == resource,
-        )
-    )
-    rows = (await db.execute(stmt)).all()
-    if not rows:
-        # No sync-state row at all: connector may be brand-new or never
-        # synced. Not necessarily broken — just unknown.
-        return {"ok": True, "checked": True, "states": []}
-
-    errors: list[dict[str, Any]] = []
-    healthy: list[dict[str, Any]] = []
-    for state, conn in rows:
-        entry = {
-            "connection_id": conn.id,
-            "provider": conn.provider,
-            "label": conn.label,
-            "status": state.status,
-            "last_full_sync_at": (
-                state.last_full_sync_at.isoformat() if state.last_full_sync_at else None
-            ),
-            "last_delta_at": (
-                state.last_delta_at.isoformat() if state.last_delta_at else None
-            ),
-            "error_count": state.error_count,
-        }
-        if state.status == "error" and state.last_error:
-            entry["last_error"] = (state.last_error or "")[:600]
-            errors.append(entry)
-        else:
-            healthy.append(entry)
-
-    if errors:
-        # Synthesize a short, artist-friendly summary the model can echo.
-        first = errors[0]
-        provider_friendly = (
-            "Drive" if domain == "drive"
-            else "Calendario" if domain == "calendar"
-            else "Correo"
-        )
-        # Try to extract the human-readable bit from the upstream error.
-        raw = first.get("last_error", "") or ""
-        if "API has not been used" in raw or "is disabled" in raw:
-            cause = "el API correspondiente está desactivado en el proyecto de Google Cloud"
-        elif "invalid_grant" in raw or "unauthorized" in raw.lower() or "401" in raw:
-            cause = "el acceso caducó y necesita re-autorizarse"
-        elif "403" in raw or "permission" in raw.lower():
-            cause = "faltan permisos en la cuenta conectada"
-        elif "rate" in raw.lower() and "limit" in raw.lower():
-            cause = "el proveedor está limitando el ritmo de sincronización"
-        else:
-            cause = "hay un error de sincronización con el proveedor"
-        summary = (
-            f"La conexión de {provider_friendly} ({first['provider']}) está fallando: "
-            f"{cause}. Lo que ves puede estar incompleto o desactualizado."
-        )
-        return {"ok": False, "checked": True, "summary": summary, "errors": errors, "healthy": healthy}
-
-    return {"ok": True, "checked": True, "healthy": healthy}
+        parts.append(f"Thread context: {thread_context_hint.strip()}")
+    return "\n\n".join(parts)
 
 
 def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
@@ -244,338 +145,561 @@ def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
         msg["tool_calls"] = [tc.to_message_dict() for tc in response.tool_calls]
     return msg
 
+
+# ---------------------------------------------------------------------------
+# Connection resolution
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_connection(
+    db: AsyncSession,
+    user: User,
+    args: dict[str, Any],
+    providers: tuple[str, ...],
+    *,
+    label: str,
+) -> ConnectorConnection:
+    """Pick the connector connection a tool call should use.
+
+    Honour ``args["connection_id"]`` when present; otherwise auto-detect
+    the user's single matching connection. Returns a friendly-error
+    ``RuntimeError`` (caught by the dispatcher) when the user has zero
+    or many connections of the requested type.
+    """
+    cid = args.get("connection_id")
+    if cid is not None:
+        row = await db.get(ConnectorConnection, int(cid))
+        if not row or row.user_id != user.id:
+            raise RuntimeError(f"connection {cid} not found")
+        if row.provider not in providers:
+            raise RuntimeError(f"connection {cid} is not a {label} connection")
+        return row
+    stmt = (
+        select(ConnectorConnection)
+        .where(
+            ConnectorConnection.user_id == user.id,
+            ConnectorConnection.provider.in_(providers),
+        )
+        .order_by(ConnectorConnection.created_at.desc())
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    if not rows:
+        raise RuntimeError(f"no {label} connection — connect one in Settings → Connectors")
+    if len(rows) > 1:
+        ids = ", ".join(str(r.id) for r in rows)
+        raise RuntimeError(
+            f"multiple {label} connections — pass `connection_id` (available: {ids})"
+        )
+    return rows[0]
+
+
+async def _gmail_client(db: AsyncSession, row: ConnectorConnection) -> GmailClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GmailClient(token)
+
+
+async def _calendar_client(db: AsyncSession, row: ConnectorConnection) -> GoogleCalendarClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GoogleCalendarClient(token)
+
+
+async def _drive_client(db: AsyncSession, row: ConnectorConnection) -> GoogleDriveClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GoogleDriveClient(token)
+
+
+async def _graph_client(db: AsyncSession, row: ConnectorConnection) -> GraphClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GraphClient(token)
+
+
 class AgentService:
+    # ------------------------------------------------------------------
+    # Gmail tools
+    # ------------------------------------------------------------------
     @staticmethod
-    def _serialize_contact(c: Contact) -> dict[str, Any]:
-        return {
-            "id": c.id,
-            "name": c.name,
-            "email": c.email,
-            "phone": c.phone,
-            "role": c.role,
-            "notes": c.notes,
-        }
-
-    @staticmethod
-    def _serialize_email(e: Email) -> dict[str, Any]:
-        return {
-            "id": e.id,
-            "contact_id": e.contact_id,
-            "sender_email": e.sender_email,
-            "sender_name": e.sender_name,
-            "subject": e.subject,
-            "body": e.body,
-            "received_at": e.received_at.isoformat(),
-        }
-
-    @staticmethod
-    def _serialize_deal(d: Deal) -> dict[str, Any]:
-        return {
-            "id": d.id,
-            "contact_id": d.contact_id,
-            "title": d.title,
-            "status": d.status,
-            "amount": float(d.amount) if d.amount is not None else None,
-            "currency": d.currency,
-            "notes": d.notes,
-        }
-
-    @staticmethod
-    def _serialize_event(ev: Event) -> dict[str, Any]:
-        return {
-            "id": ev.id,
-            "deal_id": ev.deal_id,
-            "venue_name": ev.venue_name,
-            "event_date": ev.event_date.isoformat(),
-            "city": ev.city,
-            "status": ev.status,
-            "notes": ev.notes,
-        }
-
-    @staticmethod
-    async def _tool_get_entity(db: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
-        et = str(args.get("entity_type") or "").lower()
-        eid = int(args.get("entity_id"))
-        if et == "contact":
-            row = await db.get(Contact, eid)
-            return {"found": row is not None, "entity": AgentService._serialize_contact(row) if row else None}
-        if et == "email":
-            row = await db.get(Email, eid)
-            return {"found": row is not None, "entity": AgentService._serialize_email(row) if row else None}
-        if et == "deal":
-            row = await db.get(Deal, eid)
-            return {"found": row is not None, "entity": AgentService._serialize_deal(row) if row else None}
-        if et == "event":
-            row = await db.get(Event, eid)
-            return {"found": row is not None, "entity": AgentService._serialize_event(row) if row else None}
-        if et == "drive_file":
-            row = await db.get(DriveFile, eid)
-            if not row:
-                return {"found": False, "entity": None}
-            return {
-                "found": True,
-                "entity": {
-                    "id": row.id,
-                    "connection_id": row.connection_id,
-                    "name": row.name,
-                    "mime_type": row.mime_type,
-                    "size_bytes": row.size_bytes,
-                    "web_view_link": row.web_view_link,
-                    "modified_time": row.modified_time.isoformat() if row.modified_time else None,
-                    "has_text": bool(row.content_text),
-                },
-            }
-        return {"error": "invalid entity_type"}
-
-    @staticmethod
-    async def _tool_rag(
+    async def _tool_gmail_list_messages(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        q = str(args.get("query") or "").strip()
-        if not q:
-            return {"hits": [], "error": "missing query"}
-        lim = int(args.get("limit_per_type") or 5)
-        lim = max(1, min(8, lim))
-        hits = await SemanticSearchService.search(db, user, q, lim)
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.list_messages(
+            page_token=args.get("page_token"),
+            q=args.get("q"),
+            label_ids=args.get("label_ids"),
+            max_results=int(args.get("max_results") or 25),
+        )
+
+    @staticmethod
+    async def _tool_gmail_get_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.get_message(
+            str(args["message_id"]), format=str(args.get("format") or "full")
+        )
+
+    @staticmethod
+    async def _tool_gmail_get_thread(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.get_thread(
+            str(args["thread_id"]), format=str(args.get("format") or "metadata")
+        )
+
+    @staticmethod
+    async def _tool_gmail_list_labels(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.list_labels()
+
+    @staticmethod
+    async def _tool_gmail_list_filters(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.list_filters()
+
+    @staticmethod
+    async def _tool_gmail_modify_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.modify_message(
+            str(args["message_id"]),
+            add_label_ids=args.get("add_label_ids"),
+            remove_label_ids=args.get("remove_label_ids"),
+        )
+
+    @staticmethod
+    async def _tool_gmail_modify_thread(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.modify_thread(
+            str(args["thread_id"]),
+            add_label_ids=args.get("add_label_ids"),
+            remove_label_ids=args.get("remove_label_ids"),
+        )
+
+    @staticmethod
+    async def _tool_gmail_trash_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.trash_message(str(args["message_id"]))
+
+    @staticmethod
+    async def _tool_gmail_untrash_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.untrash_message(str(args["message_id"]))
+
+    @staticmethod
+    async def _tool_gmail_trash_thread(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.trash_thread(str(args["thread_id"]))
+
+    @staticmethod
+    async def _tool_gmail_untrash_thread(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.untrash_thread(str(args["thread_id"]))
+
+    @staticmethod
+    async def _tool_gmail_mark_read(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        if args.get("thread_id"):
+            return await client.modify_thread(
+                str(args["thread_id"]), remove_label_ids=["UNREAD"]
+            )
+        if args.get("message_id"):
+            return await client.modify_message(
+                str(args["message_id"]), remove_label_ids=["UNREAD"]
+            )
+        return {"error": "either message_id or thread_id is required"}
+
+    @staticmethod
+    async def _tool_gmail_mark_unread(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        if args.get("thread_id"):
+            return await client.modify_thread(
+                str(args["thread_id"]), add_label_ids=["UNREAD"]
+            )
+        if args.get("message_id"):
+            return await client.modify_message(
+                str(args["message_id"]), add_label_ids=["UNREAD"]
+            )
+        return {"error": "either message_id or thread_id is required"}
+
+    @staticmethod
+    async def _tool_gmail_silence_sender(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """High-level: create a filter that mutes (or spams) future mail.
+
+        ``mode='mute'`` (default): future messages skip the inbox.
+        ``mode='spam'``: same, plus the SPAM label is applied.
+        """
+        email = str(args.get("email") or "").strip()
+        if not email:
+            return {"error": "email (sender address) is required"}
+        mode = str(args.get("mode") or "mute").lower()
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        criteria = {"from": email}
+        action: dict[str, Any] = {"removeLabelIds": ["INBOX"]}
+        if mode == "spam":
+            action["addLabelIds"] = ["SPAM"]
+        result = await client.create_filter(criteria=criteria, action=action)
         return {
-            "hits": [
+            "ok": True,
+            "mode": mode,
+            "sender": email,
+            "filter_id": result.get("id"),
+            "summary": (
+                f"Future mail from {email} will skip the inbox"
+                + (" and be marked as spam." if mode == "spam" else ".")
+            ),
+        }
+
+    @staticmethod
+    async def _tool_gmail_create_filter(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        criteria = args.get("criteria") or {}
+        action = args.get("action") or {}
+        if not criteria or not action:
+            return {"error": "both criteria and action are required"}
+        return await client.create_filter(criteria=criteria, action=action)
+
+    @staticmethod
+    async def _tool_gmail_delete_filter(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        client = await _gmail_client(db, row)
+        return await client.delete_filter(str(args["filter_id"]))
+
+    # ------------------------------------------------------------------
+    # Calendar tools
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_calendar_list_events(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        client = await _calendar_client(db, row)
+        return await client.list_events(
+            str(args.get("calendar_id") or "primary"),
+            page_token=args.get("page_token"),
+            max_results=int(args.get("max_results") or 50),
+        )
+
+    @staticmethod
+    async def _tool_calendar_create_event(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+        return await create_calendar_event(provider, creds, args)
+
+    @staticmethod
+    async def _tool_calendar_update_event(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+        return await update_calendar_event(provider, creds, args)
+
+    @staticmethod
+    async def _tool_calendar_delete_event(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+        return await delete_calendar_event(provider, creds, str(args["event_id"]))
+
+    # ------------------------------------------------------------------
+    # Drive tools
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_drive_list_files(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DRIVE_PROVIDERS, label="Google Drive")
+        client = await _drive_client(db, row)
+        return await client.list_files(
+            page_token=args.get("page_token"),
+            q=args.get("q"),
+            page_size=int(args.get("page_size") or 50),
+        )
+
+    @staticmethod
+    async def _tool_drive_upload_file(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DRIVE_PROVIDERS, label="Google Drive")
+        _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+        path = str(args.get("path") or "").strip()
+        mime = str(args.get("mime_type") or "application/octet-stream")
+        if args.get("content_base64"):
+            try:
+                body = base64.b64decode(str(args["content_base64"]))
+            except Exception as exc:  # noqa: BLE001
+                return {"error": f"invalid base64: {exc}"}
+        elif args.get("content_text") is not None:
+            body = str(args["content_text"]).encode("utf-8")
+        else:
+            return {"error": "either content_text or content_base64 is required"}
+        return await upload_file(provider, creds, path, body, mime)
+
+    @staticmethod
+    async def _tool_drive_share_file(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DRIVE_PROVIDERS, label="Google Drive")
+        _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+        return await share_file(
+            provider,
+            creds,
+            str(args["file_id"]),
+            str(args["email"]),
+            str(args.get("role") or "reader"),
+        )
+
+    # ------------------------------------------------------------------
+    # Outlook + Teams tools
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_outlook_list_messages(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _OUTLOOK_PROVIDERS, label="Outlook")
+        client = await _graph_client(db, row)
+        return await client.messages_delta(top=int(args.get("top") or 25))
+
+    @staticmethod
+    async def _tool_outlook_get_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _OUTLOOK_PROVIDERS, label="Outlook")
+        client = await _graph_client(db, row)
+        return await client.get_message(str(args["message_id"]))
+
+    @staticmethod
+    async def _tool_teams_list_teams(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TEAMS_PROVIDERS, label="Microsoft Teams")
+        client = await _graph_client(db, row)
+        return await client._get("/me/joinedTeams")
+
+    @staticmethod
+    async def _tool_teams_list_channels(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TEAMS_PROVIDERS, label="Microsoft Teams")
+        client = await _graph_client(db, row)
+        return await client._get(f"/teams/{args['team_id']}/channels")
+
+    @staticmethod
+    async def _tool_teams_post_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        import httpx
+
+        row = await _resolve_connection(db, user, args, _TEAMS_PROVIDERS, label="Microsoft Teams")
+        token = await TokenManager.get_valid_access_token(db, row)
+        url = (
+            f"https://graph.microsoft.com/v1.0/teams/{args['team_id']}"
+            f"/channels/{args['channel_id']}/messages"
+        )
+        body = {"body": {"contentType": "html", "content": str(args.get("body") or "")}}
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            r = await http.post(url, headers={"Authorization": f"Bearer {token}"}, json=body)
+        if r.status_code >= 300:
+            return {"ok": False, "status": r.status_code, "detail": r.text[:500]}
+        return {"ok": True, "result": r.json()}
+
+    # ------------------------------------------------------------------
+    # Memory + skills tools
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_upsert_memory(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await AgentMemoryService.upsert(
+            db,
+            user,
+            key=str(args["key"]),
+            content=str(args["content"]),
+            importance=int(args.get("importance") or 0),
+            tags=args.get("tags"),
+        )
+        return {"ok": True, "key": row.key, "id": row.id}
+
+    @staticmethod
+    async def _tool_delete_memory(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        ok = await AgentMemoryService.delete(db, user, key=str(args["key"]))
+        return {"ok": ok}
+
+    @staticmethod
+    async def _tool_list_memory(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        rows = await AgentMemoryService.list_for_user(
+            db, user, limit=int(args.get("limit") or 50)
+        )
+        return {
+            "memories": [
                 {
-                    "entity_type": h.entity_type,
-                    "entity_id": h.entity_id,
-                    "score": h.score,
-                    "title": h.title,
-                    "snippet": h.snippet,
-                    "citation": h.citation,
-                    "match_sources": h.match_sources,
-                    "rrf_score": h.rrf_score,
+                    "key": r.key,
+                    "content": r.content,
+                    "importance": r.importance or 0,
+                    "tags": r.tags,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                 }
-                for h in hits
+                for r in rows
             ]
         }
 
     @staticmethod
-    async def _tool_search_emails(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        from sqlalchemy import and_, or_
-
-        limit = max(1, min(25, int(args.get("limit") or 10)))
-        q = str(args.get("query") or "").strip()
-        direction = str(args.get("direction") or "").strip().lower() or None
-        thread_id = args.get("thread_id")
-        connection_id = args.get("connection_id")
-
-        filters = []
-        if direction in ("inbound", "outbound"):
-            filters.append(Email.direction == direction)
-        if thread_id:
-            filters.append(Email.provider_thread_id == str(thread_id))
-        if connection_id is not None:
-            filters.append(Email.connection_id == int(connection_id))
-        if q:
-            like = f"%{q}%"
-            filters.append(or_(Email.subject.ilike(like), Email.body.ilike(like), Email.sender_email.ilike(like)))
-        stmt = select(Email).order_by(Email.received_at.desc()).limit(limit)
-        if filters:
-            stmt = stmt.where(and_(*filters))
-        r = await db.execute(stmt)
-        hits = []
-        for e in r.scalars().all():
-            hits.append(
-                {
-                    "id": e.id,
-                    "subject": e.subject,
-                    "from": f"{e.sender_name or ''} <{e.sender_email}>",
-                    "direction": e.direction,
-                    "received_at": e.received_at.isoformat(),
-                    "thread_id": e.provider_thread_id,
-                    "snippet": (e.snippet or e.body or "")[:300],
-                    "citation": f"email:{e.id}",
-                }
-            )
-        sync_health = await _get_sync_health(db, user, "email")
-        return {"hits": hits, "sync_health": sync_health}
-
-    @staticmethod
-    async def _tool_get_thread(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        tid = str(args.get("thread_id") or "")
-        if not tid:
-            return {"error": "thread_id required"}
-        stmt = select(Email).where(Email.provider_thread_id == tid)
-        if args.get("connection_id") is not None:
-            stmt = stmt.where(Email.connection_id == int(args["connection_id"]))
-        r = await db.execute(stmt.order_by(Email.received_at.asc()))
-        msgs = []
-        for e in r.scalars().all():
-            msgs.append(
-                {
-                    "id": e.id,
-                    "direction": e.direction,
-                    "from": f"{e.sender_name or ''} <{e.sender_email}>",
-                    "subject": e.subject,
-                    "received_at": e.received_at.isoformat(),
-                    "body": (e.body or "")[:8000],
-                    "citation": f"email:{e.id}",
-                }
-            )
-        return {"thread_id": tid, "messages": msgs}
-
-    @staticmethod
-    async def _tool_list_calendar_events(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        from datetime import datetime as dt
-
-        limit = max(1, min(50, int(args.get("limit") or 20)))
-        stmt = select(Event).order_by(Event.start_utc.asc().nulls_last(), Event.event_date.asc())
-        if args.get("connection_id") is not None:
-            stmt = stmt.where(Event.connection_id == int(args["connection_id"]))
-        if args.get("start"):
-            try:
-                s_dt = dt.fromisoformat(str(args["start"]).replace("Z", "+00:00"))
-                stmt = stmt.where((Event.start_utc >= s_dt) | (Event.event_date >= s_dt.date()))
-            except ValueError:
-                pass
-        if args.get("end"):
-            try:
-                e_dt = dt.fromisoformat(str(args["end"]).replace("Z", "+00:00"))
-                stmt = stmt.where((Event.start_utc <= e_dt) | (Event.event_date <= e_dt.date()))
-            except ValueError:
-                pass
-        r = await db.execute(stmt.limit(limit))
-        out = []
-        for ev in r.scalars().all():
-            out.append(
-                {
-                    "id": ev.id,
-                    "summary": ev.summary or ev.venue_name,
-                    "start": ev.start_utc.isoformat() if ev.start_utc else ev.event_date.isoformat(),
-                    "end": ev.end_utc.isoformat() if ev.end_utc else None,
-                    "provider": ev.provider,
-                    "provider_event_id": ev.provider_event_id,
-                    "connection_id": ev.connection_id,
-                    "location": ev.location,
-                    "html_link": ev.html_link,
-                    "citation": f"event:{ev.id}",
-                }
-            )
-        sync_health = await _get_sync_health(db, user, "calendar")
-        return {"events": out, "sync_health": sync_health}
-
-    @staticmethod
-    def _serialize_drive_file(f: DriveFile) -> dict[str, Any]:
-        return {
-            "id": f.id,
-            "connection_id": f.connection_id,
-            "name": f.name,
-            "mime_type": f.mime_type,
-            "size_bytes": f.size_bytes,
-            "web_view_link": f.web_view_link,
-            "modified_time": f.modified_time.isoformat() if f.modified_time else None,
-            "has_text": bool(f.content_text),
-            "citation": f"drive_file:{f.id}",
-        }
-
-    @staticmethod
-    async def _tool_search_drive(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        from sqlalchemy import or_
-
-        from app.models.connector_connection import ConnectorConnection
-
-        q = str(args.get("query") or "").strip()
-        if not q:
-            return {"error": "query required"}
-        limit = max(1, min(25, int(args.get("limit") or 10)))
-        like = f"%{q}%"
-        stmt = (
-            select(DriveFile)
-            .join(ConnectorConnection, ConnectorConnection.id == DriveFile.connection_id)
-            .where(
-                ConnectorConnection.user_id == user.id,
-                DriveFile.is_trashed.is_(False),
-                or_(DriveFile.name.ilike(like), DriveFile.content_text.ilike(like)),
-            )
-            .order_by(DriveFile.modified_time.desc().nulls_last())
-            .limit(limit)
-        )
-        r = await db.execute(stmt)
-        sync_health = await _get_sync_health(db, user, "drive")
-        return {
-            "hits": [AgentService._serialize_drive_file(f) for f in r.scalars().all()],
-            "sync_health": sync_health,
-        }
-
-    @staticmethod
-    async def _tool_list_drive_files(
+    async def _tool_recall_memory(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        """Enumerate the user's Drive/OneDrive files. Use when the artist asks
-        an open-ended "what files do I have?" question with no search term."""
-        from app.models.connector_connection import ConnectorConnection
-
-        limit = max(1, min(50, int(args.get("limit") or 20)))
-        stmt = (
-            select(DriveFile)
-            .join(ConnectorConnection, ConnectorConnection.id == DriveFile.connection_id)
-            .where(
-                ConnectorConnection.user_id == user.id,
-                DriveFile.is_trashed.is_(False),
-            )
-            .order_by(DriveFile.modified_time.desc().nulls_last(), DriveFile.id.desc())
-            .limit(limit)
+        hits = await AgentMemoryService.recall(
+            db,
+            user,
+            query=(args.get("query") or None),
+            tags=args.get("tags"),
+            limit=int(args.get("limit") or 6),
         )
-        if args.get("connection_id") is not None:
-            stmt = stmt.where(DriveFile.connection_id == int(args["connection_id"]))
-        if args.get("mime_type"):
-            stmt = stmt.where(DriveFile.mime_type == str(args["mime_type"]))
-        r = await db.execute(stmt)
-        files = [AgentService._serialize_drive_file(f) for f in r.scalars().all()]
-        sync_health = await _get_sync_health(db, user, "drive")
-        if not files:
-            # Distinguish "no Drive connected" from "connected but empty mirror"
-            # so the model can guide the artist toward connecting Drive instead
-            # of claiming the drive is empty.
-            conn_r = await db.execute(
-                select(ConnectorConnection.id).where(
-                    ConnectorConnection.user_id == user.id,
-                    ConnectorConnection.provider.in_(("google", "google_drive", "microsoft", "onedrive")),
-                )
-            )
-            has_drive_connection = conn_r.first() is not None
-            return {
-                "files": [],
-                "has_drive_connection": has_drive_connection,
-                "sync_health": sync_health,
-                "hint": (
-                    "No drive files have been mirrored yet. The artist may need to connect Drive "
-                    "via start_connector_setup / start_oauth_flow."
-                    if not has_drive_connection
-                    else "Drive is connected but no files have been synced yet."
-                ),
-            }
-        return {"files": files, "count": len(files), "sync_health": sync_health}
+        return {"hits": hits}
 
     @staticmethod
-    async def _tool_get_drive_file_text(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        fid = int(args.get("file_id") or 0)
-        if not fid:
-            return {"error": "file_id required"}
-        row = await db.get(DriveFile, fid)
-        if not row:
-            return {"found": False}
-        if not row.content_text:
-            try:
-                from app.services.drive_sync_service import run_extract_text
-
-                await run_extract_text(db, fid)
-                await db.refresh(row)
-            except Exception as exc:
-                return {"found": True, "extracted": False, "error": str(exc)[:300]}
+    async def _tool_list_skills(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del db, user, args
         return {
-            "found": True,
-            "extracted": bool(row.content_text),
-            "name": row.name,
-            "mime_type": row.mime_type,
-            "text": (row.content_text or "")[:40_000],
-            "web_view_link": row.web_view_link,
+            "skills": [
+                {"slug": s.slug, "title": s.title, "summary": s.summary}
+                for s in _list_skills()
+            ]
         }
 
+    @staticmethod
+    async def _tool_load_skill(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del db, user
+        s = _load_skill(str(args.get("slug") or ""))
+        if not s:
+            return {"found": False}
+        return {
+            "found": True,
+            "slug": s.slug,
+            "title": s.title,
+            "summary": s.summary,
+            "body": s.body,
+        }
+
+    # ------------------------------------------------------------------
+    # Connector helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_list_connectors(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del args
+        from app.services.connector_service import ConnectorService
+
+        rows = await ConnectorService.list_connections(db, user)
+        return {
+            "connectors": [
+                {
+                    "id": ConnectorService.to_read(c).id,
+                    "provider": c.provider,
+                    "label": c.label,
+                    "needs_reauth": ConnectorService.to_read(c).needs_reauth,
+                    "missing_scopes": ConnectorService.to_read(c).missing_scopes,
+                }
+                for c in rows
+            ]
+        }
+
+    @staticmethod
+    async def _tool_start_connector_setup(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.connector_setup_service import start_setup
+
+        return await start_setup(db, user, str(args.get("provider") or ""))
+
+    @staticmethod
+    async def _tool_submit_connector_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.connector_setup_service import submit_credentials
+
+        token = str(args.get("setup_token") or "").strip()
+        cid = str(args.get("client_id") or "").strip()
+        secret = str(args.get("client_secret") or "").strip()
+        if not (token and cid and secret):
+            return {"error": "setup_token, client_id and client_secret are required"}
+        return await submit_credentials(
+            db,
+            user,
+            setup_token=token,
+            client_id=cid,
+            client_secret=secret,
+            redirect_uri=args.get("redirect_uri"),
+            tenant=args.get("tenant"),
+        )
+
+    @staticmethod
+    async def _tool_start_oauth_flow(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from app.services.connector_setup_service import start_oauth
+
+        return await start_oauth(
+            db,
+            user,
+            provider=str(args.get("provider") or ""),
+            service=str(args.get("service") or "all"),
+        )
+
+    # ------------------------------------------------------------------
+    # Proposal tools (only outbound EMAIL is gated)
+    # ------------------------------------------------------------------
     @staticmethod
     async def _insert_proposal(
         db: AsyncSession,
@@ -620,7 +744,7 @@ class AgentService:
             "proposal_id": prop.id,
             "kind": kind,
             "status": "pending",
-            "message": "Proposal recorded. A human must approve it before it is executed.",
+            "message": "Proposal recorded. The user must approve it before it is executed.",
         }
 
     @staticmethod
@@ -629,107 +753,7 @@ class AgentService:
         return str(raw).strip()[:128] if raw is not None and str(raw).strip() else None
 
     @staticmethod
-    async def _tool_propose_create_deal(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = {
-            "contact_id": int(args["contact_id"]),
-            "title": str(args["title"])[:255],
-            "status": str(args.get("status") or "new"),
-            "notes": args.get("notes"),
-            "amount": args.get("amount"),
-            "currency": args.get("currency"),
-        }
-        if payload["status"] not in ("new", "contacted", "negotiating", "won", "lost"):
-            payload["status"] = "new"
-        summary = f"Create deal: {payload['title']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "create_deal", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_update_deal(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"deal_id": int(args["deal_id"])}
-        for key in ("title", "status", "amount", "currency", "notes"):
-            if key in args and args[key] is not None:
-                payload[key] = args[key]
-        if len(payload) <= 1:
-            return {"error": "no fields to update"}
-        summary = f"Update deal #{payload['deal_id']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "update_deal", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_create_contact(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = {
-            "name": str(args["name"])[:255],
-            "email": args.get("email"),
-            "phone": args.get("phone"),
-            "role": str(args.get("role") or "other"),
-            "notes": args.get("notes"),
-        }
-        summary = f"Create contact: {payload['name']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "create_contact", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_update_contact(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"contact_id": int(args["contact_id"])}
-        for key in ("name", "email", "phone", "role", "notes"):
-            if key in args and args[key] is not None:
-                payload[key] = args[key]
-        if len(payload) <= 1:
-            return {"error": "no fields to update"}
-        summary = f"Update contact #{payload['contact_id']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "update_contact", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_create_event(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "venue_name": str(args["venue_name"])[:255],
-            "event_date": str(args["event_date"]),
-            "status": str(args.get("status") or "confirmed"),
-        }
-        if args.get("deal_id") is not None:
-            payload["deal_id"] = int(args["deal_id"])
-        if args.get("city") is not None:
-            payload["city"] = str(args["city"])[:255]
-        if args.get("notes") is not None:
-            payload["notes"] = args.get("notes")
-        summary = f"Create event: {payload['venue_name']} on {payload['event_date']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "create_event", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_update_event(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"event_id": int(args["event_id"])}
-        for key in ("venue_name", "event_date", "deal_id", "city", "status", "notes"):
-            if key in args and args[key] is not None:
-                payload[key] = args[key]
-        if len(payload) <= 1:
-            return {"error": "no fields to update"}
-        summary = f"Update event #{payload['event_id']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "update_event", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_connector_email_send(
+    async def _tool_propose_email_send(
         db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
     ) -> dict[str, Any]:
         to_raw = args["to"]
@@ -741,415 +765,110 @@ class AgentService:
             "body": str(args["body"]),
             "content_type": str(args.get("content_type") or "text"),
         }
-        summary = f"Send email: {payload['subject'][:80]}"
         return await AgentService._insert_proposal(
-            db, user, run_id, "connector_email_send", payload, summary, idempotency_key=AgentService._idem(args)
+            db,
+            user,
+            run_id,
+            "email_send",
+            payload,
+            f"Send email: {payload['subject'][:80]}",
+            idempotency_key=AgentService._idem(args),
         )
 
     @staticmethod
-    async def _tool_propose_connector_calendar_create(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = {
-            "connection_id": int(args["connection_id"]),
-            "summary": str(args.get("summary") or args.get("title") or "Event")[:500],
-            "start_iso": str(args["start_iso"]),
-            "end_iso": str(args["end_iso"]),
-            "description": args.get("description"),
-            "timezone": str(args.get("timezone") or "UTC"),
-        }
-        summary = f"Calendar: {payload['summary'][:80]}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "connector_calendar_create", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_connector_file_upload(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "connection_id": int(args["connection_id"]),
-            "path": str(args["path"])[:1024],
-            "mime_type": str(args.get("mime_type") or "application/octet-stream"),
-        }
-        if args.get("content_base64"):
-            payload["content_base64"] = str(args["content_base64"])
-        elif args.get("content_text") is not None:
-            payload["content_text"] = str(args["content_text"])
-        else:
-            return {"error": "content_text or content_base64 required"}
-        summary = f"Upload file: {payload['path'][:80]}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "connector_file_upload", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_connector_teams_message(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = {
-            "connection_id": int(args["connection_id"]),
-            "team_id": str(args["team_id"]),
-            "channel_id": str(args["channel_id"]),
-            "body": str(args["body"]),
-        }
-        summary = "Teams channel message"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "connector_teams_message", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_connector_email_reply(
+    async def _tool_propose_email_reply(
         db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
     ) -> dict[str, Any]:
         thread_id = str(args.get("thread_id") or "").strip()
         if not thread_id:
             return {"error": "thread_id required"}
         to_raw = args.get("to")
-        to_list: list[str]
+        to_list: list[str] | None = None
         if to_raw:
             to_list = to_raw if isinstance(to_raw, list) else [str(to_raw)]
-        else:
-            # Default: reply to the sender of the last inbound message in this thread.
-            r = await db.execute(
-                select(Email)
-                .where(Email.provider_thread_id == thread_id, Email.direction == "inbound")
-                .order_by(Email.received_at.desc())
-                .limit(1)
-            )
-            last = r.scalar_one_or_none()
-            if not last or not last.sender_email:
-                return {"error": "no inbound sender found in thread; provide `to` explicitly"}
-            to_list = [last.sender_email]
-        # Default subject = "Re: <last subject>".
-        subject = args.get("subject")
-        if not subject:
-            r2 = await db.execute(
-                select(Email)
-                .where(Email.provider_thread_id == thread_id)
-                .order_by(Email.received_at.desc())
-                .limit(1)
-            )
-            last = r2.scalar_one_or_none()
-            if last:
-                subj = (last.subject or "").strip()
-                subject = subj if subj.lower().startswith("re:") else f"Re: {subj}"[:998]
-            else:
-                subject = "Re:"
+        # If 'to' is omitted we leave it for the executor to derive from
+        # the live thread headers; we no longer have a local Email mirror
+        # to look up the last inbound sender, so the agent SHOULD include
+        # ``to`` (or call ``gmail_get_thread`` first to discover it).
+        if not to_list:
+            return {
+                "error": "no `to` provided. Call gmail_get_thread first and pass the sender as `to`."
+            }
         payload = {
             "connection_id": int(args["connection_id"]),
             "to": [str(x) for x in to_list],
-            "subject": str(subject)[:998],
+            "subject": str(args.get("subject") or "")[:998],
             "body": str(args["body"]),
             "content_type": str(args.get("content_type") or "text"),
             "thread_id": thread_id,
             "in_reply_to": args.get("in_reply_to"),
         }
-        summary = f"Reply in thread: {payload['subject'][:80]}"
         return await AgentService._insert_proposal(
-            db, user, run_id, "connector_email_send", payload, summary, idempotency_key=AgentService._idem(args)
-        )
-
-    @staticmethod
-    async def _tool_propose_connector_calendar_update(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "connection_id": int(args["connection_id"]),
-            "event_id": str(args["event_id"]),
-        }
-        for k in ("summary", "description", "start_iso", "end_iso", "timezone"):
-            if args.get(k) is not None:
-                payload[k] = str(args[k])
-        if len(payload) <= 2:
-            return {"error": "no fields to update"}
-        summary = f"Update calendar event {payload['event_id']}"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "connector_calendar_update", payload, summary,
+            db,
+            user,
+            run_id,
+            "email_reply",
+            payload,
+            f"Reply in thread: {payload['subject'][:80] or thread_id}",
             idempotency_key=AgentService._idem(args),
         )
-
-    @staticmethod
-    async def _tool_propose_connector_calendar_delete(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = {
-            "connection_id": int(args["connection_id"]),
-            "event_id": str(args["event_id"]),
-        }
-        return await AgentService._insert_proposal(
-            db, user, run_id, "connector_calendar_delete", payload,
-            f"Delete calendar event {payload['event_id']}",
-            idempotency_key=AgentService._idem(args),
-        )
-
-    @staticmethod
-    async def _tool_propose_connector_file_share(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        payload = {
-            "connection_id": int(args["connection_id"]),
-            "file_id": str(args["file_id"]),
-            "email": str(args["email"]),
-            "role": str(args.get("role") or "reader"),
-        }
-        if payload["role"] not in ("reader", "writer"):
-            payload["role"] = "reader"
-        return await AgentService._insert_proposal(
-            db, user, run_id, "connector_file_share", payload,
-            f"Share file {payload['file_id']} with {payload['email']} ({payload['role']})",
-            idempotency_key=AgentService._idem(args),
-        )
-
-    _PROPOSAL_TOOL_METHODS: dict[str, str] = {
-        # Internal-CRM proposals (legacy: create a pending row even though we now also
-        # support an auto-apply variant). Kept for back-compat with prior agent prompts.
-        "propose_create_deal": "_tool_propose_create_deal",
-        "propose_update_deal": "_tool_propose_update_deal",
-        "propose_create_contact": "_tool_propose_create_contact",
-        "propose_update_contact": "_tool_propose_update_contact",
-        "propose_create_event": "_tool_propose_create_event",
-        "propose_update_event": "_tool_propose_update_event",
-        # External-write proposals (always require approval).
-        "propose_connector_email_send": "_tool_propose_connector_email_send",
-        "propose_connector_calendar_create": "_tool_propose_connector_calendar_create",
-        "propose_connector_file_upload": "_tool_propose_connector_file_upload",
-        "propose_connector_teams_message": "_tool_propose_connector_teams_message",
-        "propose_connector_email_reply": "_tool_propose_connector_email_reply",
-        "propose_connector_calendar_update": "_tool_propose_connector_calendar_update",
-        "propose_connector_calendar_delete": "_tool_propose_connector_calendar_delete",
-        "propose_connector_file_share": "_tool_propose_connector_file_share",
-    }
-
-    # Auto-apply CRM tools — execute immediately (with UNDO) instead of creating a pending row.
-    _AUTO_APPLY_TOOL_KIND: dict[str, str] = {
-        "apply_create_contact": "create_contact",
-        "apply_update_contact": "update_contact",
-        "apply_create_deal": "create_deal",
-        "apply_update_deal": "update_deal",
-        "apply_create_event": "create_event",
-        "apply_update_event": "update_event",
-    }
-
-    @staticmethod
-    def _build_auto_apply_payload(kind: str, args: dict[str, Any]) -> tuple[dict[str, Any], str]:
-        """Mirrors the payload normalization the proposal tools do, then returns (payload, summary)."""
-        if kind == "create_contact":
-            payload = {
-                "name": str(args["name"])[:255],
-                "email": args.get("email"),
-                "phone": args.get("phone"),
-                "role": str(args.get("role") or "other"),
-                "notes": args.get("notes"),
-            }
-            return payload, f"Crear contacto: {payload['name']}"
-        if kind == "update_contact":
-            payload = {"contact_id": int(args["contact_id"])}
-            for k in ("name", "email", "phone", "role", "notes"):
-                if args.get(k) is not None:
-                    payload[k] = args[k]
-            return payload, f"Actualizar contacto #{payload['contact_id']}"
-        if kind == "create_deal":
-            payload = {
-                "contact_id": int(args["contact_id"]),
-                "title": str(args["title"])[:255],
-                "status": str(args.get("status") or "new"),
-                "notes": args.get("notes"),
-                "amount": args.get("amount"),
-                "currency": args.get("currency"),
-            }
-            if payload["status"] not in ("new", "contacted", "negotiating", "won", "lost"):
-                payload["status"] = "new"
-            return payload, f"Crear trato: {payload['title']}"
-        if kind == "update_deal":
-            payload = {"deal_id": int(args["deal_id"])}
-            for k in ("title", "status", "amount", "currency", "notes"):
-                if args.get(k) is not None:
-                    payload[k] = args[k]
-            return payload, f"Actualizar trato #{payload['deal_id']}"
-        if kind == "create_event":
-            payload = {
-                "venue_name": str(args["venue_name"])[:255],
-                "event_date": str(args["event_date"]),
-                "status": str(args.get("status") or "confirmed"),
-            }
-            if args.get("deal_id") is not None:
-                payload["deal_id"] = int(args["deal_id"])
-            if args.get("city") is not None:
-                payload["city"] = str(args["city"])[:255]
-            if args.get("notes") is not None:
-                payload["notes"] = args.get("notes")
-            return payload, f"Crear evento: {payload['venue_name']} ({payload['event_date']})"
-        if kind == "update_event":
-            payload = {"event_id": int(args["event_id"])}
-            for k in ("venue_name", "event_date", "deal_id", "city", "status", "notes"):
-                if args.get(k) is not None:
-                    payload[k] = args[k]
-            return payload, f"Actualizar evento #{payload['event_id']}"
-        return {}, kind
-
-    @staticmethod
-    async def _tool_auto_apply(
-        db: AsyncSession,
-        user: User,
-        run_id: int,
-        thread_id: int | None,
-        agent_tool_name: str,
-        args: dict[str, Any],
-    ) -> dict[str, Any]:
-        from app.services.auto_apply_service import auto_apply
-
-        kind = AgentService._AUTO_APPLY_TOOL_KIND[agent_tool_name]
-        payload, summary = AgentService._build_auto_apply_payload(kind, args)
-        try:
-            action = await auto_apply(
-                db, user,
-                kind=kind,
-                payload=payload,
-                summary=summary,
-                run_id=run_id,
-                thread_id=thread_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return {"error": str(exc)[:300]}
-        return {
-            "executed_action_id": action.id,
-            "kind": action.kind,
-            "summary": action.summary,
-            "entity_id": (action.result or {}).get("entity_id"),
-            "reversible_until": action.reversible_until.isoformat() if action.reversible_until else None,
-            "auto_applied": True,
-        }
-
-    @staticmethod
-    async def _tool_list_automations(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        from app.services.automation_lifecycle_service import automation_to_summary, list_automations
-
-        rows = await list_automations(db, user)
-        return {"automations": [automation_to_summary(r) for r in rows]}
-
-    @staticmethod
-    async def _tool_create_automation(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from app.services.automation_lifecycle_service import (
-            automation_to_summary,
-            create_automation,
-        )
-
-        nl = str(args.get("instruction_natural_language") or "").strip()
-        if not nl:
-            return {"error": "instruction_natural_language is required"}
-        rule = await create_automation(
-            db, user,
-            name=str(args.get("name") or nl)[:255],
-            instruction_natural_language=nl,
-            trigger=args.get("trigger"),
-            conditions=args.get("conditions") if isinstance(args.get("conditions"), dict) else None,
-            enabled=bool(args.get("enabled", True)),
-            source="agent",
-        )
-        return {"ok": True, "automation": automation_to_summary(rule)}
-
-    @staticmethod
-    async def _tool_update_automation(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from app.services.automation_lifecycle_service import (
-            automation_to_summary,
-            update_automation,
-        )
-
-        aid = args.get("automation_id")
-        if aid is None:
-            return {"error": "automation_id required"}
-        rule = await update_automation(
-            db, user,
-            automation_id=int(aid),
-            name=args.get("name"),
-            instruction_natural_language=args.get("instruction_natural_language"),
-            conditions=args.get("conditions") if isinstance(args.get("conditions"), dict) else None,
-            enabled=args.get("enabled"),
-        )
-        if not rule:
-            return {"error": "automation not found"}
-        return {"ok": True, "automation": automation_to_summary(rule)}
-
-    @staticmethod
-    async def _tool_delete_automation(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from app.services.automation_lifecycle_service import delete_automation
-
-        aid = args.get("automation_id")
-        if aid is None:
-            return {"error": "automation_id required"}
-        ok = await delete_automation(db, user, int(aid))
-        return {"ok": ok}
-
-    @staticmethod
-    async def _tool_start_connector_setup(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from app.services.connector_setup_service import start_setup
-
-        return await start_setup(db, user, str(args.get("provider") or ""))
-
-    @staticmethod
-    async def _tool_submit_connector_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from app.services.connector_setup_service import submit_credentials
-
-        token = str(args.get("setup_token") or "").strip()
-        cid = str(args.get("client_id") or "").strip()
-        secret = str(args.get("client_secret") or "").strip()
-        if not (token and cid and secret):
-            return {"error": "setup_token, client_id and client_secret are required"}
-        return await submit_credentials(
-            db, user,
-            setup_token=token,
-            client_id=cid,
-            client_secret=secret,
-            redirect_uri=args.get("redirect_uri"),
-            tenant=args.get("tenant"),
-        )
-
-    @staticmethod
-    async def _tool_start_oauth_flow(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from app.services.connector_setup_service import start_oauth
-
-        return await start_oauth(
-            db, user,
-            provider=str(args.get("provider") or ""),
-            service=str(args.get("service") or "all"),
-        )
-
-    @staticmethod
-    async def _tool_list_connectors(db: AsyncSession, user: User, args: dict[str, Any]) -> dict[str, Any]:
-        from app.models.connector_connection import ConnectorConnection
-
-        r = await db.execute(
-            select(ConnectorConnection).where(ConnectorConnection.user_id == user.id)
-        )
-        out = []
-        for c in r.scalars().all():
-            out.append(
-                {
-                    "id": c.id,
-                    "provider": c.provider,
-                    "label": c.label,
-                    "status": (c.meta or {}).get("status"),
-                }
-            )
-        return {"connectors": out}
 
     # ------------------------------------------------------------------
-    # Tool dispatch (single source of truth for routing a model-issued
-    # tool call to the matching internal handler). Used by ``run_agent``.
+    # Tool dispatch — single source of truth for routing model-issued
+    # tool calls to the matching internal handler.
     # ------------------------------------------------------------------
+
+    # name → (handler attr, takes_run_id)
+    _DISPATCH: dict[str, tuple[str, bool]] = {
+        # Reads
+        "gmail_list_messages": ("_tool_gmail_list_messages", False),
+        "gmail_get_message": ("_tool_gmail_get_message", False),
+        "gmail_get_thread": ("_tool_gmail_get_thread", False),
+        "gmail_list_labels": ("_tool_gmail_list_labels", False),
+        "gmail_list_filters": ("_tool_gmail_list_filters", False),
+        "calendar_list_events": ("_tool_calendar_list_events", False),
+        "drive_list_files": ("_tool_drive_list_files", False),
+        "outlook_list_messages": ("_tool_outlook_list_messages", False),
+        "outlook_get_message": ("_tool_outlook_get_message", False),
+        "teams_list_teams": ("_tool_teams_list_teams", False),
+        "teams_list_channels": ("_tool_teams_list_channels", False),
+        "list_connectors": ("_tool_list_connectors", False),
+        # Auto-apply Gmail
+        "gmail_modify_message": ("_tool_gmail_modify_message", False),
+        "gmail_modify_thread": ("_tool_gmail_modify_thread", False),
+        "gmail_trash_message": ("_tool_gmail_trash_message", False),
+        "gmail_untrash_message": ("_tool_gmail_untrash_message", False),
+        "gmail_trash_thread": ("_tool_gmail_trash_thread", False),
+        "gmail_untrash_thread": ("_tool_gmail_untrash_thread", False),
+        "gmail_mark_read": ("_tool_gmail_mark_read", False),
+        "gmail_mark_unread": ("_tool_gmail_mark_unread", False),
+        "gmail_silence_sender": ("_tool_gmail_silence_sender", False),
+        "gmail_create_filter": ("_tool_gmail_create_filter", False),
+        "gmail_delete_filter": ("_tool_gmail_delete_filter", False),
+        # Auto-apply calendar
+        "calendar_create_event": ("_tool_calendar_create_event", False),
+        "calendar_update_event": ("_tool_calendar_update_event", False),
+        "calendar_delete_event": ("_tool_calendar_delete_event", False),
+        # Auto-apply drive
+        "drive_upload_file": ("_tool_drive_upload_file", False),
+        "drive_share_file": ("_tool_drive_share_file", False),
+        # Auto-apply teams
+        "teams_post_message": ("_tool_teams_post_message", False),
+        # Memory + skills
+        "upsert_memory": ("_tool_upsert_memory", False),
+        "delete_memory": ("_tool_delete_memory", False),
+        "list_memory": ("_tool_list_memory", False),
+        "recall_memory": ("_tool_recall_memory", False),
+        "list_skills": ("_tool_list_skills", False),
+        "load_skill": ("_tool_load_skill", False),
+        # Connector setup
+        "start_connector_setup": ("_tool_start_connector_setup", False),
+        "submit_connector_credentials": ("_tool_submit_connector_credentials", False),
+        "start_oauth_flow": ("_tool_start_oauth_flow", False),
+        # Proposals (gated)
+        "propose_email_send": ("_tool_propose_email_send", True),
+        "propose_email_reply": ("_tool_propose_email_reply", True),
+    }
 
     @staticmethod
     async def _dispatch_tool(
@@ -1161,79 +880,53 @@ class AgentService:
     ) -> tuple[dict[str, Any], PendingProposal | None]:
         """Execute one model-issued tool call.
 
-        Returns ``(result_dict, pending_proposal_or_None)``. The result dict
-        is what we feed back to the model (and persist as the tool step).
-        ``pending_proposal_or_None`` is set when the call created a row in
-        ``pending_proposals`` so the caller can include it in the response.
-
-        Tool names must match ``AGENT_TOOL_NAMES`` exactly. Argument shapes
-        must match the JSON schema. There is no aliasing or arg coercion —
-        if the model calls a tool incorrectly, it gets a structured error
-        back and is expected to retry with the correct call (the same way
-        any REST API would respond).
+        Returns ``(result_dict, pending_proposal_or_None)``. The result is
+        what we feed back to the model and persist as the tool step.
         """
+        del thread_id  # not needed in the OpenClaw dispatcher (no auto-apply CRM)
         tool_name = call.name or ""
         args = call.arguments if isinstance(call.arguments, dict) else {}
 
         if tool_name not in AGENT_TOOL_NAMES:
-            return (
-                {"error": f"unknown tool {tool_name!r}"},
-                None,
-            )
+            return ({"error": f"unknown tool {tool_name!r}"}, None)
+
+        entry = AgentService._DISPATCH.get(tool_name)
+        if entry is None:
+            return ({"error": f"unhandled tool: {tool_name}"}, None)
+        handler_name, takes_run_id = entry
+        handler = getattr(AgentService, handler_name)
 
         try:
-            if tool_name == "hybrid_rag_search":
-                return (await AgentService._tool_rag(db, user, args), None)
-            if tool_name == "get_entity":
-                return (await AgentService._tool_get_entity(db, args), None)
-            if tool_name == "search_emails":
-                return (await AgentService._tool_search_emails(db, user, args), None)
-            if tool_name == "get_thread":
-                return (await AgentService._tool_get_thread(db, user, args), None)
-            if tool_name == "list_calendar_events":
-                return (await AgentService._tool_list_calendar_events(db, user, args), None)
-            if tool_name == "search_drive":
-                return (await AgentService._tool_search_drive(db, user, args), None)
-            if tool_name == "list_drive_files":
-                return (await AgentService._tool_list_drive_files(db, user, args), None)
-            if tool_name == "get_drive_file_text":
-                return (await AgentService._tool_get_drive_file_text(db, user, args), None)
-            if tool_name == "list_connectors":
-                return (await AgentService._tool_list_connectors(db, user, args), None)
-            if tool_name == "list_automations":
-                return (await AgentService._tool_list_automations(db, user, args), None)
-            if tool_name == "create_automation":
-                return (await AgentService._tool_create_automation(db, user, args), None)
-            if tool_name == "update_automation":
-                return (await AgentService._tool_update_automation(db, user, args), None)
-            if tool_name == "delete_automation":
-                return (await AgentService._tool_delete_automation(db, user, args), None)
-            if tool_name == "start_connector_setup":
-                return (await AgentService._tool_start_connector_setup(db, user, args), None)
-            if tool_name == "submit_connector_credentials":
-                return (await AgentService._tool_submit_connector_credentials(db, user, args), None)
-            if tool_name == "start_oauth_flow":
-                return (await AgentService._tool_start_oauth_flow(db, user, args), None)
-            if tool_name in AgentService._AUTO_APPLY_TOOL_KIND:
-                result = await AgentService._tool_auto_apply(
-                    db, user, run_id, thread_id, tool_name, args
-                )
-                return (result, None)
-            if tool_name in AgentService._PROPOSAL_TOOL_METHODS:
-                method_name = AgentService._PROPOSAL_TOOL_METHODS[tool_name]
-                handler = getattr(AgentService, method_name)
+            if takes_run_id:
                 result = await handler(db, user, run_id, args)
-                prop_id = result.get("proposal_id") if isinstance(result, dict) else None
-                if prop_id:
-                    prop = await db.get(PendingProposal, int(prop_id))
-                    return (result, prop)
-                return (result, None)
+            else:
+                result = await handler(db, user, args)
+        except ConnectorNeedsReauth as exc:
+            return (
+                {
+                    "error": "connector_needs_reauth",
+                    "connection_id": exc.connection_id,
+                    "provider": exc.provider,
+                    "message": str(exc),
+                },
+                None,
+            )
+        except OAuthError as exc:
+            return ({"error": f"oauth_error: {exc}"}, None)
+        except (GmailAPIError, CalendarAPIError, DriveAPIError, GraphAPIError) as exc:
+            return ({"error": f"upstream {exc.status_code}: {exc.detail[:300]}"}, None)
         except Exception as exc:  # noqa: BLE001 — surface tool errors to the model
             return ({"error": str(exc)[:500]}, None)
 
-        # Defensive: AGENT_TOOL_NAMES says it's known but no branch handled it.
-        return ({"error": f"unhandled tool: {tool_name}"}, None)
+        prop_id = result.get("proposal_id") if isinstance(result, dict) else None
+        if prop_id:
+            prop = await db.get(PendingProposal, int(prop_id))
+            return (result, prop)
+        return (result, None)
 
+    # ------------------------------------------------------------------
+    # ReAct loop
+    # ------------------------------------------------------------------
     @staticmethod
     async def run_agent(
         db: AsyncSession,
@@ -1251,7 +944,7 @@ class AgentService:
         ``thread_id``: persisted on AgentRun so executed actions / proposals can route
           their inline cards back into the right chat thread.
         ``thread_context_hint``: a short system-injected context blurb such as
-          ``"Conversación sobre Contacto #42 (Maria Lopez)"``.
+          ``"Conversation about thread #42"``.
         """
         settings_row = await UserAISettingsService.get_or_create(db, user)
         if settings_row.ai_disabled:
@@ -1283,8 +976,8 @@ class AgentService:
         db.add(run)
         await db.flush()
 
-        system_prompt = build_system_prompt(
-            user, thread_context_hint=thread_context_hint
+        system_prompt = await build_system_prompt(
+            db, user, thread_context_hint=thread_context_hint
         )
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
@@ -1301,8 +994,6 @@ class AgentService:
 
         step_idx = 0
         proposals_created: list[PendingProposal] = []
-        # Carry the bound thread id on AgentRun for downstream surfaces (executed actions,
-        # proactive notifications) without growing the AgentRun schema. Stored as a step.
         if thread_id is not None:
             db.add(
                 AgentRunStep(
@@ -1314,17 +1005,11 @@ class AgentService:
                 )
             )
 
-        # The full tool palette is computed ONCE per run. Today
-        # ``get_tool_palette`` returns ``AGENT_TOOLS`` for every user; the
-        # extension seam is in place for future per-tenant skill toggles.
         turn_tools = get_tool_palette(user)
 
         try:
             final_answer_text: str | None = None
             for _ in range(settings.agent_max_tool_steps):
-                # Bare ReAct turn: full palette + tool_choice="required" so
-                # every turn ends in some tool call (a data/action tool or
-                # the ``final_answer`` terminator). The model decides which.
                 response = await LLMClient.chat_with_tools(
                     api_key or "",
                     settings_row,
@@ -1350,10 +1035,6 @@ class AgentService:
                     )
                 )
 
-                # ``tool_choice="required"`` should make this branch
-                # impossible, but some providers (or models without
-                # tool-call support) still return text-only. Accept that
-                # text as the final reply rather than failing the run.
                 if not response.has_tool_calls:
                     run.assistant_reply = (response.content or "").strip()
                     run.status = "completed"
@@ -1361,9 +1042,6 @@ class AgentService:
 
                 conversation.append(_assistant_message_from(response))
 
-                # Execute every tool call in order. If ``final_answer``
-                # appears in this batch it becomes the run's reply and
-                # the loop terminates after the batch.
                 for call in response.tool_calls:
                     tool_name = call.name or ""
                     args = call.arguments if isinstance(call.arguments, dict) else {}
@@ -1418,15 +1096,6 @@ class AgentService:
                 run.error = "Step budget exceeded"
 
         except LLMProviderError as exc:
-            # Provider-side failure (404 model not found, 401 bad key, network down...).
-            # Record the structured detail as a step so the chat route can render an
-            # inline "provider_error" card instead of leaking raw httpx text.
-            #
-            # We deliberately do NOT also write the same text into assistant_reply:
-            # the card already shows message + hint + technical detail + a "Settings"
-            # CTA, and writing it here would duplicate the same line as a plain
-            # bubble above the card. Any partial assistant_reply produced before the
-            # failure is preserved (so e.g. "I started looking… <CARD>" still works).
             step_idx += 1
             db.add(
                 AgentRunStep(
@@ -1460,7 +1129,6 @@ class AgentService:
                 "An API key for the active provider exists but cannot be decrypted. "
                 "Re-enter it in Settings → AI to recover."
             )
-            # No assistant_reply: the key_decrypt_error card already explains it.
         except NoActiveProviderError as exc:
             run.status = "failed"
             run.error = str(exc) or "No AI provider is selected as active."
@@ -1473,13 +1141,11 @@ class AgentService:
         await db.commit()
         await db.refresh(run)
 
-        # After commit, ORM instances are expired; lazy loads raise MissingGreenlet in async.
         for p in proposals_created:
             await db.refresh(p)
         prop_reads = [proposal_to_read(p) for p in proposals_created]
         steps = await AgentService._load_steps(db, run.id)
-        actions = await AgentService._load_executed_actions(db, run.id)
-        return AgentService._to_read(run, steps, prop_reads, actions)
+        return AgentService._to_read(run, steps, prop_reads)
 
     @staticmethod
     async def _load_steps(db: AsyncSession, run_id: int) -> list[AgentStepRead]:
@@ -1487,39 +1153,16 @@ class AgentService:
             select(AgentRunStep).where(AgentRunStep.run_id == run_id).order_by(AgentRunStep.step_index)
         )
         rows = result.scalars().all()
-        return [AgentStepRead(step_index=s.step_index, kind=s.kind, name=s.name, payload=s.payload) for s in rows]
-
-    @staticmethod
-    async def _load_executed_actions(db: AsyncSession, run_id: int):
-        from app.models.executed_action import ExecutedAction
-        from app.schemas.agent import ExecutedActionRead
-
-        r = await db.execute(
-            select(ExecutedAction).where(ExecutedAction.run_id == run_id).order_by(ExecutedAction.id)
-        )
-        out: list[ExecutedActionRead] = []
-        for a in r.scalars().all():
-            out.append(
-                ExecutedActionRead(
-                    id=a.id,
-                    kind=a.kind,
-                    summary=a.summary,
-                    status=a.status,
-                    payload=dict(a.payload),
-                    result=dict(a.result) if a.result else None,
-                    reversible_until=a.reversible_until,
-                    reversed_at=a.reversed_at,
-                    created_at=a.created_at,
-                )
-            )
-        return out
+        return [
+            AgentStepRead(step_index=s.step_index, kind=s.kind, name=s.name, payload=s.payload)
+            for s in rows
+        ]
 
     @staticmethod
     def _to_read(
         run: AgentRun,
         steps: list[AgentStepRead],
         proposals: list[PendingProposalRead],
-        executed_actions: list | None = None,
     ) -> AgentRunRead:
         return AgentRunRead(
             id=run.id,
@@ -1529,7 +1172,6 @@ class AgentService:
             error=run.error,
             steps=steps,
             pending_proposals=proposals,
-            executed_actions=executed_actions or [],
         )
 
     @staticmethod
@@ -1539,8 +1181,9 @@ class AgentService:
             return None
         steps = await AgentService._load_steps(db, run.id)
         pr = await db.execute(
-            select(PendingProposal).where(PendingProposal.run_id == run_id, PendingProposal.user_id == user.id)
+            select(PendingProposal).where(
+                PendingProposal.run_id == run_id, PendingProposal.user_id == user.id
+            )
         )
         props = [proposal_to_read(p) for p in pr.scalars().all()]
-        actions = await AgentService._load_executed_actions(db, run.id)
-        return AgentService._to_read(run, steps, props, actions)
+        return AgentService._to_read(run, steps, props)

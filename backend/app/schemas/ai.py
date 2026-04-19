@@ -130,31 +130,6 @@ class ListModelsResponse(BaseModel):
     error: TestConnectionResult | None = None
 
 
-# --- Unchanged -------------------------------------------------------------
-
-
-class SemanticSearchRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=2000)
-    limit_per_type: int = Field(default=5, ge=1, le=20)
-
-
-class SemanticSearchHit(BaseModel):
-    entity_type: str
-    entity_id: int
-    score: float
-    title: str
-    snippet: str
-    citation: str
-    chunk_id: int | None = None
-    match_sources: list[str] | None = None
-    rrf_score: float | None = None
-
-
-class EmailDraftResponse(BaseModel):
-    draft: str
-    model: str
-
-
 # --- Multi-provider configs (new in 0016) ----------------------------------
 
 

@@ -7,8 +7,6 @@ import { ConnectorSetupCard } from "./cards/connector-setup-card";
 import { KeyDecryptErrorCard } from "./cards/key-decrypt-error-card";
 import { OAuthCard } from "./cards/oauth-card";
 import { ProviderErrorCard } from "./cards/provider-error-card";
-import { RuleLearnedCard } from "./cards/rule-learned-card";
-import { UndoCard } from "./cards/undo-card";
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
@@ -74,14 +72,10 @@ function CardRouter({
   switch (card.card_kind) {
     case "approval":
       return <ApprovalCard card={card as never} />;
-    case "undo":
-      return <UndoCard card={card as never} />;
     case "connector_setup":
       return <ConnectorSetupCard card={card as never} />;
     case "oauth_authorize":
       return <OAuthCard card={card as never} />;
-    case "rule_learned":
-      return <RuleLearnedCard card={card as never} />;
     case "provider_error":
       return <ProviderErrorCard card={card as never} />;
     case "key_decrypt_error":

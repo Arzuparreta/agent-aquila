@@ -4,11 +4,12 @@ from app.services.capability_registry import describe_capabilities, proposal_kin
 from app.services.pending_execution_service import preview_for_proposal_kind
 
 
-def test_proposal_kind_registry_covers_execution_kinds() -> None:
+def test_proposal_kind_registry_only_email_kinds() -> None:
     reg = proposal_kind_registry()
-    assert "create_deal" in reg
-    assert "connector_teams_message" in reg
-    assert reg["connector_email_send"]["risk_tier"] == "external_write"
+    # After the OpenClaw refactor only outbound email is proposal-gated.
+    assert set(reg.keys()) == {"email_send", "email_reply"}
+    assert reg["email_send"]["risk_tier"] == "external_write"
+    assert reg["email_send"]["auto_apply"] is False
 
 
 def test_describe_capabilities_shape() -> None:
@@ -17,10 +18,17 @@ def test_describe_capabilities_shape() -> None:
     assert isinstance(cap["proposal_kinds"], dict)
 
 
-def test_preview_for_create_deal() -> None:
+def test_preview_for_email_send() -> None:
     p = preview_for_proposal_kind(
-        "create_deal",
-        {"contact_id": 1, "title": "Festival", "status": "new"},
+        "email_send",
+        {
+            "connection_id": 7,
+            "to": ["alice@example.com"],
+            "subject": "Hello",
+            "body": "Hey there",
+        },
     )
-    assert p["action"] == "create_deal"
-    assert p["title"] == "Festival"
+    assert p["action"] == "email_send"
+    assert p["to"] == ["alice@example.com"]
+    assert p["subject"] == "Hello"
+    assert p["body_preview"].startswith("Hey")

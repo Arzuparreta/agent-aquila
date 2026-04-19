@@ -34,26 +34,8 @@ from app.services.instance_oauth_service import (
     save_google_app_credentials,
     save_microsoft_app_credentials,
 )
-from app.services.job_queue import enqueue as enqueue_job
 from app.services.oauth import google_oauth, microsoft_oauth, state_store
 from app.services.oauth.errors import OAuthError
-
-_RESOURCE_FOR_PROVIDER: dict[str, str] = {
-    "google_gmail": "gmail",
-    "google_calendar": "calendar",
-    "google_drive": "drive",
-    "graph_mail": "graph_mail",
-    "graph_calendar": "graph_calendar",
-    "graph_onedrive": "graph_drive",
-}
-_INITIAL_JOB_FOR_RESOURCE: dict[str, str] = {
-    "gmail": "gmail_initial_sync",
-    "calendar": "calendar_initial_sync",
-    "drive": "drive_initial_sync",
-    "graph_mail": "graph_mail_initial_sync",
-    "graph_calendar": "graph_calendar_initial_sync",
-    "graph_drive": "graph_drive_initial_sync",
-}
 
 router = APIRouter(prefix="/oauth", tags=["oauth"])
 
@@ -292,7 +274,6 @@ async def google_callback(
         )
 
     created_ids: list[int] = []
-    created_rows: list[tuple[int, str]] = []
     for provider in provider_ids:
         row = await _upsert_google_connection(
             db,
@@ -306,20 +287,9 @@ async def google_callback(
         )
         await db.flush()
         created_ids.append(row.id)
-        created_rows.append((row.id, provider))
     await db.commit()
-
-    # Kick off the initial sync for each freshly-connected product. Best-effort: if Redis is not
-    # configured the job queue runs it inline (blocking) or returns an error we ignore.
-    for conn_id, provider in created_rows:
-        resource = _RESOURCE_FOR_PROVIDER.get(provider)
-        if not resource:
-            continue
-        job_name = _INITIAL_JOB_FOR_RESOURCE[resource]
-        try:
-            await enqueue_job(job_name, conn_id, job_id=f"{resource}-initial-{conn_id}", allow_inline=False)
-        except Exception:  # pragma: no cover — best-effort
-            pass
+    # No background sync to kick off — every read happens live via the
+    # provider proxy routes after the OpenClaw refactor.
 
     return RedirectResponse(
         _frontend_redirect(
@@ -574,7 +544,6 @@ async def microsoft_callback(
         )
 
     created_ids: list[int] = []
-    created_rows: list[tuple[int, str]] = []
     for provider in provider_ids:
         row = await _upsert_microsoft_connection(
             db,
@@ -588,20 +557,9 @@ async def microsoft_callback(
         )
         await db.flush()
         created_ids.append(row.id)
-        created_rows.append((row.id, provider))
     await db.commit()
-
-    for conn_id, provider in created_rows:
-        resource = _RESOURCE_FOR_PROVIDER.get(provider)
-        if not resource:
-            continue
-        job_name = _INITIAL_JOB_FOR_RESOURCE.get(resource)
-        if not job_name:
-            continue
-        try:
-            await enqueue_job(job_name, conn_id, job_id=f"{resource}-initial-{conn_id}", allow_inline=False)
-        except Exception:
-            pass
+    # No background sync to kick off — every read happens live via the
+    # provider proxy routes after the OpenClaw refactor.
 
     return RedirectResponse(
         _frontend_redirect(

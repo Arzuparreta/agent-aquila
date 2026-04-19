@@ -4,7 +4,8 @@ Automated tests live under `backend/tests/` and use **[pytest](https://pytest.or
 
 The **frontend** has no unit/e2e test script; use `npm run lint` (Next.js ESLint).
 
-Background **Redis** and the **ARQ worker** are for runtime mail/calendar/drive sync — they are **not** required to run `pytest`.
+Background **Redis** and the **ARQ worker** are only used for the optional
+`agent_heartbeat` cron — they are **not** required to run `pytest`.
 
 ---
 
@@ -41,8 +42,6 @@ Background **Redis** and the **ARQ worker** are for runtime mail/calendar/drive 
 
 ## Running the suite
 
-The backend currently collects **37** tests under `backend/tests/`.
-
 From `backend/`:
 
 ```bash
@@ -67,7 +66,7 @@ Useful variants:
 |--------|------|
 | `anyio_backend` | Asyncio backend for anyio-using code |
 | `db_session` | Async SQLAlchemy session in a **transaction rolled back** after each test; requires live Postgres at `TEST_DATABASE_URL` |
-| `crm_user` | User with Ollama provider and AI enabled (agent/RAG tool tests) |
+| `crm_user` | User with Ollama provider and AI enabled (agent tool tests) |
 | `agent_run` | Minimal `AgentRun` row tied to `crm_user` |
 
 ---
@@ -76,10 +75,10 @@ Useful variants:
 
 | Module | DB | Summary |
 |--------|----|---------|
-| `test_capability_registry.py` | No | Registry keys, `describe_capabilities`, preview helpers for proposal kinds |
+| `test_capability_registry.py` | No | Registry keys for the only two proposal kinds the agent can produce (`email_send`, `email_reply`) and their preview helpers |
 | `test_ai_providers.py` | No | AI provider adapters (OpenAI, Ollama, Anthropic, OpenRouter, Azure, LiteLLM, custom OpenAI-compatible): URLs, headers, parsing, error codes — HTTP mocked via `httpx.AsyncClient` patches |
 | `test_ai_routes.py` | No | Provider registry enumeration, API key sentinel resolution, Pydantic normalization for user AI settings |
-| `test_agent_tools.py` | Mostly yes | Hybrid RAG + entity tools, CRM/connector proposals, idempotency; `test_agent_proposal_tool_registry_matches_service` is DB-free |
+| `test_agent_tools.py` | Mostly yes | OpenClaw tool catalogue invariants: every tool is in exactly one bucket (auto-apply or proposal), every tool is dispatched, and `propose_email_send` / `propose_email_reply` are the only proposal tools |
 
 ---
 
@@ -95,7 +94,7 @@ npm run lint
 
 ## Manual UI QA
 
-There is no Playwright/Cypress suite for the chat or inbox yet. After changing those surfaces, run through the checklist in **[`MANUAL_QA.md`](MANUAL_QA.md)** (thread kebab: rename / pin / archive / delete; inbox kebab: read state, promote, silence, start chat).
+There is no Playwright/Cypress suite for the chat or inbox yet. After changing those surfaces, run through the checklist in **[`MANUAL_QA.md`](MANUAL_QA.md)** (thread kebab: rename / pin / archive / delete; inbox: search, mute, spam, start chat; settings: memory + skills viewers; reconnect-Gmail banner).
 
 ---
 

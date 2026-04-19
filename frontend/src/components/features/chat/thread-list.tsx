@@ -5,16 +5,16 @@ import { useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { ChatThread } from "@/types/api";
 
-import { LibraryDrawer } from "./library-drawer";
 import { ThreadActionsMenu } from "./thread-actions-menu";
 
+// Threads no longer mirror first-class CRM entities. Any non-general thread
+// kind (gmail_message, calendar_event, drive_file, …) gets a generic chip.
 const KIND_BADGES: Record<string, string> = {
-  contact: "👤",
-  deal: "💼",
-  event: "📅",
-  email: "📩",
+  gmail_message: "📩",
+  calendar_event: "📅",
   drive_file: "📎",
-  attachment: "📎"
+  outlook_message: "📩",
+  teams_message: "💬",
 };
 
 function timeShort(iso: string | null): string {
@@ -50,7 +50,6 @@ export function ChatThreadList({
   onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
   onDeleteThread: (id: number) => Promise<void> | void;
 }) {
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   const startNewThread = async () => {
@@ -137,13 +136,6 @@ export function ChatThreadList({
           })}
         </ul>
       </div>
-      <button
-        onClick={() => setLibraryOpen(true)}
-        className="border-t border-border-subtle px-3 py-3 text-left text-sm text-fg-muted hover:bg-interactive-hover"
-      >
-        📚 Biblioteca · contactos, eventos, archivos…
-      </button>
-      {libraryOpen ? <LibraryDrawer onClose={() => setLibraryOpen(false)} /> : null}
     </div>
   );
 }

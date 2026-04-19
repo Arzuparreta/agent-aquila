@@ -5,13 +5,11 @@ Endpoints:
 - ``POST   /threads`` — create a manual thread (or upsert an entity-bound one).
 - ``GET    /threads/{id}`` — read a single thread.
 - ``PATCH  /threads/{id}`` — pin/archive/title.
-- ``DELETE /threads/{id}`` — hard-delete the thread (cascades to chat_messages;
-  ``executed_actions.thread_id`` and ``attachments.thread_id`` are SET NULL by
-  the migration so audit history survives).
+- ``DELETE /threads/{id}`` — hard-delete the thread (cascades to chat_messages).
 - ``GET    /threads/{id}/messages`` — paginated message history.
 - ``POST   /threads/{id}/messages`` — append a user message and run the agent in this
   thread context. Persists both messages, returns the assistant reply with any inline
-  cards (approval / undo / setup) attached as ``attachments``.
+  cards (approval / setup) attached as ``attachments``.
 """
 from __future__ import annotations
 
@@ -54,108 +52,24 @@ router = APIRouter(prefix="/threads", tags=["threads"], dependencies=[Depends(ge
 async def _build_thread_context_hint(db: AsyncSession, thread) -> str | None:
     """Build the system-prompt suffix for entity-bound threads.
 
-    Returns a short, single-line sentence describing the bound entity so the agent
-    knows what the thread is about without needing a tool call. Falls back to a
-    minimal "conversación dedicada al {type} #{id}" when the entity can't be
-    fetched (deleted, permission issue, etc.). Non-entity threads get ``None``.
+    After the OpenClaw refactor the only first-class entities are the
+    free-form ``general`` threads opened from the inbox / chat composer.
+    External resources (Gmail messages, Calendar events, Drive files) are
+    referenced by their *provider* IDs via message attachments rather
+    than mirrored into our DB, so there is no entity row to enrich.
     """
+    del db  # entity hints removed alongside CRM/mirror tables
     if thread.kind != "entity" or not thread.entity_type:
         return None
-
-    fallback = (
+    return (
         f"Conversación dedicada al {thread.entity_type} #{thread.entity_id} ({thread.title})."
     )
 
-    try:
-        if thread.entity_type == "email":
-            from app.services.email_service import EmailService
-
-            email = await EmailService.get_email(db, thread.entity_id)
-            if not email:
-                return fallback
-            bits = [
-                f"de {email.sender_name or email.sender_email}" if (email.sender_name or email.sender_email) else None,
-                f"asunto \"{email.subject}\"" if email.subject else None,
-            ]
-            tail = " · ".join(b for b in bits if b)
-            snippet = (email.snippet or email.body or "").strip().replace("\n", " ")[:200]
-            return (
-                f"Conversación dedicada al correo #{email.id}"
-                f"{' ' + tail if tail else ''}."
-                f"{' Extracto: ' + snippet if snippet else ''}"
-            )
-
-        if thread.entity_type == "contact":
-            from app.services.contact_service import ContactService
-
-            contact = await ContactService.get_contact(db, thread.entity_id)
-            bits = [
-                f"Email: {contact.email}" if contact.email else None,
-                f"Teléfono: {contact.phone}" if contact.phone else None,
-                f"Rol: {contact.role}" if contact.role and contact.role != "other" else None,
-            ]
-            tail = " · ".join(b for b in bits if b)
-            return (
-                f"Conversación dedicada al contacto #{contact.id} ({contact.name})."
-                f"{' ' + tail + '.' if tail else ''}"
-            )
-
-        if thread.entity_type == "deal":
-            from app.services.deal_service import DealService
-
-            deal = await DealService.get_deal(db, thread.entity_id)
-            amount = None
-            if deal.amount is not None:
-                amount = f"Monto: {deal.amount}{' ' + deal.currency if deal.currency else ''}"
-            bits = [
-                f"Estado: {deal.status}" if deal.status else None,
-                amount,
-            ]
-            tail = " · ".join(b for b in bits if b)
-            return (
-                f"Conversación dedicada al trato #{deal.id} ({deal.title})."
-                f"{' ' + tail + '.' if tail else ''}"
-            )
-
-        if thread.entity_type == "event":
-            from app.services.event_service import EventService
-
-            event = await EventService.get_event(db, thread.entity_id)
-            when = event.event_date.isoformat() if event.event_date else None
-            bits = [
-                f"Fecha: {when}" if when else None,
-                f"Ciudad: {event.city}" if event.city else None,
-                f"Recinto: {event.venue_name}" if event.venue_name else None,
-            ]
-            tail = " · ".join(b for b in bits if b)
-            return (
-                f"Conversación dedicada al evento #{event.id} ({event.venue_name})."
-                f"{' ' + tail + '.' if tail else ''}"
-            )
-
-        if thread.entity_type == "attachment":
-            from app.models.attachment import Attachment
-
-            row = await db.get(Attachment, thread.entity_id)
-            if not row:
-                return fallback
-            size_kb = (row.size_bytes or 0) / 1024
-            return (
-                f"Conversación dedicada al archivo #{row.id} ({row.filename})."
-                f" Tipo: {row.mime_type} · Tamaño: {size_kb:.1f} KB."
-            )
-    except Exception:  # noqa: BLE001 — hint enrichment must never break the send turn
-        return fallback
-
-    return fallback
-
 
 def _agent_run_to_attachments(run) -> list[dict[str, Any]]:
-    """Translate executed actions and pending proposals into inline chat cards.
+    """Translate pending proposals and tool steps into inline chat cards.
 
     Each card shape (frontend-aware):
-      - {"card_kind": "undo", "action_id": int, "kind": str, "summary": str,
-         "reversible_until": iso, "result": {...}}
       - {"card_kind": "approval", "proposal_id": int, "kind": str, "summary": str,
          "risk_tier": str, "preview": {...}}
     Connector setup / oauth_authorize cards are emitted directly by the agent tools as
@@ -163,20 +77,6 @@ def _agent_run_to_attachments(run) -> list[dict[str, Any]]:
     can also poll thread refs if the agent did not embed a card.)
     """
     out: list[dict[str, Any]] = []
-    for action in run.executed_actions or []:
-        out.append(
-            {
-                "card_kind": "undo",
-                "action_id": action.id,
-                "kind": action.kind,
-                "summary": action.summary,
-                "status": action.status,
-                "reversible_until": action.reversible_until.isoformat()
-                if action.reversible_until
-                else None,
-                "result": action.result,
-            }
-        )
     for prop in run.pending_proposals or []:
         out.append(
             {
@@ -300,11 +200,8 @@ async def delete_thread(
 ) -> Response:
     """Hard-delete a chat thread owned by the calling user.
 
-    DB-level ``ON DELETE CASCADE`` on ``chat_messages.thread_id`` removes the
-    message history automatically. ``executed_actions.thread_id`` and
-    ``attachments.thread_id`` are ``SET NULL`` (see migration
-    ``0012_chat_artist_rework``), so audit history and uploaded files survive
-    the deletion.
+    DB-level ``ON DELETE CASCADE`` on ``chat_messages.thread_id`` removes
+    the message history automatically.
     """
     row = await get_thread(db, current_user, thread_id)
     if not row:

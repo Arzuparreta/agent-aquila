@@ -31,14 +31,14 @@ class AgentRateLimitService:
         q.append(now)
 
     @classmethod
-    def try_consume_proactive(cls, user_id: int) -> bool:
-        """Non-raising counterpart used by the proactive layer.
+    def try_consume_heartbeat(cls, user_id: int) -> bool:
+        """Non-raising counterpart used by the agent heartbeat worker.
 
-        Returns ``True`` when the burst budget allows another proactive agent
-        run for ``user_id``, ``False`` otherwise. ``inbound_filter_burst_per_hour=0``
-        disables the cap.
+        Returns ``True`` when the burst budget allows another background
+        agent run for ``user_id``, ``False`` otherwise.
+        ``agent_heartbeat_burst_per_hour=0`` disables the cap.
         """
-        limit = settings.inbound_filter_burst_per_hour
+        limit = settings.agent_heartbeat_burst_per_hour
         if limit <= 0:
             return True
         now = time.monotonic()

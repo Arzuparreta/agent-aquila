@@ -29,23 +29,14 @@ class Settings(BaseSettings):
     agent_email_domain_allowlist: str = Field(default="", validation_alias="AGENT_EMAIL_DOMAIN_ALLOWLIST")
     agent_max_runs_per_hour: int = Field(default=60, ge=1, le=10_000, validation_alias="AGENT_MAX_RUNS_PER_HOUR")
     agent_max_tool_steps: int = Field(default=10, ge=1, le=100, validation_alias="AGENT_MAX_TOOL_STEPS")
-    # When false, email ingest never auto-creates deals from triage/rules (aligns with human-gated agent policy).
-    email_ingest_auto_create_deals: bool = Field(default=True, validation_alias="EMAIL_INGEST_AUTO_CREATE_DEALS")
-
-    # Hybrid inbound noise filter (see app/services/inbound_filter_service.py).
-    # Modes: off | permissive | balanced (default) | strict.
-    inbound_filter_mode: str = Field(default="balanced", validation_alias="INBOUND_FILTER_MODE")
-    # Stage B (LLM triage) toggle. When false, only the heuristic stage decides.
-    inbound_filter_llm: bool = Field(default=True, validation_alias="INBOUND_FILTER_LLM")
-    # Hard cap on proactive agent runs spawned from inbound items per user/hour.
-    # Items beyond the cap are downgraded to ``informational`` (they still land
-    # in the DB + RAG, just no thread/agent/push). 0 disables the cap.
-    inbound_filter_burst_per_hour: int = Field(
-        default=20, ge=0, le=10_000, validation_alias="INBOUND_FILTER_BURST_PER_HOUR"
+    # Hard cap on proactive agent heartbeat runs per user/hour. 0 disables the cap.
+    agent_heartbeat_burst_per_hour: int = Field(
+        default=20, ge=0, le=10_000, validation_alias="AGENT_HEARTBEAT_BURST_PER_HOUR"
     )
 
-    # Redis (used for OAuth state, ARQ worker queue, and sync scheduling). If unset, a local in-memory
-    # fallback is used for OAuth state only (single-process dev); workers will refuse to start without it.
+    # Redis (used for OAuth state and the ARQ heartbeat worker). If unset, a local in-memory
+    # fallback is used for OAuth state only (single-process dev); the heartbeat worker will
+    # refuse to start without it.
     redis_url: str = Field(default="", validation_alias="REDIS_URL")
 
     # Google OAuth (https://console.cloud.google.com → OAuth 2.0 Client IDs → "Web application").
@@ -65,30 +56,21 @@ class Settings(BaseSettings):
     microsoft_oauth_client_secret: str = Field(default="", validation_alias="MICROSOFT_OAUTH_CLIENT_SECRET")
     microsoft_oauth_tenant: str = Field(default="common", validation_alias="MICROSOFT_OAUTH_TENANT")
 
-    # Gmail initial sync cap — how many recent messages to pull on first connect (None = all).
-    gmail_initial_sync_max_messages: int = Field(
-        default=2000, ge=0, le=200_000, validation_alias="GMAIL_INITIAL_SYNC_MAX_MESSAGES"
+    # ------------------------------------------------------------------
+    # OpenClaw-style agent infrastructure
+    # ------------------------------------------------------------------
+    # Optional override for the agent skills folder. Defaults to
+    # ``backend/skills/`` shipped with the app; override it to mount
+    # a custom skill set from a docker volume without rebuilding.
+    skills_dir: str = Field(default="", validation_alias="AQUILA_SKILLS_DIR")
+    # Heartbeat: when true, the worker runs ``agent_heartbeat`` every
+    # ``agent_heartbeat_minutes`` minutes (defaults to off so freshly
+    # cloned dev setups never spawn surprise LLM calls).
+    agent_heartbeat_enabled: bool = Field(
+        default=False, validation_alias="AGENT_HEARTBEAT_ENABLED"
     )
-    # Delta sync cadence (seconds) per active connection.
-    gmail_delta_poll_seconds: int = Field(default=120, ge=30, le=3600, validation_alias="GMAIL_DELTA_POLL_SECONDS")
-    calendar_delta_poll_seconds: int = Field(
-        default=300, ge=60, le=3600, validation_alias="CALENDAR_DELTA_POLL_SECONDS"
-    )
-    drive_delta_poll_seconds: int = Field(default=300, ge=60, le=3600, validation_alias="DRIVE_DELTA_POLL_SECONDS")
-
-    # Web Push (VAPID). Generate via `vapid --gen` (web-push CLI) or any standard generator.
-    # Both private and public keys are required to send notifications. The public key is also
-    # exposed via /push/public-key so the FE can subscribe.
-    vapid_public_key: str = Field(default="", validation_alias="VAPID_PUBLIC_KEY")
-    vapid_private_key: str = Field(default="", validation_alias="VAPID_PRIVATE_KEY")
-    vapid_contact_email: str = Field(
-        default="mailto:admin@example.com", validation_alias="VAPID_CONTACT_EMAIL"
-    )
-
-    # Local file storage root for artist-uploaded Archivos. Created on first write.
-    upload_dir: str = Field(default="./uploads", validation_alias="UPLOAD_DIR")
-    max_upload_bytes: int = Field(
-        default=25 * 1024 * 1024, ge=1024, le=200 * 1024 * 1024, validation_alias="MAX_UPLOAD_BYTES"
+    agent_heartbeat_minutes: int = Field(
+        default=15, ge=1, le=1440, validation_alias="AGENT_HEARTBEAT_MINUTES"
     )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

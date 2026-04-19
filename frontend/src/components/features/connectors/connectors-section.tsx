@@ -58,17 +58,6 @@ type OAuthStart = {
   configured: boolean;
 };
 
-type SyncStatus = {
-  connection_id: number;
-  resource: string;
-  status: string;
-  last_full_sync_at: string | null;
-  last_delta_at: string | null;
-  error_count: number;
-  last_error: string | null;
-  cursor: string | null;
-};
-
 function credentialSourceKey(s: OAuthCredentialSource): TranslationKey {
   if (s === "database") return "connectors.credentialSource.database";
   if (s === "environment") return "connectors.credentialSource.environment";
@@ -119,7 +108,6 @@ function RichText({ text }: { text: string }) {
 export function ConnectorsSection() {
   const { t } = useTranslation();
   const [rows, setRows] = useState<ConnectorConnection[]>([]);
-  const [syncRows, setSyncRows] = useState<Record<number, SyncStatus[]>>({});
   const [provider, setProvider] = useState("mock_email");
   const [label, setLabel] = useState("");
   const [credentialsJson, setCredentialsJson] = useState('{\n  "access_token": ""\n}');
@@ -144,22 +132,12 @@ export function ConnectorsSection() {
 
   const load = useCallback(async () => {
     try {
+      // After the OpenClaw refactor there is no local mirror, so there is no
+      // background sync state to surface either — every connector talks to its
+      // upstream API on demand.
       const list = await apiFetch<ConnectorConnection[]>("/connectors");
       setRows(list);
       setVerifyHint({});
-      // Fetch sync state per connection (non-blocking).
-      const next: Record<number, SyncStatus[]> = {};
-      await Promise.all(
-        list.map(async (r) => {
-          try {
-            const s = await apiFetch<SyncStatus[]>(`/connectors/${r.id}/sync-status`);
-            next[r.id] = s;
-          } catch {
-            next[r.id] = [];
-          }
-        })
-      );
-      setSyncRows(next);
     } catch {
       setRows([]);
     }
@@ -294,18 +272,6 @@ export function ConnectorsSection() {
     }
   };
 
-  const triggerSync = async (connectionId: number, resource: string) => {
-    setError(null);
-    setInfo(null);
-    try {
-      await apiFetch(`/connectors/${connectionId}/sync/${resource}`, { method: "POST" });
-      setInfo(t("connectors.saved.queuedSync", { resource, id: connectionId }));
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("connectors.errors.queueFailed"));
-    }
-  };
-
   const addConnection = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -390,6 +356,10 @@ export function ConnectorsSection() {
     }
   };
 
+  const gmailNeedsReauth = rows.some(
+    (r) => (r.provider === "google_gmail" || r.provider === "gmail") && r.needs_reauth,
+  );
+
   const publicBaseTrimmed = oauthPublicBase.replace(/\/$/, "") || t("connectors.oauth.publicUrlFallback");
   const googleRedirect = `${publicBaseTrimmed}/api/v1/oauth/google/callback`;
   const msRedirect = `${publicBaseTrimmed}/api/v1/oauth/microsoft/callback`;
@@ -410,6 +380,26 @@ export function ConnectorsSection() {
       {info ? (
         <div className="mt-3">
           <AlertBanner variant="success" message={info} onDismiss={() => setInfo(null)} />
+        </div>
+      ) : null}
+
+      {gmailNeedsReauth ? (
+        <div className="mt-3 flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold">Reconectar Gmail</p>
+            <p className="text-xs text-amber-800">
+              El agente necesita un permiso adicional de Gmail (filtros y configuración básica) para
+              poder silenciar y mover remitentes a spam directamente. Reconecta tu cuenta para
+              autorizarlo.
+            </p>
+          </div>
+          <Button
+            type="button"
+            className="border-amber-400 bg-amber-100 text-amber-900 hover:bg-amber-200"
+            onClick={() => void connectGoogle("gmail")}
+          >
+            Reconectar Gmail
+          </Button>
         </div>
       ) : null}
 
@@ -763,64 +753,49 @@ export function ConnectorsSection() {
         ) : (
           <ul className="space-y-2">
             {rows.map((r) => {
-              const needsReauth =
-                typeof r.meta === "object" && r.meta !== null && (r.meta as Record<string, unknown>).status === "needs_reauth";
-              const syncList = syncRows[r.id] || [];
+              const isGmailLike = r.provider === "google_gmail" || r.provider === "gmail";
+              const reconnectTarget = (() => {
+                if (r.provider.startsWith("google_") || r.provider === "gmail") return "google";
+                if (r.provider.startsWith("graph_")) return "microsoft";
+                return null;
+              })();
+              const reconnectIntent = (() => {
+                if (r.provider === "google_gmail" || r.provider === "gmail") return "gmail";
+                if (r.provider === "google_calendar") return "calendar";
+                if (r.provider === "google_drive") return "drive";
+                if (r.provider === "graph_mail") return "mail";
+                if (r.provider === "graph_calendar") return "calendar";
+                if (r.provider === "graph_onedrive") return "drive";
+                if (r.provider === "graph_teams") return "teams";
+                return "all";
+              })();
               return (
-                <li key={r.id} className="flex flex-col gap-2 rounded border border-border-subtle px-3 py-2 text-sm">
+                <li
+                  key={r.id}
+                  className="flex flex-col gap-2 rounded border border-border-subtle px-3 py-2 text-sm"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span>
                       <span className="font-medium">{r.label}</span>{" "}
                       <span className="text-fg-subtle">
                         ({r.provider}) · #{r.id}
                       </span>
-                      {needsReauth ? (
-                        <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                          {t("connectors.saved.needsReauth")}
+                      {r.needs_reauth ? (
+                        <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                          Necesita reconectarse
                         </span>
                       ) : null}
                     </span>
                     <div className="flex gap-2">
-                      {r.provider === "google_gmail" ? (
-                        <Button type="button" className="text-xs" onClick={() => void triggerSync(r.id, "gmail")}>
-                          {t("connectors.saved.syncNow")}
-                        </Button>
-                      ) : null}
-                      {r.provider === "google_calendar" ? (
-                        <Button type="button" className="text-xs" onClick={() => void triggerSync(r.id, "calendar")}>
-                          {t("connectors.saved.syncNow")}
-                        </Button>
-                      ) : null}
-                      {r.provider === "google_drive" ? (
-                        <Button type="button" className="text-xs" onClick={() => void triggerSync(r.id, "drive")}>
-                          {t("connectors.saved.syncNow")}
-                        </Button>
-                      ) : null}
-                      {r.provider === "graph_mail" ? (
+                      {r.needs_reauth && reconnectTarget ? (
                         <Button
                           type="button"
-                          className="text-xs"
-                          onClick={() => void triggerSync(r.id, "graph_mail")}
+                          className="border-amber-400 bg-amber-100 text-xs text-amber-900 hover:bg-amber-200"
+                          onClick={() =>
+                            void startOAuth(reconnectTarget, reconnectIntent)
+                          }
                         >
-                          {t("connectors.saved.syncNow")}
-                        </Button>
-                      ) : null}
-                      {r.provider === "graph_calendar" ? (
-                        <Button
-                          type="button"
-                          className="text-xs"
-                          onClick={() => void triggerSync(r.id, "graph_calendar")}
-                        >
-                          {t("connectors.saved.syncNow")}
-                        </Button>
-                      ) : null}
-                      {r.provider === "graph_onedrive" ? (
-                        <Button
-                          type="button"
-                          className="text-xs"
-                          onClick={() => void triggerSync(r.id, "graph_drive")}
-                        >
-                          {t("connectors.saved.syncNow")}
+                          {isGmailLike ? "Reconectar Gmail" : "Reconectar"}
                         </Button>
                       ) : null}
                       <Button
@@ -829,7 +804,9 @@ export function ConnectorsSection() {
                         disabled={verifyLoadingId === r.id || loading}
                         onClick={() => void verifyAccess(r.id)}
                       >
-                        {verifyLoadingId === r.id ? t("connectors.saved.verifying") : t("connectors.saved.verifyAccess")}
+                        {verifyLoadingId === r.id
+                          ? t("connectors.saved.verifying")
+                          : t("connectors.saved.verifyAccess")}
                       </Button>
                       <Button
                         type="button"
@@ -841,43 +818,28 @@ export function ConnectorsSection() {
                       </Button>
                     </div>
                   </div>
+                  {r.needs_reauth && r.missing_scopes && r.missing_scopes.length > 0 ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Faltan permisos: <span className="font-mono">{r.missing_scopes.join(", ")}</span>
+                    </p>
+                  ) : null}
                   {r.token_expires_at ? (
                     <p className="text-xs text-fg-muted">
                       {t("connectors.saved.tokenExpires", {
-                        when: new Date(r.token_expires_at).toLocaleString()
+                        when: new Date(r.token_expires_at).toLocaleString(),
                       })}
                     </p>
                   ) : null}
                   {verifyHint[r.id] ? (
                     <p
                       className={
-                        verifyHint[r.id].variant === "ok" ? "text-xs text-green-800" : "text-xs text-red-800"
+                        verifyHint[r.id].variant === "ok"
+                          ? "text-xs text-green-800"
+                          : "text-xs text-red-800"
                       }
                     >
                       {verifyHint[r.id].text}
                     </p>
-                  ) : null}
-                  {syncList.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-1 text-xs text-fg-muted md:grid-cols-2">
-                      {syncList.map((s) => (
-                        <div key={`${s.connection_id}-${s.resource}`} className="rounded bg-surface-muted px-2 py-1">
-                          <div>
-                            <span className="font-mono">{s.resource}</span> · {s.status}
-                            {s.last_delta_at
-                              ? ` · ${t("connectors.saved.lastSync", { when: new Date(s.last_delta_at).toLocaleString() })}`
-                              : ""}
-                            {s.error_count > 0
-                              ? ` · ${t("connectors.saved.errorsCount", { count: s.error_count })}`
-                              : ""}
-                          </div>
-                          {s.last_error && s.last_error.trim() ? (
-                            <div className="mt-0.5 break-words text-amber-900 dark:text-amber-200/90">
-                              {t("connectors.saved.lastError", { message: s.last_error })}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
                   ) : null}
                 </li>
               );

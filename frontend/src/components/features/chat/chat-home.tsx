@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
-import { usePushNotifications } from "@/lib/usePushNotifications";
 import type { ChatThread } from "@/types/api";
 
 import { ChatThreadList } from "./thread-list";
@@ -28,7 +27,6 @@ export function ChatHome() {
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ kind: "ok" | "error"; text: string; action?: { label: string; onClick: () => void } } | null>(null);
-  const push = usePushNotifications();
 
   const refreshThreads = useCallback(
     async (includeArchived = showArchived) => {
@@ -211,12 +209,6 @@ export function ChatHome() {
     [activeId, pickNextActiveAfter, showArchived]
   );
 
-  const showPushBanner =
-    push.status === "idle" &&
-    typeof window !== "undefined" &&
-    "Notification" in window &&
-    Notification.permission === "default";
-
   return (
     <div className="app-shell bg-surface-base text-fg">
       <ChatTopBar
@@ -259,19 +251,6 @@ export function ChatHome() {
               <path d="M6 6l12 12M6 18 18 6" />
             </svg>
           </button>
-        </div>
-      ) : null}
-      {showPushBanner ? (
-        <button
-          onClick={push.enable}
-          className="bg-primary px-4 py-2 text-center text-sm font-medium text-primary-fg opacity-95 hover:opacity-100"
-        >
-          Activar notificaciones para enterarte al instante
-        </button>
-      ) : null}
-      {push.status === "error" && push.error ? (
-        <div className="bg-rose-900/60 px-4 py-2 text-center text-xs text-rose-100">
-          Push: {push.error}
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1">

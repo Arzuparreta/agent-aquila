@@ -1,73 +1,177 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useChatReferences } from "@/components/features/chat/reference-context";
-import type { Email, TriageCategory } from "@/types/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import type {
+  GmailMessageFull,
+  GmailMessagePart,
+  GmailMessageRow,
+} from "@/types/api";
 
 import { EmailActionsMenu } from "./email-actions-menu";
 
-const TRIAGE_BADGE: Record<TriageCategory, { label: string; className: string }> = {
-  actionable: { label: "Accionable", className: "bg-emerald-600/30 text-emerald-200" },
-  informational: { label: "Info", className: "bg-surface-muted text-fg-muted" },
-  noise: { label: "Silenciado", className: "bg-rose-700/30 text-rose-200" },
-  unknown: { label: "Sin clasificar", className: "bg-surface-muted/90 text-fg-subtle" }
-};
+function header(parts: GmailMessagePart | undefined, name: string): string {
+  if (!parts?.headers) return "";
+  const target = name.toLowerCase();
+  for (const h of parts.headers) {
+    if (h.name.toLowerCase() === target) return h.value;
+  }
+  return "";
+}
+
+function decodeBase64Url(input: string): string {
+  try {
+    const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    if (typeof window === "undefined") return "";
+    const binary = window.atob(padded);
+    // Decode as UTF-8.
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+function extractBody(payload: GmailMessagePart | undefined): string {
+  if (!payload) return "";
+  // Prefer text/plain, fall back to text/html stripped.
+  let plain = "";
+  let html = "";
+  const walk = (part: GmailMessagePart) => {
+    if (part.mimeType === "text/plain" && part.body?.data) {
+      plain += decodeBase64Url(part.body.data);
+    } else if (part.mimeType === "text/html" && part.body?.data) {
+      html += decodeBase64Url(part.body.data);
+    }
+    for (const child of part.parts ?? []) walk(child);
+  };
+  walk(payload);
+  if (plain) return plain;
+  if (html) {
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return "";
+}
+
+function rowFromFull(full: GmailMessageFull): GmailMessageRow {
+  const fromRaw = header(full.payload, "From");
+  let senderName: string | null = null;
+  let senderEmail = fromRaw;
+  if (fromRaw.includes("<") && fromRaw.includes(">")) {
+    const [namePart, rest] = fromRaw.split("<");
+    senderName = namePart.replace(/"/g, "").trim() || null;
+    senderEmail = rest.replace(">", "").trim();
+  }
+  const labels = full.labelIds ?? [];
+  return {
+    id: full.id,
+    thread_id: full.threadId,
+    snippet: full.snippet ?? "",
+    subject: header(full.payload, "Subject"),
+    sender_name: senderName,
+    sender_email: senderEmail,
+    to: header(full.payload, "To"),
+    internal_date: full.internalDate ?? null,
+    label_ids: labels,
+    is_unread: labels.includes("UNREAD"),
+  };
+}
 
 /**
- * Email detail pane. Renders sender / subject / timestamp / body and the
- * primary actions:
- *   - Referenciar en chat: pushes an @email chip into the shared composer state and
- *     navigates to the main chat.
- *   - Iniciar chat sobre este correo: server creates an entity-bound thread (no agent
- *     run) and we navigate straight into it.
- *   - Promover / Silenciar: re-classify the email's triage category in place.
- *   - Overflow menu (kebab): same actions plus mark read/unread, mirrored on
- *     the row in the inbox list. The kebab is the only discoverable surface for
- *     these on touch devices once the detail is open.
- *
- * All mutating actions are owned by the page (``inbox-page.tsx``) so it can do
- * optimistic updates and surface a single inline status banner.
+ * Detail pane for a single Gmail message. Fetches the full payload from
+ * ``/gmail/messages/{id}?format=full`` on mount; renders a best-effort plain
+ * text body extracted from the MIME tree.
  */
 export function InboxDetail({
-  email,
+  messageId,
   onClose,
+  onArchive,
+  onTrash,
+  onSilence,
+  onStartChat,
   onMarkRead,
-  onPromote,
-  onSuppress,
-  onStartChat
 }: {
-  email: Email;
+  messageId: string;
   onClose: () => void;
-  onMarkRead: (id: number, next: boolean) => Promise<void> | void;
-  onPromote: (id: number) => Promise<void> | void;
-  onSuppress: (id: number) => Promise<void> | void;
-  onStartChat: (id: number) => Promise<void> | void;
+  onArchive: (msg: GmailMessageRow) => void;
+  onTrash: (msg: GmailMessageRow) => void;
+  onSilence: (msg: GmailMessageRow) => void;
+  onStartChat: (msg: GmailMessageRow) => void;
+  onMarkRead: (msg: GmailMessageRow, next: boolean) => void;
 }) {
   const router = useRouter();
   const refs = useChatReferences();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [full, setFull] = useState<GmailMessageFull | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const cat: TriageCategory = (email.triage_category ?? "unknown") as TriageCategory;
-  const badge = TRIAGE_BADGE[cat] ?? TRIAGE_BADGE.unknown;
+  useEffect(() => {
+    let cancelled = false;
+    setFull(null);
+    setError(null);
+    (async () => {
+      try {
+        const data = await apiFetch<GmailMessageFull>(
+          `/gmail/messages/${messageId}?format=full`,
+        );
+        if (!cancelled) setFull(data);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof ApiError
+              ? err.message
+              : "No se pudo cargar el correo.",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messageId]);
+
+  if (error) {
+    return (
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center gap-2 border-b border-border-subtle bg-surface-elevated px-3 py-2">
+          <button
+            onClick={onClose}
+            className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover md:hidden"
+            aria-label="Volver"
+          >
+            ←
+          </button>
+          <div className="text-sm text-rose-300">{error}</div>
+        </header>
+      </div>
+    );
+  }
+  if (!full) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
+        Cargando…
+      </div>
+    );
+  }
+
+  const row = rowFromFull(full);
+  const body = extractBody(full.payload);
 
   const onReference = () => {
     refs.add({
-      type: "email",
-      id: email.id,
-      label: email.subject || email.sender_name || email.sender_email
+      type: "gmail_message",
+      id: row.id,
+      label: row.subject || row.sender_email,
     });
     router.push("/");
-  };
-
-  const wrap = async (key: string, fn: () => Promise<void> | void) => {
-    setBusy(key);
-    try {
-      await fn();
-    } finally {
-      setBusy(null);
-    }
   };
 
   return (
@@ -82,25 +186,20 @@ export function InboxDetail({
         </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold">
-            {email.subject || "(sin asunto)"}
+            {row.subject || "(sin asunto)"}
           </div>
           <div className="truncate text-xs text-fg-subtle">
-            {email.sender_name ? `${email.sender_name} · ` : ""}
-            {email.sender_email}
+            {row.sender_name ? `${row.sender_name} · ` : ""}
+            {row.sender_email}
           </div>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${badge.className}`}
-          title={email.triage_reason ?? undefined}
-        >
-          {badge.label}
-        </span>
         <EmailActionsMenu
-          email={email}
+          message={row}
           variant="bar"
           onMarkRead={onMarkRead}
-          onPromote={onPromote}
-          onSuppress={onSuppress}
+          onArchive={onArchive}
+          onTrash={onTrash}
+          onSilence={onSilence}
           onStartChat={onStartChat}
         />
       </header>
@@ -108,44 +207,32 @@ export function InboxDetail({
       <div className="flex flex-wrap gap-2 border-b border-border-subtle bg-surface-elevated/70 px-3 py-2 text-xs">
         <button
           onClick={onReference}
-          disabled={busy !== null}
-          className="rounded-full bg-primary px-3 py-1 font-medium text-primary-fg hover:opacity-90 disabled:opacity-60"
+          className="rounded-full bg-primary px-3 py-1 font-medium text-primary-fg hover:opacity-90"
         >
           Referenciar en chat
         </button>
         <button
-          onClick={() => void wrap("chat", () => onStartChat(email.id))}
-          disabled={busy !== null}
-          className="rounded-full bg-primary/20 px-3 py-1 font-medium text-fg hover:bg-primary/30 disabled:opacity-60"
+          onClick={() => onStartChat(row)}
+          className="rounded-full bg-primary/20 px-3 py-1 font-medium text-fg hover:bg-primary/30"
         >
-          {busy === "chat" ? "Abriendo…" : "Iniciar chat sobre este correo"}
+          Iniciar chat sobre este correo
         </button>
-        {cat !== "actionable" ? (
-          <button
-            onClick={() => void wrap("promote", () => onPromote(email.id))}
-            disabled={busy !== null}
-            className="rounded-full bg-emerald-700/40 px-3 py-1 text-emerald-200 hover:bg-emerald-700/60 disabled:opacity-60"
-          >
-            {busy === "promote" ? "…" : "Promover a accionable"}
-          </button>
-        ) : null}
-        {cat !== "noise" ? (
-          <button
-            onClick={() => void wrap("suppress", () => onSuppress(email.id))}
-            disabled={busy !== null}
-            className="rounded-full bg-surface-muted px-3 py-1 text-fg-muted hover:bg-surface-inset disabled:opacity-60"
-          >
-            {busy === "suppress" ? "…" : "Silenciar"}
-          </button>
-        ) : null}
+        <button
+          onClick={() => onSilence(row)}
+          className="rounded-full bg-rose-700/30 px-3 py-1 text-rose-200 hover:bg-rose-700/50"
+        >
+          Silenciar remitente…
+        </button>
         <span className="ml-auto self-center text-[11px] text-fg-subtle">
-          {new Date(email.received_at).toLocaleString("es-ES")}
+          {row.internal_date
+            ? new Date(Number(row.internal_date)).toLocaleString("es-ES")
+            : ""}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-fg">
-          {email.body || email.snippet || ""}
+          {body || row.snippet || ""}
         </pre>
       </div>
     </div>

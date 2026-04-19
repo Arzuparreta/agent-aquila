@@ -12,7 +12,7 @@ Key invariants
 - The legacy ``user_ai_settings`` per-provider columns are kept as a
   *cached mirror* of the active provider's config. Always written via
   :meth:`_sync_legacy_mirror` so existing call sites that still take
-  ``UserAISettings`` (agent_service, embedding_service, …) keep working
+  ``UserAISettings`` (agent_service, embedding_client, …) keep working
   unchanged.
 - API keys are stored using envelope encryption
   (:mod:`app.core.envelope_crypto`). Decryption raises a typed
@@ -307,10 +307,10 @@ async def _sync_legacy_mirror_if_active(
 ) -> None:
     """Copy ``row`` into the legacy ``user_ai_settings`` columns when it is active.
 
-    Existing services (agent_service, embedding_service, rag_index_service,
-    triage_service, etc.) still load the legacy ``UserAISettings`` row and
-    pass it to the LLM/Embedding clients. By keeping that row in sync with
-    the active config we don't have to refactor every call site at once.
+    Existing services (agent_service, embedding_client, agent_memory_service)
+    still load the legacy ``UserAISettings`` row and pass it to the
+    LLM/Embedding clients. By keeping that row in sync with the active config
+    we don't have to refactor every call site at once.
     """
     prefs = await _get_or_create_prefs(db, user)
     active_kind = prefs.active_provider_kind

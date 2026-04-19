@@ -8,7 +8,7 @@ Roles:
 
 ``agent_run_id`` ties an assistant message back to the run that produced it (for the
 inline trace dropdown). ``attachments`` carries a JSON list of structured side data,
-e.g. inline action cards (kind=approval/undo/setup) or @references the user attached.
+e.g. inline action cards (kind=approval/setup) or @references the user attached.
 """
 from __future__ import annotations
 

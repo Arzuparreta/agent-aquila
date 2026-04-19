@@ -37,12 +37,26 @@ export function ChatTopBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState<number>(0);
 
+  // Live unread count via the Gmail proxy. We deliberately use Gmail's own
+  // ``q=is:unread`` so the badge always agrees with what the user sees in
+  // gmail.com — no local mirror, no triage filter.
   useEffect(() => {
     let cancelled = false;
     const fetchUnread = async () => {
       try {
-        const res = await apiFetch<{ count: number }>("/emails/unread-count");
-        if (!cancelled) setUnread(res.count);
+        const res = await apiFetch<{
+          messages?: unknown[];
+          result_size_estimate?: number | null;
+        }>(
+          "/gmail/messages?detail=ids&max_results=1&q=" +
+            encodeURIComponent("is:unread in:inbox"),
+        );
+        if (cancelled) return;
+        const estimate =
+          typeof res.result_size_estimate === "number"
+            ? res.result_size_estimate
+            : (res.messages?.length ?? 0);
+        setUnread(estimate);
       } catch {
         if (!cancelled) setUnread(0);
       }
@@ -123,13 +137,6 @@ export function ChatTopBar({
               onClick={() => setMenuOpen(false)}
             >
               Ajustes técnicos (avanzado)
-            </Link>
-            <Link
-              href="/automations"
-              className="block px-3 py-2 hover:bg-interactive-hover"
-              onClick={() => setMenuOpen(false)}
-            >
-              Reglas aprendidas
             </Link>
             <button
               onClick={() => {
