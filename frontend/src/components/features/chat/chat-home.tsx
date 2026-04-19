@@ -6,7 +6,6 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 import type { ChatThread } from "@/types/api";
 
-import { ChatReferenceProvider } from "./reference-context";
 import { ChatThreadList } from "./thread-list";
 import { ChatThreadView } from "./thread-view";
 import { ChatTopBar } from "./top-bar";
@@ -88,7 +87,6 @@ export function ChatHome() {
     Notification.permission === "default";
 
   return (
-    <ChatReferenceProvider>
     <div className="flex h-screen w-screen flex-col bg-slate-950 text-slate-100">
       <ChatTopBar
         title={activeThread?.title ?? "Mánager"}
@@ -176,7 +174,6 @@ export function ChatHome() {
         </main>
       </div>
     </div>
-    </ChatReferenceProvider>
   );
 }
 

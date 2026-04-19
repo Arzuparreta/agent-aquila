@@ -25,10 +25,24 @@ class EmailRead(ORMBaseModel):
     sender_name: str | None = None
     subject: str
     body: str
+    snippet: str | None = None
     received_at: datetime
+    is_read: bool = False
     raw_headers: dict[str, Any] | None = None
     created_at: datetime
     triage_category: str | None = None
     triage_reason: str | None = None
     triage_source: str | None = None
     triage_at: datetime | None = None
+
+
+class EmailReadStateUpdate(BaseModel):
+    is_read: bool
+
+
+class StartChatResponse(BaseModel):
+    thread_id: int
+
+
+class UnreadCountResponse(BaseModel):
+    count: int

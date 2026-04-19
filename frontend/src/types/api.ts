@@ -19,7 +19,9 @@ export type Email = {
   sender_name: string | null;
   subject: string;
   body: string;
+  snippet?: string | null;
   received_at: string;
+  is_read?: boolean;
   created_at: string;
   triage_category?: TriageCategory | null;
   triage_reason?: string | null;

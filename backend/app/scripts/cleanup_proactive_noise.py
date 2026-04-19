@@ -32,7 +32,7 @@ import argparse
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -232,11 +232,47 @@ async def _delete_orphan_noise_contacts(db: AsyncSession, *, apply: bool) -> int
     return deleted
 
 
-async def main_async(*, apply: bool) -> None:
+async def _purge_unanswered_entity_threads(db: AsyncSession, *, apply: bool) -> int:
+    """Hard-delete entity-bound threads (email/contact/event) where the user
+    never typed anything. The new proactive layer is push-only and never
+    spawns chat threads, so anything matching this filter is leftover noise
+    from the old auto-agent behavior.
+
+    Cascades to ``chat_messages`` first because there's no DB-level cascade.
+    """
+    user_msg_exists = (
+        select(ChatMessage.id)
+        .where(
+            ChatMessage.thread_id == ChatThread.id,
+            ChatMessage.role == "user",
+        )
+        .exists()
+    )
+    candidate_stmt = select(ChatThread.id).where(
+        ChatThread.kind == "entity",
+        ChatThread.entity_type.in_(("email", "contact", "event")),
+        ~user_msg_exists,
+    )
+    res = await db.execute(candidate_stmt)
+    ids = [row[0] for row in res.all()]
+    if not ids:
+        print("threads purged: 0")
+        return 0
+    if apply:
+        await db.execute(delete(ChatMessage).where(ChatMessage.thread_id.in_(ids)))
+        await db.execute(delete(ChatThread).where(ChatThread.id.in_(ids)))
+    print(f"threads purged: {len(ids)}")
+    return len(ids)
+
+
+async def main_async(*, apply: bool, purge: bool) -> None:
     async with AsyncSessionLocal() as db:
         await _backfill_emails(db, apply=apply)
         await _backfill_events(db, apply=apply)
-        await _archive_noise_threads(db, apply=apply)
+        if purge:
+            await _purge_unanswered_entity_threads(db, apply=apply)
+        else:
+            await _archive_noise_threads(db, apply=apply)
         await _delete_orphan_noise_contacts(db, apply=apply)
         if apply:
             await db.commit()
@@ -249,8 +285,17 @@ async def main_async(*, apply: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0] if __doc__ else None)
     parser.add_argument("--apply", action="store_true", help="Actually write changes (default: dry run).")
+    parser.add_argument(
+        "--purge",
+        action="store_true",
+        help=(
+            "Hard-DELETE unanswered entity-bound threads (and their messages) "
+            "instead of just archiving them. Use after the proactive layer has "
+            "been switched to push-only."
+        ),
+    )
     args = parser.parse_args()
-    asyncio.run(main_async(apply=args.apply))
+    asyncio.run(main_async(apply=args.apply, purge=args.purge))
 
 
 if __name__ == "__main__":

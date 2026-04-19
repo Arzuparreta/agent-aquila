@@ -12,6 +12,7 @@ import { TestConnectionButton } from "@/components/features/ai-settings/test-con
 import { useSettingsForm } from "@/components/features/ai-settings/use-settings-form";
 import { ConnectorsSection } from "@/components/features/connectors/connectors-section";
 import { LanguageSection } from "@/components/features/language/language-section";
+import { MaintenanceSection } from "@/components/features/maintenance/maintenance-section";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
@@ -149,6 +150,11 @@ export default function SettingsPage() {
               desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.
             </p>
             <ConnectorsSection />
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold">Mantenimiento</h2>
+            <MaintenanceSection />
           </Card>
         </main>
       </div>

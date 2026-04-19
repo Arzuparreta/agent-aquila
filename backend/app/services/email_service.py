@@ -22,14 +22,24 @@ from app.services.user_ai_settings_service import UserAISettingsService
 class EmailService:
     @staticmethod
     async def list_emails(
-        db: AsyncSession, *, triage: str | None = None
+        db: AsyncSession, *, triage: str | None = None, read: bool | None = None
     ) -> list[Email]:
         stmt = select(Email)
         if triage:
             stmt = stmt.where(Email.triage_category == triage)
+        if read is not None:
+            stmt = stmt.where(Email.is_read.is_(read))
         stmt = stmt.order_by(Email.received_at.desc())
         result = await db.execute(stmt)
         return list(result.scalars().all())
+
+    @staticmethod
+    async def count_unread(db: AsyncSession) -> int:
+        from sqlalchemy import func
+        result = await db.execute(
+            select(func.count(Email.id)).where(Email.is_read.is_(False))
+        )
+        return int(result.scalar() or 0)
 
     @staticmethod
     async def get_email(db: AsyncSession, email_id: int) -> Email | None:

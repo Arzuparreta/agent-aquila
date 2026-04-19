@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,21 +75,15 @@ async def promote_event(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> EventRead:
+    """Re-classify an event as ``actionable``. Does NOT create a chat thread or run
+    the agent — the proactive layer is push-only now (see ``proactive_service``).
+    """
+    del current_user  # accepted via dependency for auth, no per-user side effects
     event = await EventService.get_event(db, event_id)
     InboundFilterService.apply_verdict_to_event(
         event,
         Verdict(category=CATEGORY_ACTIONABLE, reason="promoted by user", source=SOURCE_MANUAL),
     )
-    await db.flush()
-    from app.services.proactive_service import notify_calendar_event
-
-    try:
-        await notify_calendar_event(db, current_user, event, action="created")
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Proactive run failed: {exc}",
-        ) from exc
     await db.commit()
     await db.refresh(event)
     return EventRead.model_validate(event)

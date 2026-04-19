@@ -106,7 +106,13 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
     ProviderDefinition(
         id="ollama",
         label="Ollama",
-        description="Local models via Ollama. No API key required.",
+        description=(
+            "Local models via Ollama. No API key required. Tested combo for the "
+            "agent loop on a 12GB GPU: qwen2.5:7b-instruct (chat) + "
+            "nomic-embed-text (embeddings, 768d auto-padded to 1536). "
+            "Pull them with `ollama pull qwen2.5:7b-instruct` and "
+            "`ollama pull nomic-embed-text`."
+        ),
         auth_kind="none",
         fields=(
             ProviderField(
@@ -120,11 +126,29 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
             ),
         ),
         default_base_url="http://localhost:11434",
-        default_chat_model=None,
-        default_embedding_model=None,
-        default_classify_model=None,
+        default_chat_model="qwen2.5:7b-instruct",
+        default_embedding_model="nomic-embed-text",
+        default_classify_model="qwen2.5:7b-instruct",
         test_strategy="ollama_tags",
         docs_url="https://ollama.com/download",
+    ),
+    ProviderDefinition(
+        id="google",
+        label="Google AI Studio (Gemini)",
+        description=(
+            "Gemini models via Google's OpenAI-compatible endpoint. Generous free tier "
+            "on AI Studio (gemini-2.5-flash). Reliable tool calling; good for the agent "
+            "loop and the inbox triage classifier."
+        ),
+        auth_kind="bearer",
+        fields=(_API_KEY_FIELD,),
+        default_base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        default_chat_model="gemini-2.5-flash",
+        default_embedding_model="text-embedding-004",
+        default_classify_model="gemini-2.5-flash",
+        test_strategy="list_models",
+        docs_url="https://aistudio.google.com/apikey",
+        supports_capability_filter=True,
     ),
     ProviderDefinition(
         id="openrouter",

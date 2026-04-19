@@ -106,7 +106,7 @@ def _classify_capability(provider_id: str, model_id: str) -> Capability:
         return "embedding"
     # OpenAI-family text completion / chat models: everything else defaults
     # to chat. Anthropic, OpenRouter, LiteLLM mostly list chat models.
-    if provider_id in {"openai", "openai_compatible", "openrouter", "litellm", "anthropic"}:
+    if provider_id in {"openai", "openai_compatible", "openrouter", "litellm", "anthropic", "google"}:
         return "chat"
     return "unknown"
 

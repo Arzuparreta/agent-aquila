@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 /**
- * Compact bar with: hamburger (mobile only), title, settings menu.
- * The settings entry is intentionally tucked behind a small menu so the artist
- * can't accidentally open it in their pocket.
+ * Compact bar with: hamburger (mobile only), title, inbox link with unread badge,
+ * and a settings menu. Settings is tucked behind a small menu so the artist can't
+ * accidentally open it in their pocket.
  */
 export function ChatTopBar({
   title,
@@ -19,6 +20,25 @@ export function ChatTopBar({
 }) {
   const { logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [unread, setUnread] = useState<number>(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchUnread = async () => {
+      try {
+        const res = await apiFetch<{ count: number }>("/emails/unread-count");
+        if (!cancelled) setUnread(res.count);
+      } catch {
+        if (!cancelled) setUnread(0);
+      }
+    };
+    void fetchUnread();
+    const id = window.setInterval(fetchUnread, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   return (
     <header className="pt-safe flex items-center gap-2 border-b border-white/5 bg-slate-900 px-3 py-2">
@@ -32,6 +52,28 @@ export function ChatTopBar({
         </svg>
       </button>
       <div className="min-w-0 flex-1 truncate text-base font-semibold">{title}</div>
+      <Link
+        href="/inbox"
+        className="relative rounded-md p-2 text-slate-300 hover:bg-white/5"
+        aria-label="Bandeja"
+        title="Bandeja"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <path d="m3 7 9 7 9-7" />
+        </svg>
+        {unread > 0 ? (
+          <span className="absolute -right-0.5 -top-0.5 flex min-w-[1.1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
+            {unread > 99 ? "99+" : unread}
+          </span>
+        ) : null}
+      </Link>
       <div className="relative">
         <button
           onClick={() => setMenuOpen((v) => !v)}

@@ -11,6 +11,7 @@ from app.routes import (
     emails,
     events,
     files,
+    maintenance,
     oauth,
     push,
     threads,
@@ -30,3 +31,4 @@ api_router.include_router(automations.router)
 api_router.include_router(threads.router)
 api_router.include_router(files.router)
 api_router.include_router(push.router)
+api_router.include_router(maintenance.router)

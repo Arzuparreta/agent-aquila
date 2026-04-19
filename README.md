@@ -18,7 +18,7 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
 - **OAuth connectors**: Google Workspace and Microsoft 365 (Graph) — register redirect URIs in each vendor console once, then paste app credentials under **Settings → External connectors** (stored in Postgres; no OAuth env vars required for normal use)
 - **Operations cockpit** (Next.js `/cockpit`): ReAct-style agent with hybrid RAG and **human-gated pending operations** — CRM create/update (contacts, deals, events) plus **connector actions** (email send, calendar create, file upload, Teams message) after approval (`POST /api/v1/agent/runs`, `/api/v1/agent/proposals/...` or list `/api/v1/agent/pending-operations`, preview `/api/v1/agent/pending-operations/{id}/preview`, capabilities `/api/v1/agent/capabilities`). Configure connectors via `/api/v1/connectors` (create, `GET/PATCH /connectors/{id}`, `POST /connectors/preview`, `POST /connectors/dry-run`).
 - **Chunked hybrid RAG**: per-entity text is split into labeled chunks, embedded, and searched with **dense vectors + PostgreSQL full-text (RRF fusion)**. Falls back to legacy single-vector row search if `rag_chunks` is empty. Rebuild indexes with `POST /api/v1/ai/rag/backfill`.
-- Per-user AI settings (OpenAI-compatible / Ollama / OpenRouter) and encrypted API keys
+- Per-user AI settings (OpenAI-compatible / Ollama / OpenRouter / Google AI Studio) and encrypted API keys
 - Deterministic email ingestion rule on `POST /api/v1/emails`:
   - upsert contact by sender email
   - create `new` deal when subject contains `concert|booking|show` (LLM triage can refine when configured)
@@ -122,15 +122,41 @@ invocation; the loop only knows about their return values:
 
 ### Recommended models
 
-Any provider that honors `tools=` and `tool_choice="required"` reliably
-works. Frontier models (GPT-4o-class, Claude Sonnet-class, Gemini Pro-class)
-read tool descriptions and pick the right tool every time. Small local models
-(Gemma 3B, Qwen 2.5 small, Llama 3.2 3B) will misbehave more visibly here
-than in older harnesses — by design: every model-compensating workaround was
-removed because each one was a permanent tax on every future tool. If a
-weaker model is in the loop and emits hallucinated tool names, the run will
-exhaust the step budget and fail; swap the model rather than re-introducing
-compensations.
+This harness deliberately ships zero model-compensating shims (no tool-name
+alias maps, no argument coercion, no consecutive-unknown-call breakers — see
+the docstring at the top of `app/services/agent_service.py`). That puts the
+entire burden on the model: it must honor `tools=` and `tool_choice="required"`
+on every turn, pick a tool by reading its description, and never invent tool
+names. If a weaker model misbehaves the run will exhaust the step budget and
+fail; swap the model rather than re-introducing compensations.
+
+For a single-user CRM cockpit (Spanish, tool-calling required) configure your
+models in **Settings → Modelo de IA**:
+
+| Slot                       | Recommended                       | Why                                                                                                |
+| -------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Agent (chat)               | `claude-sonnet-4-5` (Anthropic)   | Best-in-class tool-call accuracy, strong Spanish, reliable JSON args. ~$3/M in, $15/M out.         |
+| Agent (chat) — alternative | `gpt-5` or `gpt-4.1` (OpenAI)     | Drop-in via the existing OpenAI-compatible client, also excellent at tool-calling.                 |
+| Agent (chat) — free tier   | `gemini-2.5-flash` (Google)       | Free on AI Studio; honors `tools=` / `tool_choice="required"` reliably. Pick the **Google AI Studio (Gemini)** provider in Settings. |
+| Triage / classification    | `gemini-2.5-flash` (Google)       | Cheap (~$0.30/M in) and fast; good enough for inbox triage and the LLM stage of `InboundFilterService`. |
+| Embeddings                 | `text-embedding-3-large` (OpenAI) | What `pgvector(1536)` is sized for; works on any OpenAI-compatible endpoint.                       |
+| Embeddings — free tier     | `text-embedding-004` (Google)     | 768-dim; auto-padded to 1536 by `embedding_vector.pad_embedding`. Free on AI Studio.               |
+| Local fallback             | `qwen2.5:32b-instruct` (Ollama)   | Only if you have serious GPU. **Do not** use Gemma 3B/4B as the agent model in this harness.       |
+
+> The previous "Gemma 3B" warning was right but understated: with this
+> harness, Gemma 3B/4B will silently invent tool names, conflate unrelated
+> rows pulled from RAG, and hallucinate ids in its responses. Use it for
+> embeddings only (or not at all).
+>
+> The **Google AI Studio (Gemini)** provider talks to Google's
+> OpenAI-compatible endpoint (`/v1beta/openai`) using the same chat /
+> embeddings clients as every other provider — no custom code path. Get a
+> free key at <https://aistudio.google.com/apikey>.
+
+For copy-pasteable setup steps for each tier (free cloud / free local /
+paid frontier) plus a **smoke-test command that exercises the same code
+paths the agent uses** (tool calling + JSON mode + embeddings), see
+[`docs/PROVIDERS.md`](docs/PROVIDERS.md).
 
 ## Notes
 
