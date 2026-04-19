@@ -10,12 +10,14 @@ Docs: https://developers.google.com/gmail/api/reference/rest
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from typing import Any
 
 import httpx
 
 BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+logger = logging.getLogger(__name__)
 
 
 class GmailAPIError(Exception):
@@ -91,6 +93,13 @@ class GmailClient:
 
             if resp.status_code == 429:
                 retry_after = self._parse_retry_after(resp.headers.get("Retry-After"))
+                # Log the upstream body so operators can confirm this really is
+                # Google's quota/rate response (vs a mistaken 429 from a proxy).
+                logger.warning(
+                    "Gmail API returned HTTP 429 (Retry-After=%r): %s",
+                    resp.headers.get("Retry-After"),
+                    (resp.text or "")[:800],
+                )
                 # Gmail's body sometimes carries a wall-clock retry hint; we
                 # don't try to parse it because Retry-After (when present) is
                 # canonical, and otherwise we just suggest a short pause.

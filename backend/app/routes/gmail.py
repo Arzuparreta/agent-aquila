@@ -118,6 +118,7 @@ def _wrap_api_error(exc: GmailAPIError) -> HTTPException:
     if isinstance(exc, GmailRateLimited):
         retry_after = int(round(exc.retry_after or 30.0))
         headers = {"Retry-After": str(retry_after)}
+        raw = (exc.detail or "").strip()
         detail = {
             "kind": "gmail_rate_limited",
             "retry_after_seconds": retry_after,
@@ -125,6 +126,9 @@ def _wrap_api_error(exc: GmailAPIError) -> HTTPException:
                 "Gmail está limitando tus peticiones. Vuelve a intentar en "
                 f"{retry_after}s."
             ),
+            # Truncated Gmail error JSON/text — use DevTools → Network → this
+            # response to confirm the 429 really came from Google, not a proxy.
+            "upstream": raw[:800] if raw else None,
         }
     return HTTPException(
         status_code=exc.status_code or 502, detail=detail, headers=headers
