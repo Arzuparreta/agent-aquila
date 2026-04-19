@@ -216,7 +216,7 @@ export function InboxPage() {
   );
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-surface-base text-fg">
+    <div className="app-shell bg-surface-base text-fg">
       <InboxTopBar />
       {status ? (
         <div

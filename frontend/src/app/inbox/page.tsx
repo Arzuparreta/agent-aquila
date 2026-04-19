@@ -10,7 +10,7 @@ export default function InboxRoute() {
     <ProtectedPage>
       <Suspense
         fallback={
-          <div className="flex h-screen w-screen items-center justify-center bg-surface-base text-sm text-fg-subtle">
+          <div className="app-shell items-center justify-center bg-surface-base text-sm text-fg-subtle">
             Cargando bandeja…
           </div>
         }

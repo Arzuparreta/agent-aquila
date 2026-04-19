@@ -218,7 +218,7 @@ export function ChatHome() {
     Notification.permission === "default";
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-surface-base text-fg">
+    <div className="app-shell bg-surface-base text-fg">
       <ChatTopBar
         title={activeThread?.title ?? "Mánager"}
         activeThread={activeThread}

@@ -13,6 +13,30 @@ body,
   height: 100%;
 }
 
+/*
+ * App-shell utility used by the chat + inbox surfaces. Pinning to
+ * `position: fixed; inset: 0;` makes the container fill exactly the
+ * *visible* viewport on iOS Safari / Android Chrome (where 100vh lies
+ * about the visible area because of the collapsing URL bar). The dvh
+ * cascade with svh + vh fallbacks keeps older browsers sane, and the
+ * inset:0 anchor means the shell shrinks with the on-screen keyboard
+ * when paired with `interactive-widget=resizes-content` in the viewport
+ * meta. Internal scroll happens inside child panels (thread list,
+ * message list) so the document itself never scrolls — the top bar and
+ * composer therefore stay locked to the edges, the way pro chat apps
+ * (ChatGPT, WhatsApp Web, Slack) handle it.
+ */
+.app-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
   --surface-base: #09090b;
