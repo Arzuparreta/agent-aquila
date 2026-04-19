@@ -1,6 +1,10 @@
 "use client";
 
+import { useState } from "react";
+
 import type { Email, TriageCategory } from "@/types/api";
+
+import { EmailActionsMenu } from "./email-actions-menu";
 
 export type EmailFilter = "all" | "actionable" | "informational" | "noise";
 
@@ -29,14 +33,24 @@ export function InboxList({
   activeId,
   loading,
   error,
-  onPick
+  onPick,
+  onMarkRead,
+  onPromote,
+  onSuppress,
+  onStartChat
 }: {
   emails: Email[];
   activeId: number | null;
   loading: boolean;
   error: string | null;
   onPick: (email: Email) => void;
+  onMarkRead: (id: number, next: boolean) => Promise<void> | void;
+  onPromote: (id: number) => Promise<void> | void;
+  onSuppress: (id: number) => Promise<void> | void;
+  onStartChat: (id: number) => Promise<void> | void;
 }) {
+  const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
+
   if (loading && emails.length === 0) {
     return <div className="p-4 text-sm text-slate-400">Cargando…</div>;
   }
@@ -58,51 +72,75 @@ export function InboxList({
         const sender = email.sender_name || email.sender_email;
         const isActive = email.id === activeId;
         const unread = !email.is_read;
+        const menuOpen = menuOpenId === email.id;
         return (
           <li key={email.id}>
-            <button
-              onClick={() => onPick(email)}
-              className={`flex w-full flex-col gap-1 border-b border-white/5 px-3 py-3 text-left transition ${
+            <div
+              className={`group/row relative flex items-stretch border-b border-white/5 transition ${
                 isActive ? "bg-indigo-600/10" : "hover:bg-white/5"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
-                    unread ? "bg-indigo-400" : "bg-transparent"
-                  }`}
-                  aria-label={unread ? "No leído" : "Leído"}
-                />
-                <span
-                  className={`min-w-0 flex-1 truncate text-sm ${
-                    unread ? "font-semibold text-white" : "font-normal text-slate-300"
+              <button
+                type="button"
+                onClick={() => onPick(email)}
+                className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-3 text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      unread ? "bg-indigo-400" : "bg-transparent"
+                    }`}
+                    aria-label={unread ? "No leído" : "Leído"}
+                  />
+                  <span
+                    className={`min-w-0 flex-1 truncate text-sm ${
+                      unread ? "font-semibold text-white" : "font-normal text-slate-300"
+                    }`}
+                  >
+                    {sender}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-slate-500">
+                    {relativeTime(email.received_at)}
+                  </span>
+                </div>
+                <div
+                  className={`truncate text-sm ${
+                    unread ? "text-slate-100" : "text-slate-400"
                   }`}
                 >
-                  {sender}
-                </span>
-                <span className="shrink-0 text-[11px] text-slate-500">
-                  {relativeTime(email.received_at)}
-                </span>
-              </div>
-              <div
-                className={`truncate text-sm ${
-                  unread ? "text-slate-100" : "text-slate-400"
+                  {email.subject || "(sin asunto)"}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${badge.className}`}
+                    title={email.triage_reason ?? undefined}
+                  >
+                    {badge.label}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
+                    {email.snippet || ""}
+                  </span>
+                </div>
+              </button>
+              <span
+                className={`flex items-start py-3 pr-2 ${
+                  menuOpen
+                    ? "inline-flex"
+                    : "hidden group-hover/row:inline-flex group-focus-within/row:inline-flex"
                 }`}
               >
-                {email.subject || "(sin asunto)"}
-              </div>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${badge.className}`}
-                  title={email.triage_reason ?? undefined}
-                >
-                  {badge.label}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-                  {email.snippet || ""}
-                </span>
-              </div>
-            </button>
+                <EmailActionsMenu
+                  email={email}
+                  variant="row"
+                  open={menuOpen}
+                  onOpenChange={(next) => setMenuOpenId(next ? email.id : null)}
+                  onMarkRead={onMarkRead}
+                  onPromote={onPromote}
+                  onSuppress={onSuppress}
+                  onStartChat={onStartChat}
+                />
+              </span>
+            </div>
           </li>
         );
       })}
