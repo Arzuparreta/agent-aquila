@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+OAuthCredentialSource = Literal["database", "environment", "none"]
 
 
 class OAuthStartRequest(BaseModel):
@@ -29,6 +33,8 @@ class GoogleOAuthAppCredentialsResponse(BaseModel):
     redirect_uri: str
     configured: bool
     has_saved_secret: bool
+    client_id_source: OAuthCredentialSource
+    client_secret_source: OAuthCredentialSource
 
 
 class GoogleOAuthAppCredentialsUpdate(BaseModel):
@@ -46,6 +52,9 @@ class MicrosoftOAuthAppCredentialsResponse(BaseModel):
     redirect_uri: str
     configured: bool
     has_saved_secret: bool
+    client_id_source: OAuthCredentialSource
+    client_secret_source: OAuthCredentialSource
+    tenant_source: OAuthCredentialSource
 
 
 class MicrosoftOAuthAppCredentialsUpdate(BaseModel):

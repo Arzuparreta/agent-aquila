@@ -222,6 +222,13 @@ export type ConnectorConnection = {
   updated_at: string;
 };
 
+export type ConnectorHealthResponse = {
+  ok: boolean;
+  provider: string;
+  account?: string | null;
+  error?: string | null;
+};
+
 export type AgentStep = {
   step_index: number;
   kind: string;

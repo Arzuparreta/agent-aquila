@@ -12,6 +12,49 @@ from app.services.oauth.microsoft_oauth import MicrosoftOAuthRuntimeConfig, is_r
 
 _SINGLETON_ID = 1
 
+# Where the effective value comes from (DB row vs server env). Used by Settings UI only.
+CredentialSource = str  # "database" | "environment" | "none"
+
+
+def _google_client_id_source(row: InstanceOAuthSettings) -> CredentialSource:
+    if (row.google_oauth_client_id or "").strip():
+        return "database"
+    if settings.google_oauth_client_id.strip():
+        return "environment"
+    return "none"
+
+
+def _google_client_secret_source(row: InstanceOAuthSettings) -> CredentialSource:
+    if row.google_oauth_client_secret_encrypted:
+        return "database"
+    if settings.google_oauth_client_secret.strip():
+        return "environment"
+    return "none"
+
+
+def _microsoft_client_id_source(row: InstanceOAuthSettings) -> CredentialSource:
+    if (row.microsoft_oauth_client_id or "").strip():
+        return "database"
+    if settings.microsoft_oauth_client_id.strip():
+        return "environment"
+    return "none"
+
+
+def _microsoft_client_secret_source(row: InstanceOAuthSettings) -> CredentialSource:
+    if row.microsoft_oauth_client_secret_encrypted:
+        return "database"
+    if settings.microsoft_oauth_client_secret.strip():
+        return "environment"
+    return "none"
+
+
+def _microsoft_tenant_source(row: InstanceOAuthSettings) -> CredentialSource:
+    if (row.microsoft_oauth_tenant or "").strip():
+        return "database"
+    if (settings.microsoft_oauth_tenant or "").strip():
+        return "environment"
+    return "none"
+
 
 async def _get_or_create_row(db: AsyncSession) -> InstanceOAuthSettings:
     result = await db.execute(select(InstanceOAuthSettings).where(InstanceOAuthSettings.id == _SINGLETON_ID))
@@ -52,6 +95,8 @@ async def get_google_app_credentials_form(db: AsyncSession) -> dict[str, str | b
         "redirect_uri": f"{cfg.redirect_base.rstrip('/')}/api/v1/oauth/google/callback",
         "configured": is_runtime_ready(cfg),
         "has_saved_secret": bool(row.google_oauth_client_secret_encrypted),
+        "client_id_source": _google_client_id_source(row),
+        "client_secret_source": _google_client_secret_source(row),
     }
 
 
@@ -101,6 +146,9 @@ async def get_microsoft_app_credentials_form(db: AsyncSession) -> dict[str, str 
         "redirect_uri": f"{base.rstrip('/')}/api/v1/oauth/microsoft/callback",
         "configured": microsoft_runtime_ready(cfg),
         "has_saved_secret": bool(row.microsoft_oauth_client_secret_encrypted),
+        "client_id_source": _microsoft_client_id_source(row),
+        "client_secret_source": _microsoft_client_secret_source(row),
+        "tenant_source": _microsoft_tenant_source(row),
     }
 
 

@@ -330,6 +330,26 @@ const en = {
   "connectors.publicUrlPlaceholder": "https://your-site.example",
   "connectors.publicUrlHelp":
     "This value is saved when you click \"Save Google link\" or \"Save Microsoft link\" below.",
+  "connectors.credentialSource.database": "database",
+  "connectors.credentialSource.environment": "environment",
+  "connectors.credentialSource.none": "not set",
+  "connectors.redirectMismatch":
+    "Public URL ({publicBase}) does not match this browser origin ({origin}). OAuth may fail until they match.",
+  "connectors.google.appStatusTitle": "OAuth app",
+  "connectors.google.appStatusLine": "Client ID from {idSrc}. Client secret from {secretSrc}.",
+  "connectors.google.configuredReady": "Ready to connect accounts.",
+  "connectors.google.configuredIncomplete": "Configure client ID and secret (saved here or via server environment).",
+  "connectors.ms.appStatusTitle": "OAuth app",
+  "connectors.ms.appStatusLine": "Client ID from {idSrc}. Secret from {secretSrc}. Tenant from {tenantSrc}.",
+  "connectors.ms.configuredReady": "Ready to connect accounts.",
+  "connectors.ms.configuredIncomplete": "Configure application ID and secret (saved here or via server environment).",
+  "connectors.saved.lastError": "Last error: {message}",
+  "connectors.saved.tokenExpires": "Access token expires {when}",
+  "connectors.saved.verifyAccess": "Verify access",
+  "connectors.saved.verifying": "Verifying…",
+  "connectors.saved.verifyOk": "Access OK — signed in as {account}",
+  "connectors.saved.verifyOkNoAccount": "Access OK — token is valid.",
+  "connectors.saved.verifyFailed": "Verification failed: {error}",
 
   "connectors.google.title": "Google Workspace",
   "connectors.google.intro":
@@ -770,6 +790,28 @@ const es: Record<keyof typeof en, string> = {
   "connectors.publicUrlPlaceholder": "https://tu-sitio.example",
   "connectors.publicUrlHelp":
     "Este valor se guarda al pulsar «Guardar enlace de Google» o «Guardar enlace de Microsoft» abajo.",
+  "connectors.credentialSource.database": "base de datos",
+  "connectors.credentialSource.environment": "variables de entorno del servidor",
+  "connectors.credentialSource.none": "sin definir",
+  "connectors.redirectMismatch":
+    "La URL pública ({publicBase}) no coincide con el origen de este navegador ({origin}). OAuth puede fallar hasta que coincidan.",
+  "connectors.google.appStatusTitle": "Aplicación OAuth",
+  "connectors.google.appStatusLine": "ID de cliente desde {idSrc}. Secreto de cliente desde {secretSrc}.",
+  "connectors.google.configuredReady": "Listo para conectar cuentas.",
+  "connectors.google.configuredIncomplete":
+    "Configura el ID de cliente y el secreto (aquí o en el entorno del servidor).",
+  "connectors.ms.appStatusTitle": "Aplicación OAuth",
+  "connectors.ms.appStatusLine": "ID de cliente desde {idSrc}. Secreto desde {secretSrc}. Inquilino desde {tenantSrc}.",
+  "connectors.ms.configuredReady": "Listo para conectar cuentas.",
+  "connectors.ms.configuredIncomplete":
+    "Configura el ID de aplicación y el secreto (aquí o en el entorno del servidor).",
+  "connectors.saved.lastError": "Último error: {message}",
+  "connectors.saved.tokenExpires": "El token de acceso caduca {when}",
+  "connectors.saved.verifyAccess": "Comprobar acceso",
+  "connectors.saved.verifying": "Comprobando…",
+  "connectors.saved.verifyOk": "Acceso correcto — sesión como {account}",
+  "connectors.saved.verifyOkNoAccount": "Acceso correcto — el token es válido.",
+  "connectors.saved.verifyFailed": "Error al comprobar: {error}",
 
   "connectors.google.title": "Google Workspace",
   "connectors.google.intro":

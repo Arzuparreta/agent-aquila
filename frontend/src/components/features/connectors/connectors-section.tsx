@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import { useTranslation, type TranslationKey } from "@/lib/i18n";
-import type { ConnectorConnection } from "@/types/api";
+import type { ConnectorConnection, ConnectorHealthResponse } from "@/types/api";
 
 type ProviderExample = { id: string; labelKey: TranslationKey };
 
@@ -27,12 +27,16 @@ const PROVIDER_EXAMPLES: ProviderExample[] = [
   { id: "graph_teams", labelKey: "connectors.provider.graph_teams" }
 ];
 
+type OAuthCredentialSource = "database" | "environment" | "none";
+
 type GoogleAppCredentials = {
   client_id: string;
   redirect_base: string;
   redirect_uri: string;
   configured: boolean;
   has_saved_secret: boolean;
+  client_id_source: OAuthCredentialSource;
+  client_secret_source: OAuthCredentialSource;
 };
 
 type MicrosoftAppCredentials = {
@@ -42,6 +46,9 @@ type MicrosoftAppCredentials = {
   redirect_uri: string;
   configured: boolean;
   has_saved_secret: boolean;
+  client_id_source: OAuthCredentialSource;
+  client_secret_source: OAuthCredentialSource;
+  tenant_source: OAuthCredentialSource;
 };
 
 type OAuthStart = {
@@ -61,6 +68,23 @@ type SyncStatus = {
   last_error: string | null;
   cursor: string | null;
 };
+
+function credentialSourceKey(s: OAuthCredentialSource): TranslationKey {
+  if (s === "database") return "connectors.credentialSource.database";
+  if (s === "environment") return "connectors.credentialSource.environment";
+  return "connectors.credentialSource.none";
+}
+
+function normalizedOriginFromPublicUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const u = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    return u.origin;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Render a translation that contains lightweight inline markup. We support a
@@ -113,11 +137,16 @@ export function ConnectorsSection() {
   const [msFormTenant, setMsFormTenant] = useState("common");
   const [msFormSecret, setMsFormSecret] = useState("");
   const [msSetupSaving, setMsSetupSaving] = useState(false);
+  const [verifyHint, setVerifyHint] = useState<
+    Record<number, { variant: "ok" | "err"; text: string }>
+  >({});
+  const [verifyLoadingId, setVerifyLoadingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
       const list = await apiFetch<ConnectorConnection[]>("/connectors");
       setRows(list);
+      setVerifyHint({});
       // Fetch sync state per connection (non-blocking).
       const next: Record<number, SyncStatus[]> = {};
       await Promise.all(
@@ -310,6 +339,44 @@ export function ConnectorsSection() {
     }
   };
 
+  const verifyAccess = async (connectionId: number) => {
+    setVerifyLoadingId(connectionId);
+    setVerifyHint((prev) => {
+      const next = { ...prev };
+      delete next[connectionId];
+      return next;
+    });
+    try {
+      const h = await apiFetch<ConnectorHealthResponse>(`/connectors/${connectionId}/health`);
+      if (h.ok) {
+        const msg = h.account
+          ? t("connectors.saved.verifyOk", { account: h.account })
+          : t("connectors.saved.verifyOkNoAccount");
+        setVerifyHint((prev) => ({ ...prev, [connectionId]: { variant: "ok", text: msg } }));
+      } else {
+        setVerifyHint((prev) => ({
+          ...prev,
+          [connectionId]: {
+            variant: "err",
+            text: t("connectors.saved.verifyFailed", { error: h.error || "—" })
+          }
+        }));
+      }
+    } catch (e) {
+      setVerifyHint((prev) => ({
+        ...prev,
+        [connectionId]: {
+          variant: "err",
+          text: t("connectors.saved.verifyFailed", {
+            error: e instanceof Error ? e.message : String(e)
+          })
+        }
+      }));
+    } finally {
+      setVerifyLoadingId(null);
+    }
+  };
+
   const remove = async (id: number) => {
     setError(null);
     setLoading(true);
@@ -326,6 +393,10 @@ export function ConnectorsSection() {
   const publicBaseTrimmed = oauthPublicBase.replace(/\/$/, "") || t("connectors.oauth.publicUrlFallback");
   const googleRedirect = `${publicBaseTrimmed}/api/v1/oauth/google/callback`;
   const msRedirect = `${publicBaseTrimmed}/api/v1/oauth/microsoft/callback`;
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const oauthOriginGuess = normalizedOriginFromPublicUrl(oauthPublicBase);
+  const redirectMismatch =
+    Boolean(oauthOriginGuess) && Boolean(browserOrigin) && oauthOriginGuess !== browserOrigin;
 
   return (
     <Card className="mt-8 p-5">
@@ -358,6 +429,17 @@ export function ConnectorsSection() {
           />
         </label>
         <p className="mt-2 text-xs text-fg-subtle">{t("connectors.publicUrlHelp")}</p>
+        {redirectMismatch ? (
+          <div className="mt-3">
+            <AlertBanner
+              variant="info"
+              message={t("connectors.redirectMismatch", {
+                publicBase: oauthOriginGuess || oauthPublicBase.trim() || publicBaseTrimmed,
+                origin: browserOrigin
+              })}
+            />
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
@@ -367,6 +449,23 @@ export function ConnectorsSection() {
             <RichText text={t("connectors.google.intro")} />
           </p>
         </div>
+
+        {googleApp ? (
+          <div className="mt-3 rounded-md border border-border-subtle bg-surface-elevated p-3 text-xs">
+            <p className="font-medium text-fg">{t("connectors.google.appStatusTitle")}</p>
+            <p className="mt-1 text-fg-muted">
+              {t("connectors.google.appStatusLine", {
+                idSrc: t(credentialSourceKey(googleApp.client_id_source)),
+                secretSrc: t(credentialSourceKey(googleApp.client_secret_source))
+              })}
+            </p>
+            <p className="mt-1 text-fg">
+              {googleApp.configured
+                ? t("connectors.google.configuredReady")
+                : t("connectors.google.configuredIncomplete")}
+            </p>
+          </div>
+        ) : null}
 
         <form
           className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
@@ -476,6 +575,22 @@ export function ConnectorsSection() {
             <RichText text={t("connectors.ms.intro")} />
           </p>
         </div>
+
+        {msApp ? (
+          <div className="mt-3 rounded-md border border-border-subtle bg-surface-elevated p-3 text-xs">
+            <p className="font-medium text-fg">{t("connectors.ms.appStatusTitle")}</p>
+            <p className="mt-1 text-fg-muted">
+              {t("connectors.ms.appStatusLine", {
+                idSrc: t(credentialSourceKey(msApp.client_id_source)),
+                secretSrc: t(credentialSourceKey(msApp.client_secret_source)),
+                tenantSrc: t(credentialSourceKey(msApp.tenant_source))
+              })}
+            </p>
+            <p className="mt-1 text-fg">
+              {msApp.configured ? t("connectors.ms.configuredReady") : t("connectors.ms.configuredIncomplete")}
+            </p>
+          </div>
+        ) : null}
 
         <form
           className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
@@ -710,6 +825,14 @@ export function ConnectorsSection() {
                       ) : null}
                       <Button
                         type="button"
+                        className="text-xs"
+                        disabled={verifyLoadingId === r.id || loading}
+                        onClick={() => void verifyAccess(r.id)}
+                      >
+                        {verifyLoadingId === r.id ? t("connectors.saved.verifying") : t("connectors.saved.verifyAccess")}
+                      </Button>
+                      <Button
+                        type="button"
                         className="border-dashed text-xs"
                         disabled={loading}
                         onClick={() => void remove(r.id)}
@@ -718,17 +841,40 @@ export function ConnectorsSection() {
                       </Button>
                     </div>
                   </div>
+                  {r.token_expires_at ? (
+                    <p className="text-xs text-fg-muted">
+                      {t("connectors.saved.tokenExpires", {
+                        when: new Date(r.token_expires_at).toLocaleString()
+                      })}
+                    </p>
+                  ) : null}
+                  {verifyHint[r.id] ? (
+                    <p
+                      className={
+                        verifyHint[r.id].variant === "ok" ? "text-xs text-green-800" : "text-xs text-red-800"
+                      }
+                    >
+                      {verifyHint[r.id].text}
+                    </p>
+                  ) : null}
                   {syncList.length > 0 ? (
                     <div className="grid grid-cols-1 gap-1 text-xs text-fg-muted md:grid-cols-2">
                       {syncList.map((s) => (
                         <div key={`${s.connection_id}-${s.resource}`} className="rounded bg-surface-muted px-2 py-1">
-                          <span className="font-mono">{s.resource}</span> · {s.status}
-                          {s.last_delta_at
-                            ? ` · ${t("connectors.saved.lastSync", { when: new Date(s.last_delta_at).toLocaleString() })}`
-                            : ""}
-                          {s.error_count > 0
-                            ? ` · ${t("connectors.saved.errorsCount", { count: s.error_count })}`
-                            : ""}
+                          <div>
+                            <span className="font-mono">{s.resource}</span> · {s.status}
+                            {s.last_delta_at
+                              ? ` · ${t("connectors.saved.lastSync", { when: new Date(s.last_delta_at).toLocaleString() })}`
+                              : ""}
+                            {s.error_count > 0
+                              ? ` · ${t("connectors.saved.errorsCount", { count: s.error_count })}`
+                              : ""}
+                          </div>
+                          {s.last_error && s.last_error.trim() ? (
+                            <div className="mt-0.5 break-words text-amber-900 dark:text-amber-200/90">
+                              {t("connectors.saved.lastError", { message: s.last_error })}
+                            </div>
+                          ) : null}
                         </div>
                       ))}
                     </div>

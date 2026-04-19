@@ -11,6 +11,7 @@ from app.schemas.connector import (
     ConnectorConnectionPatch,
     ConnectorConnectionRead,
     ConnectorDryRunResponse,
+    ConnectorHealthResponse,
     ConnectorPreviewRequest,
     ConnectorPreviewResponse,
 )
@@ -19,7 +20,8 @@ from app.services.connector_dry_run_service import ACTION_TO_KIND as _ACTION_TO_
 from app.services.connector_dry_run_service import ConnectorDryRunService
 from app.services.connector_service import ConnectorService
 from app.services.job_queue import enqueue as enqueue_job
-from app.services.oauth import TokenManager
+from app.services.oauth import google_oauth, microsoft_oauth, TokenManager
+from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
 from app.services.pending_execution_service import preview_for_proposal_kind
 from app.services.sync_state_service import SyncStateService
 
@@ -149,6 +151,54 @@ async def dry_run_connector_action(
         risk_tier=risk_tier_for_kind(kind),
         result=result,
     )
+
+
+@router.get("/{connection_id}/health", response_model=ConnectorHealthResponse)
+async def connector_health(
+    connection_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ConnectorHealthResponse:
+    """Refresh token if needed, then verify access with the provider (userinfo / profile)."""
+    row = await ConnectorService.get_connection(db, current_user, connection_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+    try:
+        access_token, _creds, _provider = await TokenManager.get_valid_creds(db, row)
+    except ConnectorNeedsReauth as exc:
+        return ConnectorHealthResponse(ok=False, provider=row.provider, error=str(exc))
+    except OAuthError as exc:
+        return ConnectorHealthResponse(ok=False, provider=row.provider, error=str(exc))
+
+    if TokenManager.is_google(row.provider):
+        info = await google_oauth.fetch_userinfo(access_token)
+        if not info:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Could not reach Google userinfo with this token.",
+            )
+        account = str(info.get("email") or "")
+        return ConnectorHealthResponse(ok=True, provider=row.provider, account=account or None)
+
+    if TokenManager.is_microsoft(row.provider):
+        info = await microsoft_oauth.fetch_userinfo(access_token)
+        if not info:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Could not reach Microsoft profile with this token.",
+            )
+        account = str(info.get("mail") or info.get("userPrincipalName") or "")
+        return ConnectorHealthResponse(ok=True, provider=row.provider, account=account or None)
+
+    if not (access_token or "").strip():
+        return ConnectorHealthResponse(
+            ok=False,
+            provider=row.provider,
+            error="No access token stored for this connection.",
+        )
+    return ConnectorHealthResponse(ok=True, provider=row.provider, account=None)
 
 
 @router.get("/{connection_id}/sync-status")

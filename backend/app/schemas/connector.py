@@ -53,3 +53,10 @@ class ConnectorDryRunResponse(BaseModel):
     action: str
     risk_tier: str
     result: dict[str, Any]
+
+
+class ConnectorHealthResponse(BaseModel):
+    ok: bool
+    provider: str
+    account: str | None = None
+    error: str | None = None
