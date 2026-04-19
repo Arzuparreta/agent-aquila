@@ -17,8 +17,8 @@ import { useChatReferences } from "./reference-context";
 /**
  * Loads + renders a single chat thread:
  *   - Initial fetch of the last 200 messages (oldest at top, newest at bottom).
- *   - Composer at the bottom; on submit we POST and append both sides locally to
- *     avoid a full refetch on every turn.
+ *   - Composer at the bottom; on submit we show the user message optimistically,
+ *     POST, then swap in the persisted user row plus the assistant reply.
  *   - "Pensando…" indicator while the agent reply is in flight.
  *   - Auto-scrolls to bottom whenever the message list grows.
  *
@@ -38,6 +38,7 @@ export function ChatThreadView({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const optimisticIdRef = useRef(0);
   const refs = useChatReferences();
 
   const reload = useCallback(async () => {
@@ -63,19 +64,35 @@ export function ChatThreadView({
 
   const onSend = useCallback(
     async (content: string, references: EntityRef[]) => {
+      const optimisticId = (optimisticIdRef.current -= 1);
+      const optimistic: ChatMessage = {
+        id: optimisticId,
+        thread_id: thread.id,
+        role: "user",
+        content,
+        attachments: null,
+        agent_run_id: null,
+        created_at: new Date().toISOString()
+      };
+      setMessages((prev) => [...prev, optimistic]);
       setSending(true);
       try {
         const result = await apiFetch<ChatSendResult>(`/threads/${thread.id}/messages`, {
           method: "POST",
           body: JSON.stringify({ content, references })
         });
-        setMessages((prev) => [...prev, result.user_message, result.assistant_message]);
+        setMessages((prev) => {
+          const without = prev.filter((m) => m.id !== optimisticId);
+          return [...without, result.user_message, result.assistant_message];
+        });
         onThreadUpdated(result.thread);
         if (result.error) setError(result.error);
         else setError(null);
         refs.clear();
       } catch (err) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         setError(err instanceof ApiError ? err.message : "El envío falló.");
+        throw err;
       } finally {
         setSending(false);
       }
@@ -89,15 +106,15 @@ export function ChatThreadView({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div ref={scrollerRef} className="scroll-stealth min-h-0 flex-1 overflow-y-auto px-3 py-4">
-        {loading ? <div className="text-center text-sm text-fg-subtle">Cargando…</div> : null}
+      <div ref={scrollerRef} className="scroll-stealth min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {loading ? <div className="text-center text-base text-fg-subtle">Cargando…</div> : null}
         {error ? (
-          <div className="mx-auto mb-3 max-w-md rounded-md bg-rose-900/40 px-3 py-2 text-sm text-rose-100">
+          <div className="mx-auto mb-3 max-w-md rounded-md bg-rose-900/40 px-3 py-2 text-base text-rose-100">
             {error}
           </div>
         ) : null}
         {!loading && messages.length === 0 ? (
-          <div className="mx-auto mt-12 max-w-sm text-center text-sm text-fg-subtle">
+          <div className="mx-auto mt-12 max-w-sm text-center text-base text-fg-subtle">
             Hola. Cuéntame qué necesitas y me encargo. También puedo avisarte cuando llegue
             algo importante (correos, eventos, propuestas).
           </div>
@@ -107,7 +124,7 @@ export function ChatThreadView({
             <MessageBubble key={m.id} message={m} onMessageUpdate={updateMessage} />
           ))}
           {sending ? (
-            <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-sm text-fg-muted">
+            <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted">
               Pensando…
             </div>
           ) : null}
