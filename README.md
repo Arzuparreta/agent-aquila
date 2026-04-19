@@ -27,12 +27,6 @@ accounts directly**. It pairs a deliberately bare ReAct loop with persistent
 agent memory, a markdown-driven skills folder, and live OAuth tools for Gmail,
 Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
 
-There is no local mirror, no CRM, no triage classifier, no inbox machine
-learning. Every read goes straight to the upstream API; every write is either
-auto-applied (archive, label, mute, move to spam, calendar edits, file moves,
-Teams messages…) or —  —
-staged as a one-click human approval.
-
 ## How it works
 
 - **Live, no mirror.** Inbox, calendar, drive and Teams views call the upstream
