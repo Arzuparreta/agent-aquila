@@ -64,7 +64,9 @@ async def get_or_create_general_thread(db: AsyncSession, user: User) -> ChatThre
             title="General",
             is_default=True,
         )
-        .on_conflict_do_nothing(index_elements=["user_id"], index_where=ChatThread.is_default.is_(True))
+        # Must match ``uq_chat_threads_user_default`` predicate exactly (`= true`). Using
+        # ``.is_(True)`` compiles to ``IS true``, which Postgres rejects for inference.
+        .on_conflict_do_nothing(index_elements=["user_id"], index_where=(ChatThread.is_default == True))  # noqa: E712
     )
     await db.execute(insert_stmt)
     await db.flush()
