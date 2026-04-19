@@ -601,11 +601,11 @@ async def test_run_agent_drive_listing_uses_native_tool_call(
     2. Receive the result and feed it back as a ``role:"tool"`` message,
     3. Terminate via the ``final_answer`` tool call with grounded content.
 
-    This is the exact flow that was broken before — small local models
-    pattern-matched a poisoned chat history and emitted a free-form text
-    answer instead of calling the tool. The fix uses
-    ``tool_choice="required"`` + a ``final_answer`` terminator so emitting
-    free-form text is structurally impossible.
+    The harness sends the FULL ``AGENT_TOOLS`` palette on every turn —
+    no intent filtering, no must-ground gate, no budget shrink. Tool
+    selection is the model's job; rich tool descriptions are the only
+    knob. ``tool_choice="required"`` + ``final_answer`` terminator are
+    the universal safety net (every turn ends in some tool call).
     """
     conn = await _make_drive_connection(db_session, crm_user)
     db_session.add(
@@ -652,10 +652,17 @@ async def test_run_agent_drive_listing_uses_native_tool_call(
     # guard that prevents lazy text-only replies.
     assert all(c == "required" for c in captured_choice), captured_choice
 
-    # Both the data tool and the final_answer terminator must be in the schema.
-    advertised = {t["function"]["name"] for t in captured_tools[0]}
-    assert "list_drive_files" in advertised
-    assert "final_answer" in advertised
+    # Both turns must see the FULL palette: list_drive_files (so the data
+    # call is even possible) AND final_answer (so the model can terminate).
+    # The model is trusted to call list_drive_files first because the tool
+    # description says so — there is no longer a structural "must ground
+    # first" gate fencing the palette.
+    turn1_advertised = {t["function"]["name"] for t in captured_tools[0]}
+    assert "list_drive_files" in turn1_advertised
+    assert "final_answer" in turn1_advertised
+    turn2_advertised = {t["function"]["name"] for t in captured_tools[1]}
+    assert "list_drive_files" in turn2_advertised
+    assert "final_answer" in turn2_advertised
 
     # Tool result must be threaded back as role:"tool" before the model talks.
     second_turn = captured_messages[1]
@@ -688,64 +695,22 @@ async def test_run_agent_completes_via_final_answer_terminator(
 
 
 @pytest.mark.asyncio
-async def test_run_agent_unknown_tool_call_returns_valid_names_for_recovery(
+async def test_run_agent_unknown_tool_returns_generic_error_no_alias_map(
     db_session, crm_user: User
 ) -> None:
-    """If the model hallucinates a tool name that isn't in our alias map,
-    the dispatcher must feed back BOTH the error and the list of valid
-    tool names (including ``final_answer``) so the model can self-correct
-    on the next turn."""
+    """The harness has NO tool-name alias map and NO arg-shape coercion.
+    When the model calls a tool that does not exist (Gemma's classic
+    ``google:search`` RLHF prior, an abbreviation, a misspelling), it
+    gets a single terse ``{"error": "unknown tool '...'"}`` back —
+    nothing more. No ``valid_tool_names`` payload, no recovery hint, no
+    automatic remapping to ``hybrid_rag_search``. The model is expected
+    to read its tools list and pick a real name; if it can't, the run
+    will exhaust the step budget and fail (the OpenClaw 'use a better
+    model' stance)."""
     turns = iter(
         [
-            # Truly unknown name (not in the alias map).
-            _assistant_tool_call_response(("frobnicate_widgets", {})),
-            # After seeing valid_tool_names in the error, the model picks the
-            # right tool.
-            _assistant_tool_call_response(("list_drive_files", {})),
-            _final_answer("No tienes archivos en Drive todavía."),
-        ]
-    )
-
-    captured_messages: list[list[dict]] = []
-
-    async def _fake(*_args, messages, **_kwargs):
-        captured_messages.append([dict(m) for m in messages])
-        return next(turns)
-
-    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
-        run = await AgentService.run_agent(db_session, crm_user, "qué archivos tengo")
-
-    assert run.status == "completed"
-    tool_steps = [s for s in run.steps if s.kind == "tool"]
-    assert [s.name for s in tool_steps] == [
-        "frobnicate_widgets",
-        "list_drive_files",
-        "final_answer",
-    ]
-    err = tool_steps[0].payload["result"]
-    assert err["error"].startswith("unknown tool")
-    assert "list_drive_files" in err["valid_tool_names"]
-    # final_answer must be presented as a valid escape hatch so the model
-    # can always terminate gracefully.
-    assert "final_answer" in err["valid_tool_names"]
-
-    # The recovery turn must have seen the valid tool names in the tool result.
-    second_turn_tool_msgs = [m for m in captured_messages[1] if m.get("role") == "tool"]
-    assert second_turn_tool_msgs and "list_drive_files" in second_turn_tool_msgs[0]["content"]
-
-
-@pytest.mark.asyncio
-async def test_run_agent_aliases_gemma_google_search_to_rag(
-    db_session, crm_user: User
-) -> None:
-    """Gemma 3/4 has a strong RLHF prior to emit ``google:search`` even when
-    we advertise our own tools. We alias that to ``hybrid_rag_search`` and
-    coerce the ``{"queries": [...]}`` arg shape so the call actually executes
-    instead of looping on 'unknown tool'."""
-    turns = iter(
-        [
-            _assistant_tool_call_response(("google:search", {"queries": ["riders festival"]})),
-            _final_answer("No encontré nada relevante."),
+            _assistant_tool_call_response(("google:search", {"queries": ["x"]})),
+            _final_answer("ok"),
         ]
     )
 
@@ -757,92 +722,31 @@ async def test_run_agent_aliases_gemma_google_search_to_rag(
 
     assert run.status == "completed"
     tool_steps = [s for s in run.steps if s.kind == "tool"]
-    # Step name must be the canonical resolved name, not the hallucinated one.
-    assert tool_steps[0].name == "hybrid_rag_search"
-    # And the args were rewritten so the underlying handler actually ran.
-    assert tool_steps[0].payload["args"]["query"] == "riders festival"
-    # The result must NOT be an "unknown tool" error — the alias resolved
-    # successfully and the handler ran (it may still surface a runtime
-    # error like "no embedding backend" in CI; that's a different concern).
-    res = tool_steps[0].payload["result"]
-    assert "valid_tool_names" not in res, (
-        "google:search must NOT come back as 'unknown tool' — it should be "
-        f"aliased to hybrid_rag_search. Got: {res!r}"
+    # Step name is recorded EXACTLY as the model issued it — no aliasing.
+    assert tool_steps[0].name == "google:search"
+    err = tool_steps[0].payload["result"]
+    assert err == {"error": "unknown tool 'google:search'"}, (
+        "Unknown-tool errors must be terse: just an error string, no "
+        f"valid_tool_names payload, no hint. Got: {err!r}"
     )
+    # And the args are NOT coerced — they're recorded as-issued.
+    assert tool_steps[0].payload["args"] == {"queries": ["x"]}
 
 
 @pytest.mark.asyncio
-async def test_run_agent_loop_breaker_fires_after_repeated_unknown_calls(
+async def test_run_agent_sends_full_tool_palette_every_turn(
     db_session, crm_user: User
 ) -> None:
-    """If the model spends multiple turns in a row only emitting unknown
-    tool names (Gemma's failure mode where it ignores valid_tool_names and
-    keeps calling a hallucinated function), the loop-breaker must abort
-    with a graceful synthesized reply — NOT exhaust the step budget."""
-    # Two consecutive "google:search-but-not-aliasable" turns should trip the
-    # breaker. We use a name the alias map doesn't know about.
-    turns = iter(
-        [
-            _assistant_tool_call_response(("totally_made_up_tool_a", {})),
-            _assistant_tool_call_response(("totally_made_up_tool_b", {})),
-            # If the breaker doesn't fire this third turn would complete the
-            # run successfully; the assertion below proves it never runs.
-            _final_answer("should not reach here"),
-        ]
-    )
-
-    async def _fake(*_args, **_kwargs):
-        return next(turns)
-
-    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
-        run = await AgentService.run_agent(db_session, crm_user, "haz algo raro")
-
-    # Run completes (artist gets a reply) but the error field records why.
-    assert run.status == "completed"
-    assert run.error and "loop_breaker" in run.error
-    assert run.assistant_reply and "reformular" in run.assistant_reply.lower()
-
-
-def test_select_tool_palette_filters_to_drive_intent() -> None:
-    """The palette filter must cut a 30-tool schema down to a small,
-    intent-relevant subset so small local models can actually pick the
-    right tool instead of defaulting to ``google:search`` etc."""
-    from app.services.agent_service import _select_tool_palette
-
-    palette = _select_tool_palette("¿Qué archivos tengo en mi drive?")
-    names = {t["function"]["name"] for t in palette}
-    assert "list_drive_files" in names
-    assert "search_drive" in names
-    assert "final_answer" in names
-    # Calendar / email / connector tools must NOT pollute the palette for a
-    # pure file-listing intent.
-    assert "list_calendar_events" not in names
-    assert "search_emails" not in names
-    # And the palette must be substantially smaller than the full schema.
-    from app.services.agent_tools import AGENT_TOOLS
-    assert len(palette) < len(AGENT_TOOLS) // 2
-
-
-def test_select_tool_palette_falls_back_to_full_schema_when_unclear() -> None:
-    """Generic / chitchat messages must keep the full palette so we never
-    accidentally strip the model of a tool it might need."""
-    from app.services.agent_service import _select_tool_palette
+    """Universal contract: the harness sends the full ``AGENT_TOOLS`` array
+    on every turn. No intent filtering, no must-ground gate, no budget
+    shrink. The model picks the right tool by reading descriptions."""
     from app.services.agent_tools import AGENT_TOOLS
 
-    palette = _select_tool_palette("hola, ¿cómo estás?")
-    assert len(palette) == len(AGENT_TOOLS)
-
-
-@pytest.mark.asyncio
-async def test_run_agent_passes_intent_filtered_palette_for_drive_question(
-    db_session, crm_user: User
-) -> None:
-    """End-to-end: when the artist asks about Drive files, the actual
-    ``tools=`` array sent to the LLM must be the small drive-only subset."""
     turns = iter(
         [
             _assistant_tool_call_response(("list_drive_files", {})),
-            _final_answer("Sin archivos."),
+            _assistant_tool_call_response(("hybrid_rag_search", {"query": "x"})),
+            _final_answer("ok"),
         ]
     )
     captured_tools: list[list[dict]] = []
@@ -853,66 +757,71 @@ async def test_run_agent_passes_intent_filtered_palette_for_drive_question(
 
     with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
         run = await AgentService.run_agent(
-            db_session, crm_user, "¿Qué archivos tengo en mi drive?"
+            db_session, crm_user, "qué archivos tengo en mi drive"
         )
 
-    assert run.status == "completed"
-    first_palette_names = {t["function"]["name"] for t in captured_tools[0]}
-    assert "list_drive_files" in first_palette_names
-    assert "search_emails" not in first_palette_names
-    assert "list_calendar_events" not in first_palette_names
-
-
-@pytest.mark.asyncio
-async def test_run_agent_shrinks_palette_to_force_final_answer_after_budget(
-    db_session, crm_user: User
-) -> None:
-    """If the model keeps calling data tools without ever wrapping up
-    (Gemma's infinite-search failure mode), once the data-call budget is
-    spent the loop must SHRINK the tools array to just ``final_answer``
-    so the model is structurally forced to terminate. This is the global
-    fix that protects every tool, not just Drive-specific ones."""
-    # The model loops forever on hybrid_rag_search (which is what aliasing
-    # google:search resolves to in production). Once the budget is spent
-    # the next call must be made with a single-tool palette = final_answer
-    # only — so the model has no other tool to pick.
-    rag_call = ("hybrid_rag_search", {"query": "anything"})
-    turns = iter(
-        [
-            _assistant_tool_call_response(rag_call),
-            _assistant_tool_call_response(rag_call),
-            _assistant_tool_call_response(rag_call),
-            _assistant_tool_call_response(rag_call),
-            # 5th turn: budget exhausted → palette shrunk → model must
-            # call final_answer.
-            _final_answer("Encontré algunas cosas pero nada concreto."),
-        ]
+    assert run.status == "completed", run.error
+    # Every turn must see the full palette — same length, every turn.
+    expected_len = len(AGENT_TOOLS)
+    assert all(len(t) == expected_len for t in captured_tools), (
+        f"expected every turn to see {expected_len} tools, got "
+        f"{[len(t) for t in captured_tools]}"
     )
+    # And the tool sets must be IDENTICAL across turns (no shrink, no
+    # filter, no gate).
+    expected_names = {t["function"]["name"] for t in AGENT_TOOLS}
+    for i, palette in enumerate(captured_tools):
+        names = {t["function"]["name"] for t in palette}
+        assert names == expected_names, f"turn {i + 1} palette diverged: {names ^ expected_names}"
 
-    captured_tools: list[list[dict]] = []
 
-    async def _fake(*_args, tools, **_kwargs):
-        captured_tools.append(tools)
-        return next(turns)
+def test_get_tool_palette_returns_full_schema_by_default() -> None:
+    """Pin the extension-point default: today ``get_tool_palette`` returns
+    the universal ``AGENT_TOOLS`` palette for everyone. The seam exists
+    so per-tenant skill toggles can plug in later WITHOUT touching the
+    loop — but switching the default to a filtered palette must be an
+    explicit, observable change (this test will fail if someone does it
+    accidentally)."""
+    from app.services.agent_service import get_tool_palette
+    from app.services.agent_tools import AGENT_TOOLS
 
-    with patch.object(LLMClient, "chat_with_tools", new=AsyncMock(side_effect=_fake)):
-        run = await AgentService.run_agent(db_session, crm_user, "qué hay")
+    # The seam is a pure function — it doesn't actually touch ``user`` today,
+    # so a sentinel object works fine and avoids coupling this regression
+    # test to the User model schema.
+    user = object()
+    palette = get_tool_palette(user)
+    assert palette is AGENT_TOOLS or palette == AGENT_TOOLS
+    # And the tenant_hint kwarg is accepted but inert today.
+    assert get_tool_palette(user, tenant_hint="artist") == AGENT_TOOLS
 
-    assert run.status == "completed"
-    assert run.assistant_reply and "Encontré" in run.assistant_reply
 
-    # The first 4 turns saw the full palette.
-    full_palette_size = len(captured_tools[0])
-    assert full_palette_size > 5, (
-        "expected a multi-tool palette on the first turn; "
-        f"got {full_palette_size}"
-    )
-    for i in range(4):
-        assert len(captured_tools[i]) == full_palette_size
+def test_every_agent_tool_has_a_when_to_use_description() -> None:
+    """Regression guard for the OpenClaw harness contract: tool selection
+    is the agent's job, and rich tool descriptions are the ONLY knob it
+    has. If a description degrades to a one-liner, the agent loses its
+    ability to pick the right tool — silently. This test fails loudly
+    when that happens.
 
-    # The 5th turn (budget spent) must have ONLY final_answer in the palette.
-    assert len(captured_tools[4]) == 1
-    assert captured_tools[4][0]["function"]["name"] == "final_answer"
+    Each description must be at least 200 chars and contain at least
+    one of the OpenClaw markers ('Use when', 'Use this', 'Returns:').
+    The bar is intentionally low — the goal is to catch regressions to
+    'Search the artist's emails.'-style stubs, not to micromanage prose.
+    """
+    from app.services.agent_tools import AGENT_TOOLS
+
+    bad: list[str] = []
+    for tool in AGENT_TOOLS:
+        name = tool["function"]["name"]
+        desc = tool["function"]["description"]
+        if len(desc) < 200:
+            bad.append(f"{name}: description too short ({len(desc)} chars)")
+            continue
+        markers = ("Use when", "Use this", "Use to", "Use IMMEDIATELY", "Use after")
+        if not any(m in desc for m in markers):
+            bad.append(f"{name}: missing 'Use when/this/to/...' marker")
+        if "Returns" not in desc:
+            bad.append(f"{name}: missing 'Returns' section")
+    assert not bad, "tool description regressions:\n  " + "\n  ".join(bad)
 
 
 @pytest.mark.asyncio

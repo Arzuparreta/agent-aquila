@@ -75,6 +75,32 @@ def _email(
             sender="no-reply@stripe.com",
             subject="Your verification code is 123456",
         ),
+        # Real-world security / account-confirmation noise that previously
+        # leaked through to actionable. These are the regressions reported
+        # by the user (Notion passkey, Mozilla / Firefox sign-in, etc).
+        _email(
+            sender="notify@updates.notion.so",
+            subject="A passkey was added to your account",
+            body="Passkey added. You just added a passkey to your Notion account from your iCloud Keychain device.",
+        ),
+        _email(
+            sender="accounts@firefox.com",
+            subject="New sign-in to Firefox",
+            body="Your Mozilla account was used to sign in to Firefox on Linux.",
+        ),
+        _email(
+            sender="security-noreply@accounts.google.com",
+            subject="Security alert",
+            body="A new sign-in on Linux. If this was you, you don't need to do anything.",
+        ),
+        _email(
+            sender="account-update@amazon.com",
+            subject="Your password has been changed",
+        ),
+        _email(
+            sender="welcome@notion.so",
+            subject="Welcome to Notion!",
+        ),
     ],
 )
 def test_known_newsletters_are_classified_as_noise(email: Email) -> None:
@@ -123,6 +149,10 @@ def test_unknown_personal_mail_falls_through_to_informational() -> None:
         ("no-reply@leetcode.com", None, True),
         ("noreply@stripe.com", None, True),
         ("notifications@github.com", None, True),
+        ("notify@updates.notion.so", None, True),
+        ("accounts@firefox.com", None, True),
+        ("welcome@notion.so", None, True),
+        ("verify@example.com", None, True),
         ("linkedin@em.linkedin.com", None, True),
         ("partner@somecompany.com", None, False),
         ("partner@somecompany.com", {"List-Unsubscribe": "<...>"}, True),

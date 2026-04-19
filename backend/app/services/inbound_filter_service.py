@@ -109,17 +109,30 @@ _PRECEDENCE_NOISE_VALUES = ("bulk", "list", "junk", "auto_reply", "marketing")
 # the start of the local-part to avoid false positives like ``support-team@``
 # being treated as bulk.
 _NOISE_LOCAL_RE = re.compile(
-    r"^(no[-._]?reply|do[-._]?not[-._]?reply|reply\+|notifications?|alerts?|"
-    r"updates?|news(letter)?|digest|info|hello|team|support|billing|receipts?|"
-    r"mailer|bounce|return|postmaster|automated|account|service|security)"
+    r"^(no[-._]?reply|noreply|noresponse|do[-._]?not[-._]?reply|reply\+|"
+    r"notifications?|notify|alerts?|updates?|news(letter)?|digest|info|hello|"
+    r"team|support|billing|receipts?|mailer|mailer-daemon|bounce|return|"
+    r"postmaster|automated|accounts?|service|security|verify|verification|"
+    r"welcome|auth|otp|2fa|robot|daemon)"
     r"([-._+].*)?@",
     re.IGNORECASE,
 )
 
-# Subdomain prefixes commonly used by Email Service Providers / marketing.
+# Subdomain prefixes that *exclusively* belong to bulk / marketing /
+# transactional-notification mail. Any sender on one of these subdomains is
+# noise — companies do not route human correspondence through ``notify.*``
+# or ``marketing.*`` subdomains.
+_BULK_SUBDOMAIN_NOISE_RE = re.compile(
+    r"^(notify|notifications?|news|newsletter|marketing|updates?|alerts?|"
+    r"promo|promotions?|t|track|click|bounce|return)\.",
+    re.IGNORECASE,
+)
+
+# Subdomain prefixes commonly used by mail-sending infrastructure. These can
+# legitimately carry human or transactional mail (a company's primary mail
+# server is often ``mail.example.com``), so we only mark as ``informational``.
 _NOISE_DOMAIN_PREFIX_RE = re.compile(
-    r"^(em|email|mail|mailer|marketing|notify|notifications?|news|newsletter|"
-    r"updates?|alerts?|reply|bounce|t|track|click|smtp)\.",
+    r"^(em|email|mail|mailer|reply|smtp)\.",
     re.IGNORECASE,
 )
 
@@ -150,22 +163,44 @@ _NOISE_DOMAIN_SUFFIX = (
     "hsemail.com",
 )
 
-# Subject patterns that mark a message as digest / one-off transactional.
+# Subject patterns that mark a message as digest / one-off transactional /
+# user-initiated security confirmation. We deliberately keep this list broad:
+# the user can always promote a silenced item from the UI, but they cannot
+# easily un-flood a chat-thread list once junk lands there.
 _NOISE_SUBJECT_RE = re.compile(
-    r"\b("
-    r"(weekly|monthly|daily|quarterly)\s+digest|"
-    r"(weekly|monthly|daily)\s+(summary|update|recap|newsletter)|"
-    r"your\s+(weekly|monthly|daily)\s+\w+|"
-    r"unsubscribe|"
-    r"verify\s+your\s+email|"
-    r"confirm\s+your\s+(email|account)|"
-    r"reset\s+your\s+password|"
-    r"(otp|verification)\s+code|"
-    r"one[-\s]?time\s+(password|code)|"
-    r"thanks\s+for\s+(joining|signing\s+up|subscribing)|"
-    r"welcome\s+to\s+|"
-    r"new\s+(login|sign[-\s]?in)\s+from"
-    r")\b",
+    r"("
+    # Digests & periodic recaps.
+    r"\b(weekly|monthly|daily|quarterly)\s+digest\b|"
+    r"\b(weekly|monthly|daily)\s+(summary|update|recap|newsletter)\b|"
+    r"\byour\s+(weekly|monthly|daily)\s+\w+|"
+    r"\bunsubscribe\b|"
+    # Account / verification / password flows.
+    r"\bverify\s+your\s+(email|account|identity)\b|"
+    r"\bconfirm\s+your\s+(email|account|subscription)\b|"
+    r"\breset\s+your\s+password\b|"
+    r"\b(your\s+)?password\s+(was|has\s+been)\s+(changed|updated|reset)\b|"
+    r"\b(otp|verification)\s+code\b|"
+    r"\bone[-\s]?time\s+(password|code|pin)\b|"
+    r"\bthanks\s+for\s+(joining|signing\s+up|subscribing)\b|"
+    r"\bwelcome\s+to\s+|"
+    # Sign-in / device / passkey notifications. ``new sign-in to <product>`` and
+    # ``sign-in from <device>`` are both routine user-initiated confirmations.
+    r"\bnew\s+(login|sign[-\s]?in|sign[-\s]?on)\s+(from|to|on|detected)\b|"
+    r"\b(recent|unrecognized|unusual|suspicious)\s+(login|sign[-\s]?in)\b|"
+    r"\bsign[-\s]?in\s+(notification|alert|attempt)\b|"
+    r"\byou(\s+just|'?ve|\s+have)?\s+signed\s+in\b|"
+    r"\bsigned\s+in(\s+to|\s+on|\s+from)\b|"
+    r"\bpasskey\s+(was\s+)?(added|removed|enabled|disabled|created|deleted)\b|"
+    r"\b(was|has\s+been)\s+added\s+to\s+your\s+account\b|"
+    r"\b(security|account)\s+(alert|notification|update|activity)\b|"
+    r"\b(new|unrecognized|unknown)\s+device\b|"
+    r"\bdevice\s+(was\s+)?(added|connected|verified|removed|signed)\b|"
+    r"\b(your\s+)?(2fa|two[-\s]factor)\s+(is|was|has\s+been|code|enabled|disabled)\b|"
+    # Routine transactional receipts.
+    r"\b(your\s+)?(receipt|invoice|order)\s+(from|for|#)|"
+    r"\bpayment\s+(received|confirmation)\b|"
+    r"\bsubscription\s+(renewed|confirmed|activated)\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -246,8 +281,10 @@ def _heuristic_email_verdict(email: Email) -> Verdict:
     if sender and _NOISE_LOCAL_RE.search(sender):
         return Verdict(CATEGORY_NOISE, "no-reply / bulk local-part", SOURCE_HEURISTIC)
     if domain:
+        if _BULK_SUBDOMAIN_NOISE_RE.search(domain):
+            return Verdict(CATEGORY_NOISE, f"bulk-only subdomain: {domain}", SOURCE_HEURISTIC)
         if _NOISE_DOMAIN_PREFIX_RE.search(domain):
-            return Verdict(CATEGORY_INFORMATIONAL, f"marketing subdomain: {domain}", SOURCE_HEURISTIC)
+            return Verdict(CATEGORY_INFORMATIONAL, f"mail-infrastructure subdomain: {domain}", SOURCE_HEURISTIC)
         if _matches_any(domain, _NOISE_DOMAIN_SUFFIX):
             return Verdict(CATEGORY_INFORMATIONAL, f"known ESP/bulk domain: {domain}", SOURCE_HEURISTIC)
 
@@ -271,6 +308,8 @@ def heuristic_sender_is_noise(sender_email: str | None, raw_headers: dict | None
     if sender and _NOISE_LOCAL_RE.search(sender):
         return True
     domain = _domain(sender)
+    if domain and _BULK_SUBDOMAIN_NOISE_RE.search(domain):
+        return True
     if domain and _matches_any(domain, _NOISE_DOMAIN_SUFFIX):
         return True
     headers = _headers_lower(raw_headers)

@@ -20,7 +20,6 @@ from app.schemas.agent import AgentRunRead, AgentStepRead, PendingProposalRead
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
     AGENT_TOOLS,
-    EXECUTABLE_TOOL_NAMES,
     FINAL_ANSWER_TOOL_NAME,
 )
 from app.services.ai_providers import provider_kind_requires_api_key
@@ -30,200 +29,91 @@ from app.services.semantic_search_service import SemanticSearchService
 from app.services.user_ai_settings_service import UserAISettingsService
 
 # ---------------------------------------------------------------------------
-# Tool-name aliasing
+# Harness contract (OpenClaw-style: agent decides, code only plumbs)
 # ---------------------------------------------------------------------------
-# Small instruction-tuned models (notably Gemma 3/4 on Ollama) have heavy
-# RLHF priors that make them emit tool names from THEIR training (e.g.
-# ``google:search``) instead of the names we advertise. Rather than telling
-# the model "no, try again" and hoping it self-corrects (which Gemma in
-# particular doesn't reliably do — it just retries the same wrong name in
-# a tight loop), we accept a small set of well-known aliases and rewrite
-# them to the matching real tool name. This recovers gracefully for the
-# common confusions and is a no-op for everything else.
-TOOL_NAME_ALIASES: dict[str, str] = {
-    # Gemma's pretraining bias.
-    "google:search": "hybrid_rag_search",
-    "google_search": "hybrid_rag_search",
-    "websearch": "hybrid_rag_search",
-    "search": "hybrid_rag_search",
-    # Common abbreviations small models reach for.
-    "list_files": "list_drive_files",
-    "drive_list_files": "list_drive_files",
-    "list_drive": "list_drive_files",
-    "search_files": "search_drive",
-    "drive_search": "search_drive",
-    "get_file": "get_drive_file_text",
-    "read_file": "get_drive_file_text",
-    "list_emails": "search_emails",
-    "email_search": "search_emails",
-    "list_events": "list_calendar_events",
-    "calendar_list": "list_calendar_events",
-    # Final-answer aliases.
-    "answer": FINAL_ANSWER_TOOL_NAME,
-    "respond": FINAL_ANSWER_TOOL_NAME,
-    "reply": FINAL_ANSWER_TOOL_NAME,
-}
-
-
-def _resolve_tool_name(name: str | None) -> str | None:
-    """Map a possibly-aliased / case-mangled tool name to a real one, or
-    return ``None`` if no resolution is possible."""
-    if not name:
-        return None
-    if name in AGENT_TOOL_NAMES:
-        return name
-    lowered = name.lower().strip()
-    if lowered in AGENT_TOOL_NAMES:
-        return lowered
-    aliased = TOOL_NAME_ALIASES.get(lowered)
-    if aliased and aliased in AGENT_TOOL_NAMES:
-        return aliased
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Intent-based tool palette filtering
-# ---------------------------------------------------------------------------
-# Small local models (Gemma, Qwen 2.5 small, Llama 3.2 3B) struggle when given
-# 30 unrelated tool schemas — they routinely fall back to RLHF priors like
-# ``google:search`` instead of picking the right one. The fix is to look at
-# the artist's last user message and, when the intent is obvious, advertise
-# only the tools that are actually relevant. This dramatically lifts tool-
-# selection accuracy without needing a separate classifier model.
+# This module deliberately contains NO model-compensating logic — no tool-name
+# alias maps, no argument-shape coercion, no intent-keyword routing, no
+# "must-ground" gates, no consecutive-unknown-call loop breakers, no
+# data-tool-call budget shrinks. Those were all band-aids for weak local
+# models (Gemma 3B, Qwen 2.5 small) and they actively harm scalability:
+# every future tool would have to reason about each band-aid's interactions.
 #
-# Rules are intentionally conservative: when in doubt we fall back to the
-# full palette so the model never has access ripped away from it.
+# The harness is now a bare ReAct loop:
+#   1. Send the FULL tool palette + the conversation to the LLM.
+#   2. tool_choice="required" — every turn must end in a tool call.
+#   3. Execute every tool call the model issued, feed results back as
+#      role:"tool" messages.
+#   4. Stop when the model calls ``final_answer`` (the universal terminator)
+#      OR when ``settings.agent_max_tool_steps`` is reached.
+#
+# The agent picks tools by reading their ``description`` fields. Rich
+# descriptions are the ONLY knob for "the agent picks the right tool";
+# adding a tool is one edit (register it in ``AGENT_TOOLS`` with a
+# rich description) and the harness picks it up automatically.
+#
+# Two extension seams (see ``get_tool_palette`` and ``build_system_prompt``
+# below) are pure functions called once per ``run_agent`` invocation. Today
+# they return the universal default; tomorrow they're where per-tenant skill
+# toggles (artists vs businesses) and per-vertical personas plug in.
 
-_INTENT_TOOL_GROUPS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
-    # Drive / files / documents.
-    (
-        ("archivo", "archivos", "drive", "carpeta", "documento", "documentos",
-         "file", "files", "rider", "contrato", "pdf"),
-        ("list_drive_files", "search_drive", "get_drive_file_text",
-         "hybrid_rag_search"),
-    ),
-    # Email.
-    (
-        ("correo", "correos", "email", "emails", "mail", "mails",
-         "mensaje", "mensajes", "bandeja", "inbox"),
-        ("search_emails", "get_thread", "hybrid_rag_search"),
-    ),
-    # Calendar / agenda.
-    (
-        ("agenda", "calendario", "calendar", "evento", "eventos",
-         "cita", "citas", "agendado", "fecha", "fechas"),
-        ("list_calendar_events", "hybrid_rag_search"),
-    ),
-    # Connector / integration setup.
-    (
-        ("conectar", "conecta", "conexión", "conexion", "conectores",
-         "integración", "integracion", "google", "outlook", "spotify",
-         "instagram", "oauth"),
-        ("list_connectors", "start_connector_setup",
-         "submit_connector_credentials", "start_oauth_flow"),
-    ),
-    # Automations / preferences.
-    (
-        ("automatización", "automatizacion", "automatizaciones",
-         "regla", "reglas", "preferencia", "preferencias",
-         "siempre", "nunca", "no vuelvas", "recordar"),
-        ("create_automation", "list_automations", "update_automation",
-         "delete_automation"),
-    ),
-]
-
-
-def _select_tool_palette(
-    last_user_message: str,
-) -> list[dict[str, Any]]:
-    """Return the subset of AGENT_TOOLS that's relevant to the user's last
-    message. Always includes ``final_answer`` so the model can terminate.
-    Falls back to the full palette when no intent matches."""
-    if not last_user_message:
-        return AGENT_TOOLS
-    text = last_user_message.lower()
-
-    matched: set[str] = set()
-    for keywords, tools in _INTENT_TOOL_GROUPS:
-        if any(kw in text for kw in keywords):
-            matched.update(tools)
-
-    if not matched:
-        return AGENT_TOOLS
-
-    # Always include the terminator so we never strand the model.
-    matched.add(FINAL_ANSWER_TOOL_NAME)
-    return [t for t in AGENT_TOOLS if t["function"]["name"] in matched]
-
-
-def _normalize_tool_args(resolved_name: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Coerce common argument-shape variants to the canonical names each tool
-    expects. Pairs with ``_resolve_tool_name``: when we accept ``google:search``
-    as an alias for ``hybrid_rag_search``, we also need to accept its
-    ``{"queries": [...]}`` arg shape. Conservative: only rewrites keys that
-    are clearly synonymous, leaves everything else untouched."""
-    if not isinstance(args, dict):
-        return {}
-    out = dict(args)
-
-    if resolved_name == "hybrid_rag_search":
-        if "query" not in out:
-            if isinstance(out.get("queries"), list) and out["queries"]:
-                out["query"] = " ".join(str(q) for q in out["queries"])
-            elif isinstance(out.get("q"), str):
-                out["query"] = out.pop("q")
-            elif isinstance(out.get("text"), str):
-                out["query"] = out.pop("text")
-    elif resolved_name == "search_emails" or resolved_name == "search_drive":
-        if "q" not in out:
-            for k in ("query", "text", "search"):
-                if isinstance(out.get(k), str):
-                    out["q"] = out[k]
-                    break
-    elif resolved_name == FINAL_ANSWER_TOOL_NAME:
-        if "text" not in out:
-            for k in ("answer", "reply", "message", "content"):
-                if isinstance(out.get(k), str):
-                    out["text"] = out[k]
-                    break
-    return out
-
-# The agent uses the provider's NATIVE function/tool-calling API (see
-# ``LLMClient.chat_with_tools``), so the system prompt deliberately does NOT
-# enumerate tool schemas — those are passed as a typed ``tools=[]`` array,
-# which is dramatically more reliable than asking the model to author a
-# bespoke JSON envelope (especially for small local models like Gemma /
-# Qwen / Llama via Ollama). The prompt only carries persona + behavior
-# rules; the schemas live in ``agent_tools.AGENT_TOOLS``.
+# Universal ReAct contract — tool-agnostic. The model reads each tool's
+# ``description`` (set in ``app.services.agent_tools``) to know WHEN to use
+# it; this prompt only carries persona, language preference, and the four
+# rules of engagement that any harness needs.
 AGENT_SYSTEM = """You are the artist's personal operations manager (live music: festivals, concerts, venues, promoters). The artist is NON-TECHNICAL — never mention APIs, OAuth, RAG, embeddings, JSON, model names, or any internal implementation. Speak like a friendly colleague.
 
-You operate inside a chat app. The artist may be talking to you about a specific contact, deal, event or email (the thread title indicates this). When proactive notifications arrive ("Nuevo correo entrante de X"), you continue the conversation in that same thread.
+You operate inside a chat app. The artist may be talking to you about a specific contact, deal, event or email (the thread title indicates this). When proactive notifications arrive ("Nuevo correo entrante de X"), continue the conversation in that same thread.
 
-# How to respond — IMPORTANT
+# Rules of engagement
 
-Every assistant turn MUST end in a tool call. You have two kinds of tools:
+1. Every assistant turn MUST end in a tool call. The tools available to you this turn are listed in the ``tools`` array — pick from that list, using the exact name spelled in the schema.
+2. ``final_answer`` is the terminator: call it (exactly once) to deliver the user-facing reply. After ``final_answer`` the turn ends. Never write a free-form text reply outside ``final_answer`` — the artist will not see it.
+3. Ground factual claims with a tool BEFORE answering. For any question about the artist's data (files, contacts, deals, events, emails, calendar), or any preference / action the artist asks you to remember or perform, first call the tool whose ``description`` matches the request, then summarize its result in ``final_answer.text``. Never invent data that did not come from a tool result; never paraphrase what a previous turn said about that data — re-check with a tool every time.
+4. Reply in the same language the artist uses (default: Spanish). Be concise. Cite bare ids inline in ``final_answer.text`` (e.g. "(drive_file:7)") and/or in ``final_answer.citations``.
 
-1. Data/action tools — fetch information or perform actions on behalf of the artist (e.g. list_drive_files, search_emails, hybrid_rag_search, apply_create_contact, propose_connector_email_send, ...). Use these to GATHER data or DO things.
-2. final_answer — deliver the user-facing reply. Call this EXACTLY ONCE, when you are ready to talk to the artist. After final_answer the turn ends.
-
-You may call as many data/action tools as you need before calling final_answer. Never write a free-form text reply outside of final_answer — the artist will not see it.
-
-# Behavior rules
-
-- Always pick a tool from the provided tools list. Do NOT invent tool names — use the exact names spelled in the schema.
-- Always reply in the same language the artist uses (default: Spanish), inside `final_answer.text`.
-- For ANY factual question about the artist's own data (their files, contacts, deals, events, emails, calendar), you MUST first call a data tool to ground the answer. Never guess, never paraphrase from memory, and never repeat what a previous assistant turn said about that data — re-check with a tool every time.
-  - "¿Qué archivos tengo?" / "qué tengo en mi drive" → call list_drive_files (NOT list_files; the tool is named list_drive_files).
-  - "Busca el rider de X" / "encuéntrame el contrato" → call search_drive or hybrid_rag_search.
-  - "¿Qué correos tengo de X?" → call search_emails.
-  - "¿Qué tengo agendado?" → call list_calendar_events.
-  - General "¿qué sabes de X?" → call hybrid_rag_search.
-- After tools return, summarize the actual result in `final_answer.text`. If a tool result is empty, say so honestly ("No encontré archivos en tu Drive todavía, ¿quieres que conectemos Drive?"). Never invent files, names, or numbers that did not come from a tool result.
-- When the artist expresses a preference ("don't email X", "always CC bookings@..."), call create_automation IMMEDIATELY without asking, then call final_answer to confirm verbally ("Hecho — no volveré a escribir a X.").
-- Be concise. The artist is busy.
-- Cite bare ids inline in `final_answer.text` (e.g. "(drive_file:7)") and/or in `final_answer.citations`.
-- If a data tool result includes a `sync_health` field with `ok: false`, the underlying connector is failing to sync. Tell the artist what's broken in plain language (using the `summary` field) and that the data they're seeing may be stale or incomplete. Example: "Tu Drive está conectado pero la sincronización está fallando — necesito que reactives el acceso. Mientras tanto te muestro lo último que tengo guardado."
+When a tool result includes a ``sync_health`` field with ``ok: false``, tell the artist what is broken in plain language (use the ``summary`` field) and that the data they are seeing may be stale or incomplete.
 """
+
+
+def get_tool_palette(
+    user: User,
+    *,
+    tenant_hint: str | None = None,
+) -> list[dict[str, Any]]:
+    """Extension seam: which tool schemas to advertise to the agent this run.
+
+    Today: returns the full ``AGENT_TOOLS`` palette for everyone. The agent
+    picks the right tool by reading each tool's ``description``.
+
+    Tomorrow: this is where per-tenant skill toggles plug in (e.g. artists
+    get the Drive/calendar/email connector tools; businesses get a CRM-only
+    palette; a "starter" tier gets read-only tools). The function signature
+    accepts ``user`` and ``tenant_hint`` so per-user/per-vertical filtering
+    is a one-function change with no impact on the loop.
+    """
+    del user, tenant_hint  # explicit: today the palette is universal
+    return AGENT_TOOLS
+
+
+def build_system_prompt(
+    user: User,
+    *,
+    thread_context_hint: str | None = None,
+    tenant_hint: str | None = None,
+) -> str:
+    """Extension seam: assemble the system prompt for this run.
+
+    Today: returns the universal ``AGENT_SYSTEM`` plus an optional
+    thread-context line.
+
+    Tomorrow: per-vertical personas (artists vs businesses, English vs
+    Spanish defaults, B2B-formal vs B2C-friendly tone) can replace
+    ``AGENT_SYSTEM`` here without touching the loop.
+    """
+    del user, tenant_hint  # explicit: today the persona is universal
+    if thread_context_hint:
+        return f"{AGENT_SYSTEM}\n\nThread context: {thread_context_hint.strip()}"
+    return AGENT_SYSTEM
 
 
 # ---------------------------------------------------------------------------
@@ -1273,35 +1163,21 @@ class AgentService:
         is what we feed back to the model (and persist as the tool step).
         ``pending_proposal_or_None`` is set when the call created a row in
         ``pending_proposals`` so the caller can include it in the response.
-        """
-        original_name = call.name
-        raw_args = call.arguments if isinstance(call.arguments, dict) else {}
 
-        tool_name = _resolve_tool_name(original_name)
-        if tool_name is None:
-            # We couldn't even fuzzy-match the name. Feed back a hard error
-            # with the full list of valid names + the final_answer escape
-            # hatch so the model has the information needed to recover.
+        Tool names must match ``AGENT_TOOL_NAMES`` exactly. Argument shapes
+        must match the JSON schema. There is no aliasing or arg coercion —
+        if the model calls a tool incorrectly, it gets a structured error
+        back and is expected to retry with the correct call (the same way
+        any REST API would respond).
+        """
+        tool_name = call.name or ""
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+
+        if tool_name not in AGENT_TOOL_NAMES:
             return (
-                {
-                    "error": f"unknown tool {original_name!r} — call rejected.",
-                    "valid_tool_names": sorted(
-                        EXECUTABLE_TOOL_NAMES | {FINAL_ANSWER_TOOL_NAME}
-                    ),
-                    "hint": (
-                        "Your next tool call MUST use one of valid_tool_names "
-                        "spelled EXACTLY. If no listed tool fits the artist's "
-                        f"request, call {FINAL_ANSWER_TOOL_NAME!r} with a "
-                        "natural-language reply explaining what you can do."
-                    ),
-                },
+                {"error": f"unknown tool {tool_name!r}"},
                 None,
             )
-
-        # The caller (run_agent) already records the canonical name and
-        # normalized args in the agent step / role:"tool" message; here we
-        # just need the normalized args to actually invoke the handler.
-        args = _normalize_tool_args(tool_name, raw_args)
 
         try:
             if tool_name == "hybrid_rag_search":
@@ -1405,11 +1281,12 @@ class AgentService:
         db.add(run)
         await db.flush()
 
-        system_prompt = AGENT_SYSTEM
-        if thread_context_hint:
-            system_prompt = f"{AGENT_SYSTEM}\n\nThread context: {thread_context_hint.strip()}"
-
-        conversation: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        system_prompt = build_system_prompt(
+            user, thread_context_hint=thread_context_hint
+        )
+        conversation: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt}
+        ]
         if prior_messages:
             conversation.extend(
                 [
@@ -1435,69 +1312,23 @@ class AgentService:
                 )
             )
 
+        # The full tool palette is computed ONCE per run. Today
+        # ``get_tool_palette`` returns ``AGENT_TOOLS`` for every user; the
+        # extension seam is in place for future per-tenant skill toggles.
+        turn_tools = get_tool_palette(user)
+
         try:
             final_answer_text: str | None = None
-            consecutive_unknown_turns = 0
-            MAX_UNKNOWN_TURNS = 2
-            # Soft budget for data-gathering tool calls before we FORCE the
-            # model to terminate via final_answer. Small local models (Gemma
-            # in particular) tend to keep issuing search queries forever
-            # rather than recognising they have enough information; once we
-            # exceed this many real tool calls without a final_answer, we
-            # switch ``tool_choice`` to specifically require ``final_answer``
-            # so the model is structurally forced to wrap up.
-            data_tool_calls_made = 0
-            DATA_TOOL_CALL_BUDGET = 4
             for _ in range(settings.agent_max_tool_steps):
-                # Tool-palette strategy:
-                #  - default: an INTENT-FILTERED palette derived from the
-                #    artist's last message + tool_choice="required" so every
-                #    turn ends in a tool call (data tool or final_answer).
-                #    Filtering down the schema is critical for small models
-                #    (Gemma, Qwen 2.5 small) which otherwise default to
-                #    RLHF-baked-in names like ``google:search`` even when we
-                #    advertise the right tool.
-                #  - over-budget: SHRINK to ONLY final_answer so the model is
-                #    structurally forced to terminate. We can't rely on
-                #    OpenAI's specific-function tool_choice because Ollama
-                #    silently ignores it for Gemma; restricting the tools
-                #    array works on every provider we support.
-                turn_tools = _select_tool_palette(message)
-                turn_tool_choice: Any = "required"
-                if data_tool_calls_made >= DATA_TOOL_CALL_BUDGET:
-                    turn_tools = [
-                        t
-                        for t in turn_tools
-                        if t["function"]["name"] == FINAL_ANSWER_TOOL_NAME
-                    ] or [
-                        t
-                        for t in AGENT_TOOLS
-                        if t["function"]["name"] == FINAL_ANSWER_TOOL_NAME
-                    ]
-                    # Also append a brief instruction so the model knows
-                    # WHY the palette shrank and what it should do.
-                    last_msg = conversation[-1] if conversation else {}
-                    if last_msg.get("role") != "user" or "wrap up now" not in str(
-                        last_msg.get("content", "")
-                    ):
-                        conversation.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "You have gathered enough information. "
-                                    "Wrap up now: call final_answer with your "
-                                    "natural-language reply to the artist, in "
-                                    "Spanish. Do not call any other tool."
-                                ),
-                            }
-                        )
-
+                # Bare ReAct turn: full palette + tool_choice="required" so
+                # every turn ends in some tool call (a data/action tool or
+                # the ``final_answer`` terminator). The model decides which.
                 response = await LLMClient.chat_with_tools(
                     api_key or "",
                     settings_row,
                     messages=conversation,
                     tools=turn_tools,
-                    tool_choice=turn_tool_choice,
+                    tool_choice="required",
                     temperature=0.15,
                 )
                 step_idx += 1
@@ -1517,80 +1348,43 @@ class AgentService:
                     )
                 )
 
-                # tool_choice="required" should make this branch impossible,
-                # but some providers (or models without tool-call support)
-                # may still return text-only. Treat that as a "lazy text"
-                # answer and complete the run with the content so the artist
-                # at least sees something useful.
+                # ``tool_choice="required"`` should make this branch
+                # impossible, but some providers (or models without
+                # tool-call support) still return text-only. Accept that
+                # text as the final reply rather than failing the run.
                 if not response.has_tool_calls:
-                    fallback = (response.content or "").strip()
-                    if fallback:
-                        run.assistant_reply = fallback
-                        run.status = "completed"
-                    else:
-                        # Empty content AND no tool call — nudge once.
-                        conversation.append(_assistant_message_from(response))
-                        conversation.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "You returned an empty reply with no tool call. "
-                                    "Call a tool from the provided list — at minimum, "
-                                    "call final_answer with your reply text."
-                                ),
-                            }
-                        )
-                        continue
+                    run.assistant_reply = (response.content or "").strip()
+                    run.status = "completed"
                     break
 
                 conversation.append(_assistant_message_from(response))
 
-                # Execute every tool call in order. If we hit final_answer
-                # at any point in this batch, that becomes the run's reply
-                # and we terminate (after still recording any sibling tool
-                # results so the run history is complete).
-                turn_had_real_call = False
-                turn_had_unknown_call = False
+                # Execute every tool call in order. If ``final_answer``
+                # appears in this batch it becomes the run's reply and
+                # the loop terminates after the batch.
                 for call in response.tool_calls:
-                    # Resolve aliases up front so both the final_answer branch
-                    # and the dispatcher see the canonical name. ChatToolCall
-                    # is frozen, so we track the canonical name/args alongside
-                    # the original ``call`` instead of mutating it.
-                    resolved = _resolve_tool_name(call.name)
-                    canonical_name = resolved or (call.name or "unknown")
-                    canonical_args = _normalize_tool_args(
-                        resolved or "", call.arguments or {}
-                    )
-                    if resolved == FINAL_ANSWER_TOOL_NAME:
-                        text = str(canonical_args.get("text") or "").strip()
-                        citations = canonical_args.get("citations") or []
+                    tool_name = call.name or ""
+                    args = call.arguments if isinstance(call.arguments, dict) else {}
+                    if tool_name == FINAL_ANSWER_TOOL_NAME:
+                        text = str(args.get("text") or "").strip()
+                        citations = args.get("citations") or []
                         if not text:
-                            tool_result: dict[str, Any] = {
+                            result: dict[str, Any] = {
                                 "error": "final_answer requires a non-empty 'text' field"
                             }
-                            turn_had_unknown_call = True
+                            prop = None
                         else:
                             if isinstance(citations, list) and citations:
                                 cite_txt = ", ".join(str(c) for c in citations)
                                 final_answer_text = f"{text}\n\n— {cite_txt}"
                             else:
                                 final_answer_text = text
-                            tool_result = {"ok": True}
-                            turn_had_real_call = True
-                        result, prop = tool_result, None
+                            result = {"ok": True}
+                            prop = None
                     else:
                         result, prop = await AgentService._dispatch_tool(
                             db, user, run.id, thread_id, call
                         )
-                        if (
-                            isinstance(result, dict)
-                            and "valid_tool_names" in result
-                            and "error" in result
-                        ):
-                            turn_had_unknown_call = True
-                        else:
-                            turn_had_real_call = True
-                            data_tool_calls_made += 1
                     if prop is not None:
                         proposals_created.append(prop)
                     step_idx += 1
@@ -1599,15 +1393,15 @@ class AgentService:
                             run_id=run.id,
                             step_index=step_idx,
                             kind="tool",
-                            name=canonical_name,
-                            payload={"args": canonical_args, "result": result},
+                            name=tool_name,
+                            payload={"args": args, "result": result},
                         )
                     )
                     conversation.append(
                         {
                             "role": "tool",
                             "tool_call_id": call.id,
-                            "name": canonical_name,
+                            "name": tool_name,
                             "content": json.dumps(result, ensure_ascii=False)[:12000],
                         }
                     )
@@ -1615,27 +1409,6 @@ class AgentService:
                 if final_answer_text is not None:
                     run.assistant_reply = final_answer_text
                     run.status = "completed"
-                    break
-
-                # Loop-breaker: if the model burns multiple consecutive turns
-                # only producing unknown/invalid tool calls, abort gracefully
-                # with a helpful synthesized reply rather than letting the
-                # step budget exhaust silently. This was observed in the wild
-                # with Gemma 3/4 on Ollama, which has a strong RLHF prior to
-                # emit ``google:search`` and won't self-correct from the error.
-                if turn_had_unknown_call and not turn_had_real_call:
-                    consecutive_unknown_turns += 1
-                else:
-                    consecutive_unknown_turns = 0
-                if consecutive_unknown_turns >= MAX_UNKNOWN_TURNS:
-                    run.assistant_reply = (
-                        "Lo siento, no logré entender bien qué necesitas. "
-                        "¿Puedes reformular la pregunta o ser un poco más específico? "
-                        "Por ejemplo: \"qué archivos tengo en Drive\", \"búscame el "
-                        "rider de X\", \"qué correos tengo de Y\"."
-                    )
-                    run.status = "completed"
-                    run.error = "loop_breaker: model failed to call a valid tool"
                     break
 
             else:
