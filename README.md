@@ -75,6 +75,63 @@ Production-oriented MVP for a music artist CRM + future AI automation cockpit.
      -d '{"email":"admin@example.com","password":"password123"}'
    ```
 
+## Agent harness
+
+The agent runtime is a deliberately bare ReAct loop in the OpenClaw style:
+plumbing belongs to the harness, every product decision (which tool to call,
+what arguments to pass, when to stop gathering, when to terminate) belongs to
+the model.
+
+### Contract
+
+- `AgentService.run_agent` sends the **full** `AGENT_TOOLS` palette on every
+  turn with `tool_choice="required"`.
+- Every turn ends in a tool call. `final_answer` is the universal terminator —
+  calling it persists the natural-language reply and ends the run. The loop
+  also stops if `settings.agent_max_tool_steps` is reached (universal step
+  cap; failure surfaces as `error="Step budget exceeded"`).
+- Tool names must match `AGENT_TOOL_NAMES` exactly. Argument shapes must match
+  the JSON schema. There is no alias map and no argument coercion: a wrong
+  call comes back as a terse `{"error": "unknown tool '<name>'"}` (or the
+  tool's own validation error) and the model is expected to retry inside the
+  step budget — exactly like any REST API.
+
+### Adding a tool
+
+Adding a capability is a **one-edit** change: register an entry in
+`backend/app/services/agent_tools.py::AGENT_TOOLS` with a rich description in
+the OpenClaw "when to use / when not to use / inputs / outputs" pattern and
+wire its handler into `AgentService._dispatch_tool`. The harness picks the
+new tool up automatically on the next turn — no prompt updates, no router
+edits, no keyword maps. The description is the **only** knob the agent has
+for picking the right tool, so spend time on it.
+
+### Extension seams
+
+Two pure functions in `agent_service.py` are called once per `run_agent`
+invocation; the loop only knows about their return values:
+
+- `get_tool_palette(user, *, tenant_hint=None) -> list[dict]` — today
+  returns `AGENT_TOOLS` for everyone. This is where per-tenant skill toggles
+  plug in (artists vs businesses, "starter" tier, custom bundles), without
+  touching the loop.
+- `build_system_prompt(user, *, thread_context_hint=None, tenant_hint=None) -> str` —
+  today returns the universal `AGENT_SYSTEM` plus an optional thread-context
+  line. This is where per-vertical personas (artist's ops manager, business
+  account manager) plug in.
+
+### Recommended models
+
+Any provider that honors `tools=` and `tool_choice="required"` reliably
+works. Frontier models (GPT-4o-class, Claude Sonnet-class, Gemini Pro-class)
+read tool descriptions and pick the right tool every time. Small local models
+(Gemma 3B, Qwen 2.5 small, Llama 3.2 3B) will misbehave more visibly here
+than in older harnesses — by design: every model-compensating workaround was
+removed because each one was a permanent tax on every future tool. If a
+weaker model is in the loop and emits hallucinated tool names, the run will
+exhaust the step budget and fail; swap the model rather than re-introducing
+compensations.
+
 ## Notes
 
 - Optional agent / ingest behavior is centralized in `.env.example` (`AGENT_*`, `EMAIL_INGEST_AUTO_CREATE_DEALS`, sync poll limits).
