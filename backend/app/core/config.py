@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     jwt_secret: str = "change_me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    # POST /auth/register — disable after your account exists on a private instance.
+    registration_open: bool = Field(default=True, validation_alias="REGISTRATION_OPEN")
+    # Comma-separated lowercase domains (no @). Empty = any domain when registration_open is true.
+    registration_email_domain_allowlist: str = Field(
+        default="", validation_alias="REGISTRATION_EMAIL_DOMAIN_ALLOWLIST"
+    )
+    # 0 = unlimited. Set to 1 for single-tenant (only the first account may register).
+    registration_max_users: int = Field(default=0, ge=0, le=1_000_000, validation_alias="REGISTRATION_MAX_USERS")
     cors_origins: str = "http://localhost:3000,http://localhost:3002,http://127.0.0.1:3002"
     # Fernet key (urlsafe base64, 32 bytes). If unset, a deterministic key is derived from jwt_secret (dev only).
     fernet_encryption_key: str | None = None

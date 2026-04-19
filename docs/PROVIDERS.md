@@ -33,6 +33,14 @@ A single command exercises **the same code paths the agent uses**:
 docker compose exec backend python -m app.scripts.smoke_ai_provider
 ```
 
+If you have more than one user row, the script lists them and exits — pick one:
+
+```bash
+docker compose exec backend python -m app.scripts.smoke_ai_provider --list-users
+docker compose exec backend python -m app.scripts.smoke_ai_provider --user-id 1
+# or: --first  (uses lowest id; fine for quick local checks)
+```
+
 Output looks like this on success:
 
 ```

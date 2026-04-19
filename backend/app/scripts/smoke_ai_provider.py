@@ -26,7 +26,10 @@ the project venv + DATABASE_URL pointing at the live db)::
 
     python -m app.scripts.smoke_ai_provider --email me@example.com
 
-Use ``--user-id 1`` if you'd rather pick by id. Use ``--skip embeddings``
+Use ``--user-id 1`` if you'd rather pick by id. With **multiple** users,
+the script lists them and exits unless you pass ``--email``, ``--user-id``,
+or ``--first`` (lowest id, dev convenience). ``--list-users`` prints the
+table and exits. Use ``--skip embeddings``
 to skip a check (e.g. when the provider has no embedding model
 configured yet).
 """
@@ -343,7 +346,31 @@ async def _check_embeddings(api_key: str, settings_row: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
-async def _resolve_user(db: AsyncSession, *, email: str | None, user_id: int | None) -> User:
+async def _all_users_ordered(db: AsyncSession) -> list[User]:
+    res = await db.execute(select(User).order_by(User.id.asc()))
+    return list(res.scalars().all())
+
+
+def _print_user_choices(users: list[User]) -> None:
+    print(f"{_YELLOW}Multiple users in the database; pick one explicitly.{_RESET}\n")
+    for u in users:
+        print(f"  id={u.id}  email={u.email!r}")
+    print(
+        "\nExamples:\n"
+        "  python -m app.scripts.smoke_ai_provider --user-id 1\n"
+        "  python -m app.scripts.smoke_ai_provider --email you@example.com\n"
+        "  python -m app.scripts.smoke_ai_provider --first   # lowest id (dev only)\n"
+        "  python -m app.scripts.smoke_ai_provider --list-users"
+    )
+
+
+async def _resolve_user(
+    db: AsyncSession,
+    *,
+    email: str | None,
+    user_id: int | None,
+    first: bool,
+) -> User:
     if user_id is not None:
         row = await db.get(User, user_id)
         if row is None:
@@ -355,12 +382,20 @@ async def _resolve_user(db: AsyncSession, *, email: str | None, user_id: int | N
         if row is None:
             raise SystemExit(f"No user with email={email!r}")
         return row
-    # Fall back to the only user in single-user installs.
-    res = await db.execute(select(User).limit(2))
-    rows = res.scalars().all()
-    if len(rows) == 1:
-        return rows[0]
-    raise SystemExit("Multiple users exist; pick one with --email or --user-id.")
+    users = await _all_users_ordered(db)
+    if not users:
+        raise SystemExit("No users in the database.")
+    if len(users) == 1:
+        return users[0]
+    if first:
+        chosen = users[0]
+        print(
+            f"{_DIM}--first: using user id={chosen.id} ({chosen.email!r}); "
+            f"pass --user-id for a deterministic choice.{_RESET}"
+        )
+        return chosen
+    _print_user_choices(users)
+    raise SystemExit(2)
 
 
 def _row_as_settings_proxy(row: UserAIProviderConfig) -> Any:
@@ -477,9 +512,22 @@ def _ljust_visible(text: str, width: int) -> str:
 
 async def main_async(args: argparse.Namespace) -> int:
     skipped = set(args.skip or [])
+    if getattr(args, "list_users", False):
+        async with AsyncSessionLocal() as db:
+            users = await _all_users_ordered(db)
+        if not users:
+            print("No users in the database.")
+            return 2
+        print("Users (id, email):")
+        for u in users:
+            print(f"  {u.id}\t{u.email}")
+        return 0
+
     if args.all:
         async with AsyncSessionLocal() as db:
-            user = await _resolve_user(db, email=args.email, user_id=args.user_id)
+            user = await _resolve_user(
+                db, email=args.email, user_id=args.user_id, first=args.first
+            )
             configs = await AIProviderConfigService.list_configs(db, user)
             active = await AIProviderConfigService.get_active(db, user)
             print(f"User: {user.email} (id={user.id})  ·  {len(configs)} saved provider(s)")
@@ -501,7 +549,9 @@ async def main_async(args: argparse.Namespace) -> int:
         return 0
 
     async with AsyncSessionLocal() as db:
-        user = await _resolve_user(db, email=args.email, user_id=args.user_id)
+        user = await _resolve_user(
+            db, email=args.email, user_id=args.user_id, first=args.first
+        )
         settings_row = await UserAISettingsService.get_or_create(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user) or ""
 
@@ -569,6 +619,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--email", help="User email to test (defaults to the only user when there is one).")
     parser.add_argument("--user-id", type=int, help="User id to test.")
+    parser.add_argument(
+        "--first",
+        action="store_true",
+        help="When several users exist, use the lowest user id (prints a hint). For one-off dev smoke only.",
+    )
+    parser.add_argument(
+        "--list-users",
+        action="store_true",
+        help="Print all users (id, email) and exit 0 — no smoke checks.",
+    )
     parser.add_argument(
         "--skip",
         action="append",
