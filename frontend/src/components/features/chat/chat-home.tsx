@@ -27,6 +27,7 @@ export function ChatHome() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ kind: "ok" | "error"; text: string; action?: { label: string; onClick: () => void } } | null>(null);
   const push = usePushNotifications();
 
   const refreshThreads = useCallback(
@@ -49,6 +50,13 @@ export function ChatHome() {
   useEffect(() => {
     void refreshThreads();
   }, [refreshThreads]);
+
+  // Auto-dismiss the inline status message after a few seconds.
+  useEffect(() => {
+    if (!statusMessage) return;
+    const id = window.setTimeout(() => setStatusMessage(null), 6000);
+    return () => window.clearTimeout(id);
+  }, [statusMessage]);
 
   const visibleThreads = useMemo(
     () => threads.filter((t) => (showArchived ? t.archived : !t.archived)),
@@ -80,6 +88,129 @@ export function ChatHome() {
     });
   }, []);
 
+  /**
+   * After a destructive / state-changing mutation on the active thread,
+   * pick a sensible new active thread from the currently-visible list (or
+   * fall back to any non-archived row if nothing remains in view).
+   */
+  const pickNextActiveAfter = useCallback(
+    (allThreads: ChatThread[], removedId: number, archivedFlag: boolean) => {
+      const candidates = allThreads.filter(
+        (t) => t.id !== removedId && (archivedFlag ? t.archived : !t.archived)
+      );
+      const sorted = [...candidates].sort(threadSortFn);
+      return sorted[0]?.id ?? allThreads.find((t) => t.id !== removedId)?.id ?? null;
+    },
+    []
+  );
+
+  const onRenameThread = useCallback(
+    async (id: number, title: string) => {
+      try {
+        const updated = await apiFetch<ChatThread>(`/threads/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ title })
+        });
+        setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn));
+        setStatusMessage({ kind: "ok", text: "Conversación renombrada." });
+      } catch (err) {
+        setStatusMessage({
+          kind: "error",
+          text: err instanceof ApiError ? err.message : "No se pudo renombrar."
+        });
+        throw err;
+      }
+    },
+    []
+  );
+
+  const onTogglePinThread = useCallback(
+    async (id: number, next: boolean) => {
+      try {
+        const updated = await apiFetch<ChatThread>(`/threads/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ pinned: next })
+        });
+        setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn));
+        setStatusMessage({
+          kind: "ok",
+          text: next ? "Conversación fijada arriba." : "Fijación quitada."
+        });
+      } catch (err) {
+        setStatusMessage({
+          kind: "error",
+          text: err instanceof ApiError ? err.message : "No se pudo actualizar."
+        });
+      }
+    },
+    []
+  );
+
+  const onToggleArchiveThread = useCallback(
+    async (id: number, next: boolean) => {
+      try {
+        const updated = await apiFetch<ChatThread>(`/threads/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ archived: next })
+        });
+        setThreads((prev) => {
+          const merged = prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn);
+          // If the active thread just left the visible list, pick another.
+          if (id === activeId) {
+            const inView = merged.some((t) => t.id === id && (showArchived ? t.archived : !t.archived));
+            if (!inView) {
+              setActiveId(pickNextActiveAfter(merged, id, showArchived));
+            }
+          }
+          return merged;
+        });
+        setStatusMessage({
+          kind: "ok",
+          text: next ? "Conversación archivada." : "Conversación restaurada.",
+          action: next && !showArchived
+            ? {
+                label: "Ver archivadas",
+                onClick: () => {
+                  setShowArchived(true);
+                  setActiveId(id);
+                  void refreshThreads(true);
+                }
+              }
+            : undefined
+        });
+      } catch (err) {
+        setStatusMessage({
+          kind: "error",
+          text: err instanceof ApiError ? err.message : "No se pudo archivar."
+        });
+      }
+    },
+    [activeId, pickNextActiveAfter, refreshThreads, showArchived]
+  );
+
+  const onDeleteThread = useCallback(
+    async (id: number) => {
+      try {
+        await apiFetch<Record<string, never>>(`/threads/${id}`, { method: "DELETE" });
+        setThreads((prev) => {
+          const remaining = prev.filter((t) => t.id !== id);
+          if (id === activeId) {
+            setActiveId(pickNextActiveAfter(remaining, id, showArchived));
+          }
+          return remaining;
+        });
+        setStatusMessage({ kind: "ok", text: "Conversación eliminada." });
+      } catch (err) {
+        setStatusMessage({
+          kind: "error",
+          text: err instanceof ApiError ? err.message : "No se pudo eliminar."
+        });
+        throw err;
+      }
+    },
+    [activeId, pickNextActiveAfter, showArchived]
+  );
+
   const showPushBanner =
     push.status === "idle" &&
     typeof window !== "undefined" &&
@@ -90,8 +221,46 @@ export function ChatHome() {
     <div className="flex h-screen w-screen flex-col bg-slate-950 text-slate-100">
       <ChatTopBar
         title={activeThread?.title ?? "Mánager"}
+        activeThread={activeThread}
         onOpenDrawer={() => setDrawerOpen(true)}
+        onRenameThread={onRenameThread}
+        onTogglePinThread={onTogglePinThread}
+        onToggleArchiveThread={onToggleArchiveThread}
+        onDeleteThread={onDeleteThread}
       />
+      {statusMessage ? (
+        <div
+          className={`flex items-center justify-center gap-3 px-4 py-2 text-center text-xs ${
+            statusMessage.kind === "ok"
+              ? "bg-emerald-900/60 text-emerald-100"
+              : "bg-rose-900/60 text-rose-100"
+          }`}
+        >
+          <span>{statusMessage.text}</span>
+          {statusMessage.action ? (
+            <button
+              type="button"
+              onClick={() => {
+                statusMessage.action?.onClick();
+                setStatusMessage(null);
+              }}
+              className="rounded border border-white/30 px-2 py-0.5 text-[11px] font-medium hover:bg-white/10"
+            >
+              {statusMessage.action.label}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setStatusMessage(null)}
+            className="rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-white"
+            aria-label="Cerrar mensaje"
+          >
+            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <path d="M6 6l12 12M6 18 18 6" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
       {showPushBanner ? (
         <button
           onClick={push.enable}
@@ -125,6 +294,10 @@ export function ChatHome() {
             onCreateGeneral={async () => {
               await refreshThreads();
             }}
+            onRenameThread={onRenameThread}
+            onTogglePinThread={onTogglePinThread}
+            onToggleArchiveThread={onToggleArchiveThread}
+            onDeleteThread={onDeleteThread}
           />
         </aside>
         {/* Mobile drawer */}
@@ -148,6 +321,10 @@ export function ChatHome() {
                 onCreateGeneral={async () => {
                   await refreshThreads();
                 }}
+                onRenameThread={onRenameThread}
+                onTogglePinThread={onTogglePinThread}
+                onToggleArchiveThread={onToggleArchiveThread}
+                onDeleteThread={onDeleteThread}
               />
             </div>
             <button

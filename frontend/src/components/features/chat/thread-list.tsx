@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import type { ChatThread } from "@/types/api";
 
 import { LibraryDrawer } from "./library-drawer";
+import { ThreadActionsMenu } from "./thread-actions-menu";
 
 const KIND_BADGES: Record<string, string> = {
   contact: "👤",
@@ -32,7 +33,11 @@ export function ChatThreadList({
   loading,
   error,
   onPick,
-  onCreateGeneral
+  onCreateGeneral,
+  onRenameThread,
+  onTogglePinThread,
+  onToggleArchiveThread,
+  onDeleteThread
 }: {
   threads: ChatThread[];
   activeId: number | null;
@@ -40,8 +45,13 @@ export function ChatThreadList({
   error: string | null;
   onPick: (id: number) => void;
   onCreateGeneral: () => Promise<void> | void;
+  onRenameThread: (id: number, title: string) => Promise<void> | void;
+  onTogglePinThread: (id: number, next: boolean) => Promise<void> | void;
+  onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
+  onDeleteThread: (id: number) => Promise<void> | void;
 }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   const startNewThread = async () => {
     const created = await apiFetch<ChatThread>("/threads", {
@@ -75,29 +85,53 @@ export function ChatThreadList({
           {threads.map((t) => {
             const active = t.id === activeId;
             const badge = (t.entity_type && KIND_BADGES[t.entity_type]) || "💬";
+            const menuOpen = menuOpenId === t.id;
             return (
               <li key={t.id}>
-                <button
-                  onClick={() => onPick(t.id)}
-                  className={`flex w-full items-center gap-3 px-3 py-3 text-left transition ${
+                <div
+                  className={`group/row relative flex w-full items-center gap-3 px-3 py-3 transition ${
                     active ? "bg-indigo-600/20 text-white" : "text-slate-200 hover:bg-white/5"
                   }`}
                 >
-                  <span className="text-lg leading-none">{badge}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium">{t.title}</span>
-                      {t.pinned ? <span className="text-xs text-amber-300">★</span> : null}
+                  <button
+                    type="button"
+                    onClick={() => onPick(t.id)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <span className="text-lg leading-none">{badge}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">{t.title}</span>
+                        {t.pinned ? <span className="text-xs text-amber-300">★</span> : null}
+                      </span>
+                      <span className="block truncate text-xs text-slate-400">
+                        {t.kind === "entity" ? `${t.entity_type} · ` : ""}
+                        {timeShort(t.last_message_at)}
+                      </span>
                     </span>
-                    <span className="block truncate text-xs text-slate-400">
-                      {t.kind === "entity" ? `${t.entity_type} · ` : ""}
-                      {timeShort(t.last_message_at)}
-                    </span>
+                    {t.unread > 0 ? (
+                      <span className="rounded-full bg-indigo-500 px-2 py-0.5 text-xs">{t.unread}</span>
+                    ) : null}
+                  </button>
+                  <span
+                    className={
+                      menuOpen
+                        ? "ml-1 inline-flex"
+                        : "ml-1 hidden group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    }
+                  >
+                    <ThreadActionsMenu
+                      thread={t}
+                      variant="row"
+                      open={menuOpen}
+                      onOpenChange={(next) => setMenuOpenId(next ? t.id : null)}
+                      onRename={onRenameThread}
+                      onTogglePin={onTogglePinThread}
+                      onToggleArchive={onToggleArchiveThread}
+                      onDelete={onDeleteThread}
+                    />
                   </span>
-                  {t.unread > 0 ? (
-                    <span className="rounded-full bg-indigo-500 px-2 py-0.5 text-xs">{t.unread}</span>
-                  ) : null}
-                </button>
+                </div>
               </li>
             );
           })}

@@ -5,6 +5,9 @@ Endpoints:
 - ``POST   /threads`` — create a manual thread (or upsert an entity-bound one).
 - ``GET    /threads/{id}`` — read a single thread.
 - ``PATCH  /threads/{id}`` — pin/archive/title.
+- ``DELETE /threads/{id}`` — hard-delete the thread (cascades to chat_messages;
+  ``executed_actions.thread_id`` and ``attachments.thread_id`` are SET NULL by
+  the migration so audit history survives).
 - ``GET    /threads/{id}/messages`` — paginated message history.
 - ``POST   /threads/{id}/messages`` — append a user message and run the agent in this
   thread context. Persists both messages, returns the assistant reply with any inline
@@ -14,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -179,6 +182,28 @@ async def patch_thread(
     await db.commit()
     await db.refresh(row)
     return thread_to_read(row)
+
+
+@router.delete("/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_thread(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Hard-delete a chat thread owned by the calling user.
+
+    DB-level ``ON DELETE CASCADE`` on ``chat_messages.thread_id`` removes the
+    message history automatically. ``executed_actions.thread_id`` and
+    ``attachments.thread_id`` are ``SET NULL`` (see migration
+    ``0012_chat_artist_rework``), so audit history and uploaded files survive
+    the deletion.
+    """
+    row = await get_thread(db, current_user, thread_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
+    await db.delete(row)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{thread_id}/messages", response_model=list[MessageRead])

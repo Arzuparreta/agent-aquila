@@ -5,18 +5,32 @@ import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type { ChatThread } from "@/types/api";
+
+import { ThreadActionsMenu } from "./thread-actions-menu";
 
 /**
- * Compact bar with: hamburger (mobile only), title, inbox link with unread badge,
- * and a settings menu. Settings is tucked behind a small menu so the artist can't
- * accidentally open it in their pocket.
+ * Compact bar with: hamburger (mobile only), title, optional thread-actions
+ * menu for the active conversation, inbox link with unread badge, and an
+ * account/settings menu. The thread-actions surface is the only discoverable
+ * way to delete / archive / rename on mobile (no hover on touch).
  */
 export function ChatTopBar({
   title,
-  onOpenDrawer
+  activeThread,
+  onOpenDrawer,
+  onRenameThread,
+  onTogglePinThread,
+  onToggleArchiveThread,
+  onDeleteThread
 }: {
   title: string;
+  activeThread: ChatThread | null;
   onOpenDrawer: () => void;
+  onRenameThread: (id: number, title: string) => Promise<void> | void;
+  onTogglePinThread: (id: number, next: boolean) => Promise<void> | void;
+  onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
+  onDeleteThread: (id: number) => Promise<void> | void;
 }) {
   const { logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -52,6 +66,16 @@ export function ChatTopBar({
         </svg>
       </button>
       <div className="min-w-0 flex-1 truncate text-base font-semibold">{title}</div>
+      {activeThread ? (
+        <ThreadActionsMenu
+          thread={activeThread}
+          variant="bar"
+          onRename={onRenameThread}
+          onTogglePin={onTogglePinThread}
+          onToggleArchive={onToggleArchiveThread}
+          onDelete={onDeleteThread}
+        />
+      ) : null}
       <Link
         href="/inbox"
         className="relative rounded-md p-2 text-slate-300 hover:bg-white/5"
