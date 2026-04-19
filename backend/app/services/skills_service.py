@@ -1,25 +1,14 @@
-"""Filesystem-backed skill loader for the agent.
+"""Filesystem-backed skill loader (AgentSkills / OpenClaw-style folders).
 
-A "skill" is a short markdown file that describes a workflow the agent
-can run on demand — "triage Gmail inbox", "silence a sender", "weekly
-review". The agent calls ``list_skills`` to discover what is available
-and ``load_skill`` to read the full body before executing it.
-
-We deliberately keep this dead simple:
-- No DB rows, no per-user customization in v1. Skills live under
-  ``backend/skills/`` and ship with the app.
-- Filenames become slugs (``gmail-triage.md`` → ``gmail-triage``).
-- The first H1 (``# Title``) is the title; the first paragraph after
-  the H1 is the summary used in the listing.
-- Path traversal is rejected (slugs are restricted to a safe charset).
-
-The folder is configurable via ``settings.skills_dir`` so an admin can
-mount custom skills from a docker volume without rebuilding the image.
+Each skill is a directory ``<slug>/`` containing ``SKILL.md`` with optional YAML
+frontmatter (``name``, ``description``). Legacy flat ``*.md`` files in the
+skills root are still discovered for compatibility.
 """
+
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.core.config import settings
@@ -38,19 +27,34 @@ def _skills_dir() -> Path:
     return _DEFAULT_SKILLS_DIR
 
 
-@dataclass(frozen=True)
-class Skill:
-    slug: str
-    title: str
-    summary: str
-    body: str
+def _split_frontmatter(raw: str) -> tuple[dict[str, str], str]:
+    """Single-line-key YAML-style frontmatter only (OpenClaw-compatible subset)."""
+    text = raw.lstrip("\ufeff")
+    if not text.startswith("---"):
+        return {}, text
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}, text
+    fm_block = parts[1].strip()
+    body = parts[2].lstrip("\n")
+    meta: dict[str, str] = {}
+    for line in fm_block.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line:
+            k, _, v = line.partition(":")
+            key = k.strip()
+            val = v.strip().strip('"').strip("'")
+            if key:
+                meta[key] = val
+    return meta, body
 
 
-def _parse(slug: str, raw: str) -> Skill:
-    """Extract title (first ``# ...``) and summary (first non-empty paragraph after it)."""
+def _first_heading_and_summary(body: str, slug: str) -> tuple[str, str]:
     title = slug
     summary = ""
-    lines = raw.splitlines()
+    lines = body.splitlines()
     in_body = False
     para: list[str] = []
     for line in lines:
@@ -67,42 +71,85 @@ def _parse(slug: str, raw: str) -> Skill:
         summary = " ".join(para)
         if len(summary) > 240:
             summary = summary[:237].rstrip() + "…"
-    return Skill(slug=slug, title=title, summary=summary, body=raw)
+    return title, summary
+
+
+@dataclass(frozen=True)
+class Skill:
+    slug: str
+    title: str
+    summary: str
+    body: str
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+def _parse_skill_file(slug: str, raw: str) -> Skill:
+    meta, body = _split_frontmatter(raw)
+    title = (meta.get("name") or "").strip() or None
+    summary = (meta.get("description") or "").strip() or None
+    h1, para = _first_heading_and_summary(body, slug)
+    return Skill(
+        slug=slug,
+        title=title or h1,
+        summary=summary or para,
+        body=body.strip(),
+        metadata=meta,
+    )
 
 
 def list_skills() -> list[Skill]:
-    """Return every ``*.md`` file in the skills directory, parsed.
-
-    Skipped on missing folder so a fresh checkout that hasn't created
-    ``backend/skills/`` yet doesn't crash the agent.
-    """
     folder = _skills_dir()
     if not folder.exists():
         return []
+    root = folder.resolve()
     out: list[Skill] = []
+    seen: set[str] = set()
+
+    for path in sorted(folder.iterdir()):
+        if not path.is_dir():
+            continue
+        slug = path.name
+        if not _SLUG_RE.match(slug):
+            continue
+        smd = path / "SKILL.md"
+        if not smd.is_file():
+            continue
+        try:
+            raw = smd.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        out.append(_parse_skill_file(slug, raw))
+        seen.add(slug)
+
     for path in sorted(folder.glob("*.md")):
         slug = path.stem
-        if not _SLUG_RE.match(slug):
+        if not _SLUG_RE.match(slug) or slug in seen:
             continue
         try:
             raw = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        out.append(_parse(slug, raw))
+        out.append(_parse_skill_file(slug, raw))
+
+    out.sort(key=lambda s: s.slug)
     return out
 
 
 def load_skill(slug: str) -> Skill | None:
-    """Load a single skill body by slug, with a strict slug guard."""
     if not _SLUG_RE.match(slug or ""):
         return None
-    path = _skills_dir() / f"{slug}.md"
-    try:
-        # Reject path traversal: resolved path must remain inside the folder.
-        resolved = path.resolve()
-        if not str(resolved).startswith(str(_skills_dir().resolve())):
-            return None
-        raw = resolved.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    return _parse(slug, raw)
+    base = _skills_dir().resolve()
+    # Prefer <slug>/SKILL.md
+    dir_smd = (base / slug / "SKILL.md").resolve()
+    flat = (base / f"{slug}.md").resolve()
+    candidates = [dir_smd, flat]
+    for path in candidates:
+        try:
+            if not str(path).startswith(str(base)):
+                return None
+            if path.is_file():
+                raw = path.read_text(encoding="utf-8")
+                return _parse_skill_file(slug, raw)
+        except OSError:
+            continue
+    return None

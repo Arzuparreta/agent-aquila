@@ -1,3 +1,8 @@
+---
+name: gmail-triage
+description: Walk through unread Gmail in priority order and decide what to do with each message.
+---
+
 # Gmail triage
 
 Walk through unread Gmail in priority order and decide what to do with

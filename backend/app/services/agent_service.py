@@ -6,21 +6,18 @@ Drive, Outlook, Teams). Most writes auto-execute; only outbound email
 (send + reply) goes through the human-approval ``PendingProposal``
 flow. Memory and skills are the agent's own state.
 
-Harness contract (intentionally tiny):
+Harness contract:
 
-1. Send the FULL tool palette + the conversation to the LLM.
-2. ``tool_choice="required"`` — every turn must end in a tool call.
-3. Execute every tool call the model issued, feed results back as
-   ``role:"tool"`` messages.
-4. Stop when the model calls ``final_answer`` (the universal
-   terminator) OR when ``settings.agent_max_tool_steps`` is reached.
+1. Send the FULL tool palette + the conversation to the LLM (native
+   ``tools=`` parameter when the **native** harness is active; embedded JSON +
+   ``<tool_call>`` tags when **prompted** — see ``agent_harness``).
+2. Native path uses ``tool_choice="required"`` (honoured by cloud providers;
+   Ollama may ignore it — we auto-fallback to prompted once per run).
+3. Execute every tool call, feed results back (``role:"tool"`` for native;
+   ``role:"user"`` + ``<tool_response>`` for prompted).
+4. Stop when the model calls ``final_answer`` OR when ``settings.agent_max_tool_steps``.
 
-The agent picks tools by reading their ``description`` fields. There is
-NO model-compensating logic: no tool-name aliasing, no argument coercion,
-no "must-ground" gates, no consecutive-unknown-call loop breakers. Those
-were band-aids for weak local models and they actively harm scalability;
-when a tool is misused the model gets a structured error back and is
-expected to retry.
+Mis-invoked tools return structured errors; the model is expected to retry.
 """
 
 from __future__ import annotations
@@ -40,12 +37,19 @@ from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import AgentRunRead, AgentStepRead, PendingProposalRead
+from app.services.agent_harness.native import chat_turn_native
+from app.services.agent_harness.prompted import (
+    format_tool_results_for_prompt,
+    parse_tool_calls_from_content,
+)
+from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
 )
+from app.services.agent_workspace import build_system_prompt
 from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.connectors.calendar_adapters import (
     create_calendar_event,
@@ -74,38 +78,6 @@ _OUTLOOK_PROVIDERS = ("graph_mail",)
 _TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
 
 
-AGENT_SYSTEM = """You are the user's personal operations agent. The user is NON-TECHNICAL — never mention APIs, OAuth, JSON, model names, or any internal implementation. Speak like a friendly colleague.
-
-You operate inside a chat app and have full live access to the user's Gmail, Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams via the tools listed in this turn. You also have a small persistent memory (key/value scratchpad) for things the user wants you to remember across sessions, and a folder of skills (markdown recipes for common workflows).
-
-# Rules of engagement
-
-1. Every assistant turn MUST end in a tool call. The tools available to you this turn are listed in the ``tools`` array — pick from that list using the exact name spelled in the schema.
-2. ``final_answer`` is the terminator: call it (exactly once) to deliver the user-facing reply. After ``final_answer`` the turn ends. Never write a free-form text reply outside ``final_answer`` — the user will not see it.
-3. Ground factual claims with a tool BEFORE answering. For any question about the user's data (mail, calendar, files, Teams), or any preference / action the user asks you to remember or perform, first call the tool whose ``description`` matches the request, then summarize its result in ``final_answer.text``. Never invent data; never paraphrase what a previous turn said about that data — re-check with a tool every time.
-4. Reply in the same language the user uses (default: Spanish). Be concise. Cite bare ids inline in ``final_answer.text`` (e.g. "(gmail:msg_xyz)") and/or in ``final_answer.citations``.
-
-Almost every action runs immediately (label, mute, spam, archive, calendar, Drive). The ONLY exception is outbound email: ``propose_email_send`` and ``propose_email_reply`` create approval cards the user must tap before anything is sent. Never describe a sent reply as if it had already gone out.
-
-When you discover a stable preference or a useful fact about the user, save it via ``upsert_memory`` so future turns benefit. When facing a multi-step workflow you've handled before, check ``list_skills`` and ``load_skill`` for a matching recipe.
-
-# Gmail playbook
-
-The Gmail tools are thin wrappers over Google's search syntax — favour ``q=`` over fetching everything and filtering yourself.
-
-- "¿Tengo correos sin leer?" → ``gmail_list_messages`` with ``q="is:unread in:inbox"``, ``max_results=10``.
-- "Buscar correos de Bob de la última semana" → ``gmail_list_messages`` with ``q="from:bob newer_than:7d"``.
-- "Léeme este correo" (with ``gmail_msg`` in context) → ``gmail_get_message`` with that id and ``format="full"``.
-- "Archiva esto" → ``gmail_modify_message`` with ``remove_label_ids=["INBOX"]``.
-- "Márcalo como leído" → ``gmail_modify_message`` with ``remove_label_ids=["UNREAD"]``.
-- "Silencia a este remitente" → ``gmail_create_filter`` with ``criteria={"from": "<email>"}`` and ``action={"removeLabelIds": ["INBOX","UNREAD"]}``; then ``gmail_modify_thread`` to apply it to the current thread too.
-- "Mándalo a spam" → same filter shape but ``action={"addLabelIds":["SPAM"], "removeLabelIds":["INBOX"]}``.
-- "Borra esto" → ``gmail_trash_message`` (the user can still recover it from Gmail's trash).
-
-If a tool returns ``"error"`` containing ``gmail_rate_limited`` or ``upstream 429``, stop calling Gmail tools this turn and answer with a short note that Gmail is throttling and you'll retry shortly. Do NOT loop on the same tool — wait the suggested seconds.
-"""
-
-
 def get_tool_palette(
     user: User,
     *,
@@ -125,27 +97,30 @@ def get_tool_palette(
     return AGENT_TOOLS
 
 
-async def build_system_prompt(
-    db: AsyncSession,
-    user: User,
-    *,
-    thread_context_hint: str | None = None,
-    tenant_hint: str | None = None,
+def _conversation_trace_snapshot(
+    conversation: list[dict[str, Any]], *, max_items: int = 8, max_content: int = 4000
 ) -> str:
-    """Assemble the system prompt: persona + memory warmup + thread hint.
-
-    The memory warmup (top N rows from ``agent_memories``) is appended so
-    the model starts each turn knowing what it has already learned. This
-    is the OpenClaw-style "scratchpad in the prompt" trick.
-    """
-    del tenant_hint  # explicit: today the persona is universal
-    parts: list[str] = [AGENT_SYSTEM]
-    memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
-    if memory_blob:
-        parts.append(memory_blob)
-    if thread_context_hint:
-        parts.append(f"Thread context: {thread_context_hint.strip()}")
-    return "\n\n".join(parts)
+    """Compact JSON of recent messages for AgentRunStep diagnostics."""
+    tail = conversation[-max_items:]
+    slim: list[dict[str, Any]] = []
+    for m in tail:
+        role = m.get("role")
+        content = m.get("content")
+        if isinstance(content, str) and len(content) > max_content:
+            content = content[:max_content] + "…"
+        item: dict[str, Any] = {"role": role, "content": content}
+        tcalls = m.get("tool_calls")
+        if tcalls:
+            item["tool_calls_preview"] = []
+            for tc in tcalls[:16]:
+                if isinstance(tc, dict):
+                    fn = tc.get("function") or {}
+                    item["tool_calls_preview"].append({"name": fn.get("name")})
+        slim.append(item)
+    try:
+        return json.dumps(slim, ensure_ascii=False)[:12000]
+    except (TypeError, ValueError):
+        return "[]"
 
 
 def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
@@ -644,6 +619,7 @@ class AgentService:
             "title": s.title,
             "summary": s.summary,
             "body": s.body,
+            "metadata": s.metadata,
         }
 
     # ------------------------------------------------------------------
@@ -991,8 +967,19 @@ class AgentService:
         db.add(run)
         await db.flush()
 
+        turn_tools = get_tool_palette(user)
+        harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
+        effective = resolve_effective_mode(
+            harness_pref, settings_row.provider_kind, settings_row.chat_model
+        )
+        allow_native_fallback = effective == "native"
+
         system_prompt = await build_system_prompt(
-            db, user, thread_context_hint=thread_context_hint
+            db,
+            user,
+            tool_palette=turn_tools,
+            harness_mode=effective,
+            thread_context_hint=thread_context_hint,
         )
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
@@ -1020,19 +1007,66 @@ class AgentService:
                 )
             )
 
-        turn_tools = get_tool_palette(user)
-
         try:
             final_answer_text: str | None = None
             for _ in range(settings.agent_max_tool_steps):
-                response = await LLMClient.chat_with_tools(
-                    api_key or "",
-                    settings_row,
-                    messages=conversation,
-                    tools=turn_tools,
-                    tool_choice="required",
-                    temperature=0.15,
-                )
+                parse_errors: list[str] = []
+                if effective == "native":
+                    response = await chat_turn_native(
+                        api_key or "",
+                        settings_row,
+                        messages=conversation,
+                        tools=turn_tools,
+                        temperature=0.15,
+                    )
+                else:
+                    raw_text, finish_reason, raw_msg = await LLMClient.chat_completion_full(
+                        api_key or "",
+                        settings_row,
+                        messages=conversation,
+                        temperature=0.15,
+                    )
+                    calls, parse_errors = parse_tool_calls_from_content(raw_text)
+                    response = ChatResponse(
+                        content=raw_text,
+                        tool_calls=calls,
+                        raw_message=raw_msg,
+                        finish_reason=finish_reason,
+                    )
+
+                if (
+                    effective == "native"
+                    and allow_native_fallback
+                    and not response.has_tool_calls
+                    and (response.content or "").strip()
+                ):
+                    effective = "prompted"
+                    allow_native_fallback = False
+                    system_prompt = await build_system_prompt(
+                        db,
+                        user,
+                        tool_palette=turn_tools,
+                        harness_mode="prompted",
+                        thread_context_hint=thread_context_hint,
+                    )
+                    conversation[0] = {"role": "system", "content": system_prompt}
+                    raw_text, finish_reason, raw_msg = await LLMClient.chat_completion_full(
+                        api_key or "",
+                        settings_row,
+                        messages=conversation,
+                        temperature=0.15,
+                    )
+                    calls, parse_errors = parse_tool_calls_from_content(raw_text)
+                    response = ChatResponse(
+                        content=raw_text,
+                        tool_calls=calls,
+                        raw_message=raw_msg,
+                        finish_reason=finish_reason,
+                    )
+
+                if effective == "native" and response.has_tool_calls:
+                    allow_native_fallback = False
+
                 step_idx += 1
                 db.add(
                     AgentRunStep(
@@ -1046,6 +1080,11 @@ class AgentService:
                                 {"name": tc.name, "arguments": tc.arguments}
                                 for tc in response.tool_calls
                             ],
+                            "harness_mode": effective,
+                            "finish_reason": response.finish_reason,
+                            "raw_response_text": (response.content or "")[:20000],
+                            "raw_request_messages": _conversation_trace_snapshot(conversation),
+                            "tool_call_parse_errors": parse_errors,
                         },
                     )
                 )
@@ -1055,8 +1094,12 @@ class AgentService:
                     run.status = "completed"
                     break
 
-                conversation.append(_assistant_message_from(response))
+                if effective == "native":
+                    conversation.append(_assistant_message_from(response))
+                else:
+                    conversation.append({"role": "assistant", "content": response.content or ""})
 
+                tool_result_dicts: list[dict[str, Any]] = []
                 for call in response.tool_calls:
                     tool_name = call.name or ""
                     args = call.arguments if isinstance(call.arguments, dict) else {}
@@ -1064,7 +1107,7 @@ class AgentService:
                         text = str(args.get("text") or "").strip()
                         citations = args.get("citations") or []
                         if not text:
-                            result: dict[str, Any] = {
+                            result = {
                                 "error": "final_answer requires a non-empty 'text' field"
                             }
                             prop = None
@@ -1092,12 +1135,31 @@ class AgentService:
                             payload={"args": args, "result": result},
                         )
                     )
+                    tool_result_dicts.append(result if isinstance(result, dict) else {"result": result})
+                    if effective == "native":
+                        conversation.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.id,
+                                "name": tool_name,
+                                "content": json.dumps(result, ensure_ascii=False)[:12000],
+                            }
+                        )
+
+                executed_non_final = any(
+                    (c.name or "") != FINAL_ANSWER_TOOL_NAME for c in response.tool_calls
+                )
+                if (
+                    effective == "prompted"
+                    and response.tool_calls
+                    and (executed_non_final or final_answer_text is None)
+                ):
                     conversation.append(
                         {
-                            "role": "tool",
-                            "tool_call_id": call.id,
-                            "name": tool_name,
-                            "content": json.dumps(result, ensure_ascii=False)[:12000],
+                            "role": "user",
+                            "content": format_tool_results_for_prompt(
+                                response.tool_calls, tool_result_dicts
+                            ),
                         }
                     )
 

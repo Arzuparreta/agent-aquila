@@ -1,3 +1,8 @@
+---
+name: silence-sender
+description: Mute or spam a Gmail sender using filters and thread labels.
+---
+
 # Silence a Gmail sender
 
 Stop a sender from cluttering the inbox. The user can ask "silence

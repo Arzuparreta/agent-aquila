@@ -40,7 +40,7 @@ from app.services.ai_providers.adapters import (
     safe_list_models,
     test_connection as adapter_test_connection,
 )
-from app.services.user_ai_settings_service import UserAISettingsService
+from app.services.user_ai_settings_service import UserAISettingsService, coerce_harness_mode
 
 router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[Depends(get_current_user)])
 
@@ -121,6 +121,9 @@ async def get_providers() -> list[ProviderRead]:
                 model_list_is_deployments=definition.model_list_is_deployments,
                 chat_openai_compatible=definition.chat_openai_compatible,
                 supports_capability_filter=definition.supports_capability_filter,
+                suggested_chat_models=list(definition.suggested_chat_models)
+                if definition.suggested_chat_models
+                else None,
             )
         )
     return out
@@ -166,6 +169,7 @@ async def list_provider_configs(
     return ProviderConfigsResponse(
         active_provider_kind=active,
         ai_disabled=prefs.ai_disabled,
+        harness_mode=coerce_harness_mode(prefs),
         configs=[_row_to_read(r, active_kind=active) for r in rows],
     )
 

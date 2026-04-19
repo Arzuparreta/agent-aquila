@@ -14,7 +14,7 @@ type SkillFull = SkillSummary & { body: string };
 
 /**
  * Read-only viewer over the agent's skills folder
- * (``backend/skills/*.md``). Lists every recipe the agent can load via the
+ * (``backend/skills/<slug>/SKILL.md``). Lists every recipe the agent can load via the
  * ``load_skill`` tool. Skills are bundled with the deployment, not stored
  * per-user — editing happens in the repo.
  */

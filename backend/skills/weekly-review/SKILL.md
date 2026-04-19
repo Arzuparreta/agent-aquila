@@ -1,3 +1,8 @@
+---
+name: weekly-review
+description: Structured weekly digest from Gmail + calendar + memory (heartbeat-friendly).
+---
+
 # Weekly review
 
 A short, structured digest the agent can run on demand or from the

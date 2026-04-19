@@ -295,11 +295,20 @@ function ProviderInputs({
 
 function modelHelpText(provider: AIProvider, models: import("@/types/api").ModelInfo[], loading: boolean): string | undefined {
   if (loading) return undefined;
+  const hints =
+    provider.suggested_chat_models && provider.suggested_chat_models.length > 0
+      ? `Modelos sugeridos: ${provider.suggested_chat_models.join(", ")}.`
+      : null;
   if (models.length === 0) {
     if (provider.id === "ollama") {
-      return "No conseguimos listar tus modelos. Asegúrate de que Ollama está corriendo y prueba la conexión.";
+      return [
+        "No conseguimos listar tus modelos. Asegúrate de que Ollama está corriendo y prueba la conexión.",
+        hints
+      ]
+        .filter(Boolean)
+        .join(" ");
     }
-    return "Pulsa Probar conexión para refrescar la lista de modelos disponibles.";
+    return [hints, "Pulsa Probar conexión para refrescar la lista de modelos disponibles."].filter(Boolean).join(" ");
   }
-  return undefined;
+  return hints ?? undefined;
 }

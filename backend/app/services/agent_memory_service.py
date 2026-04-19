@@ -219,7 +219,7 @@ class AgentMemoryService:
     ) -> str:
         """Render the agent's most relevant memories as a markdown bullet list.
 
-        Used by ``agent_service.build_system_prompt`` to warm the chat
+        Used by ``agent_workspace.build_system_prompt`` to warm the chat
         with whatever the agent has already learned about this user. We
         sort high-importance memories first, then fill the remainder with
         the most recently updated rows.

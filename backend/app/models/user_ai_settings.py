@@ -38,6 +38,8 @@ class UserAISettings(Base, TimestampMixin):
     # User-level prefs.
     active_provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ai_disabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Agent tool-calling: auto (model heuristic), native (API tools), prompted (<tool_call> tags).
+    harness_mode: Mapped[str] = mapped_column(String(16), default="auto", nullable=False)
 
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror

@@ -14,6 +14,8 @@ All writes go through :class:`AIProviderConfigService` so the canonical
 
 from __future__ import annotations
 
+from typing import Literal
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,15 @@ from app.services.ai_provider_config_service import (
     ProviderConfigUpsert,
 )
 from app.services.ai_providers import normalize_provider_id
+
+HarnessMode = Literal["auto", "native", "prompted"]
+
+
+def coerce_harness_mode(row: UserAISettings) -> HarnessMode:
+    hm = getattr(row, "harness_mode", None) or "auto"
+    if hm in ("auto", "native", "prompted"):
+        return hm
+    return "auto"
 
 
 class UserAISettingsService:
@@ -53,6 +64,7 @@ class UserAISettingsService:
             ai_disabled=row.ai_disabled,
             has_api_key=False,  # Filled in by callers that have access to db; safe default.
             extras=row.extras,
+            harness_mode=coerce_harness_mode(row),
         )
 
     @staticmethod
@@ -68,6 +80,7 @@ class UserAISettingsService:
             ai_disabled=row.ai_disabled,
             has_api_key=bool(active and active.has_api_key),
             extras=row.extras,
+            harness_mode=coerce_harness_mode(row),
         )
 
     @staticmethod
@@ -92,6 +105,12 @@ class UserAISettingsService:
 
         if "ai_disabled" in data:
             prefs.ai_disabled = bool(data["ai_disabled"])
+
+        if "harness_mode" in data and data["harness_mode"] is not None:
+            hm = str(data["harness_mode"]).strip().lower()
+            if hm not in ("auto", "native", "prompted"):
+                raise ValueError(f"Invalid harness_mode: {data['harness_mode']!r}")
+            prefs.harness_mode = hm
 
         # Pick the target provider for this update. When the client doesn't
         # name one, we keep operating on the currently-active one (or fall

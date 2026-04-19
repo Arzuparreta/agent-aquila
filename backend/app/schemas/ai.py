@@ -28,6 +28,7 @@ class UserAISettingsRead(BaseModel):
     ai_disabled: bool
     has_api_key: bool
     extras: dict[str, Any] | None = None
+    harness_mode: Literal["auto", "native", "prompted"] = "auto"
 
 
 class UserAISettingsUpdate(BaseModel):
@@ -37,6 +38,7 @@ class UserAISettingsUpdate(BaseModel):
     chat_model: str | None = None
     classify_model: str | None = None
     ai_disabled: bool | None = None
+    harness_mode: Literal["auto", "native", "prompted"] | None = None
     api_key: str | None = Field(
         default=None,
         description="When set, replaces the stored key. Send empty string to clear.",
@@ -83,6 +85,7 @@ class ProviderRead(BaseModel):
     model_list_is_deployments: bool = False
     chat_openai_compatible: bool = True
     supports_capability_filter: bool = False
+    suggested_chat_models: list[str] | None = None
 
 
 # --- Test / list models request-response ------------------------------------
@@ -162,6 +165,7 @@ class ProviderConfigsResponse(BaseModel):
 
     active_provider_kind: str | None = None
     ai_disabled: bool = False
+    harness_mode: Literal["auto", "native", "prompted"] = "auto"
     configs: list[ProviderConfigRead] = Field(default_factory=list)
 
 

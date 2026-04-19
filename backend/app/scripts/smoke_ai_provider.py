@@ -9,12 +9,10 @@ means the harness will work end-to-end.
 It performs three independent checks, prints a per-check verdict, and
 exits with code 0 only if all three pass:
 
-1. **Tool calling** — the contract the agent depends on. We send a
-   minimal palette (``echo`` + ``final_answer``) with
-   ``tool_choice="required"``. Pass = the model returned at least one
-   tool call with a parseable name. (Raw HTTP / parsing errors fail
-   fast; a model that ignores ``required`` and returns plain text is
-   also a fail because the agent loop relies on it.)
+1. **Tool calling** — **native**: ``echo`` + ``final_answer`` with
+   ``tool_choice="required"``. **Ollama** also runs a **prompted** check
+   (``<tool_call>`` tags, no ``tools=``). Pass if either path succeeds.
+   The script prints the auto-resolved harness mode for the active chat model.
 2. **JSON mode** — what the inbox triage uses. We ask for a strict JSON
    verdict; pass = the response parses as JSON with the expected key.
 3. **Embeddings** — what RAG / semantic-search uses. We embed two short
@@ -47,6 +45,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
 from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
+from app.services.agent_harness.prompted import parse_tool_calls_from_content
+from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.ai_provider_config_service import AIProviderConfigService
 from app.services.ai_providers import get_provider, normalize_provider_id
 from app.services.embedding_client import EmbeddingClient
@@ -132,8 +132,8 @@ _TOOLS = [
 ]
 
 
-async def _check_tool_calling(api_key: str, settings_row: Any) -> bool:
-    print("Tool calling (agent contract)")
+async def _check_tool_calling_native(api_key: str, settings_row: Any) -> bool:
+    print("Tool calling — native (OpenAI tools + tool_choice=required)")
     try:
         resp = await LLMClient.chat_with_tools(
             api_key,
@@ -178,6 +178,52 @@ async def _check_tool_calling(api_key: str, settings_row: Any) -> bool:
             _fail(f"tool call {tc.name!r} has non-dict arguments: {tc.arguments!r}")
             return False
     _ok("all tool-call arguments parsed as dicts")
+    return True
+
+
+async def _check_tool_calling_prompted(api_key: str, settings_row: Any) -> bool:
+    """Smoke-test the text-based <tool_call> path used for weak Ollama models."""
+    print("Tool calling — prompted (<tool_call> tags, no tools= parameter)")
+    tools_blob = json.dumps(_TOOLS, ensure_ascii=False, indent=2)
+    sys = (
+        "You are a test harness. Invoke tools ONLY using this exact format:\n"
+        "<tool_call>\n"
+        '{"name": "TOOL_NAME", "arguments": { ... }}\n'
+        "</tool_call>\n\n"
+        "Available tools (JSON):\n"
+        f"{tools_blob}\n"
+        "Call `echo` with text \"ping\" first, then `final_answer` with text \"ok\"."
+    )
+    try:
+        raw, finish, _msg = await LLMClient.chat_completion_full(
+            api_key,
+            settings_row,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": "Run the echo then final_answer as instructed."},
+            ],
+            temperature=0.0,
+        )
+    except Exception as exc:
+        _fail("HTTP / parsing error during chat_completion_full (prompted path)", str(exc))
+        return False
+
+    calls, perr = parse_tool_calls_from_content(raw)
+    if perr:
+        _warn("prompted parser notes: " + "; ".join(perr[:3]))
+    if not calls:
+        _fail(
+            "no <tool_call> blocks parsed from model output",
+            f"finish_reason={finish!r} content={raw[:400]!r}",
+        )
+        return False
+    names = [c.name for c in calls]
+    _ok(f"parsed {len(calls)} prompted tool call(s): {names}; finish_reason={finish!r}")
+    for tc in calls:
+        if not isinstance(tc.arguments, dict):
+            _fail(f"tool call {tc.name!r} has non-dict arguments: {tc.arguments!r}")
+            return False
+    _ok("prompted path: all tool-call arguments are dicts")
     return True
 
 
@@ -351,7 +397,22 @@ async def _smoke_one_config(
     results: dict[str, bool | None] = {"tools": None, "json": None, "embeddings": None}
     if "tools" not in skipped:
         _section("[1/3] Tool calling")
-        results["tools"] = await _check_tool_calling(api_key, settings_row)
+        native_ok = await _check_tool_calling_native(api_key, settings_row)
+        prompted_ok = False
+        if normalize_provider_id(row.provider_kind) == "ollama":
+            _section("[1b/3] Tool calling (Ollama prompted path)")
+            prompted_ok = await _check_tool_calling_prompted(api_key, settings_row)
+        auto_mode = resolve_effective_mode("auto", row.provider_kind, row.chat_model)
+        print(f"  {_DIM}Harness auto-resolve for this model: {auto_mode}{_RESET}")
+        results["tools"] = native_ok or prompted_ok
+        if not results["tools"]:
+            _fail("tool calling failed (native and, for Ollama, prompted)")
+        elif (
+            normalize_provider_id(row.provider_kind) == "ollama"
+            and not native_ok
+            and prompted_ok
+        ):
+            _warn("native tool calling failed but prompted path passed — typical for qwen3 on Ollama")
     if "json" not in skipped:
         _section("[2/3] JSON mode")
         results["json"] = await _check_json_mode(api_key, settings_row)
@@ -455,6 +516,12 @@ async def main_async(args: argparse.Namespace) -> int:
     print(f"Classify model : {settings_row.classify_model or '(falls back to chat_model)'}")
     print(f"Embedding model: {settings_row.embedding_model or '(unset)'}")
     print(f"AI disabled    : {settings_row.ai_disabled}")
+    hm = getattr(settings_row, "harness_mode", None) or "auto"
+    print(f"Harness pref   : {hm}")
+    print(
+        "Harness effective: "
+        f"{resolve_effective_mode(hm, settings_row.provider_kind, settings_row.chat_model)}"
+    )
 
     if settings_row.ai_disabled:
         print(f"\n{_RED}AI is disabled for this user — flip the toggle in Settings → Modelo de IA.{_RESET}")
@@ -472,7 +539,16 @@ async def main_async(args: argparse.Namespace) -> int:
 
     if "tools" not in skipped:
         _section("[1/3] Tool calling")
-        results["tools"] = await _check_tool_calling(api_key, settings_row)
+        native_ok = await _check_tool_calling_native(api_key, settings_row)
+        prompted_ok = False
+        if provider_id == "ollama":
+            _section("[1b/3] Tool calling (Ollama prompted path)")
+            prompted_ok = await _check_tool_calling_prompted(api_key, settings_row)
+        results["tools"] = native_ok or prompted_ok
+        if not results["tools"]:
+            _fail("tool calling failed")
+        elif provider_id == "ollama" and not native_ok and prompted_ok:
+            _warn("native failed, prompted passed — typical for qwen3:8b on Ollama")
     if "json" not in skipped:
         _section("[2/3] JSON mode")
         results["json"] = await _check_json_mode(api_key, settings_row)

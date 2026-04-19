@@ -46,6 +46,8 @@ export type GmailMessagePart = {
   parts?: GmailMessagePart[];
 };
 
+export type HarnessMode = "auto" | "native" | "prompted";
+
 export type UserAISettings = {
   provider_kind: string;
   base_url: string | null;
@@ -55,6 +57,7 @@ export type UserAISettings = {
   ai_disabled: boolean;
   has_api_key: boolean;
   extras: Record<string, unknown> | null;
+  harness_mode: HarnessMode;
 };
 
 export type ProviderFieldType = "text" | "password" | "url" | "select";
@@ -86,6 +89,7 @@ export type AIProvider = {
   model_list_is_deployments?: boolean;
   chat_openai_compatible?: boolean;
   supports_capability_filter?: boolean;
+  suggested_chat_models?: string[] | null;
 };
 
 export type ProviderConfigRequest = {
@@ -145,6 +149,7 @@ export type ProviderConfig = {
 export type ProviderConfigsResponse = {
   active_provider_kind: string | null;
   ai_disabled: boolean;
+  harness_mode: HarnessMode;
   configs: ProviderConfig[];
 };
 

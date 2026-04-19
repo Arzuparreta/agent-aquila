@@ -71,7 +71,7 @@ Sending or replying **from the agent** is the only action that shows an approval
 
 | Path | Role |
 |------|------|
-| [`backend/`](backend/) | FastAPI, SQLAlchemy, Alembic, ARQ worker, `skills/` |
+| [`backend/`](backend/) | FastAPI, SQLAlchemy, Alembic, ARQ worker, `skills/`, `agent_workspace/` |
 | [`frontend/`](frontend/) | Next.js app |
 | [`docker-compose.yml`](docker-compose.yml) | `db`, `redis`, `backend`, `worker`, `frontend` |
 | [`.env.example`](.env.example) | Environment template |

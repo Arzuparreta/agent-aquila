@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api";
 import { isExtraField } from "@/lib/ai-providers";
 import {
   AIProvider,
+  HarnessMode,
   ListModelsResponse,
   ModelInfo,
   ProviderConfig,
@@ -82,6 +83,7 @@ export type UseProviderConfigsApi = {
   configs: ProviderConfig[];
   activeKind: string | null;
   aiDisabled: boolean;
+  harnessMode: HarnessMode;
 
   selectedKind: string | null;
   selectedConfig: ProviderConfig | null;
@@ -107,6 +109,7 @@ export type UseProviderConfigsApi = {
   setActive: (kind?: string) => Promise<void>;
   remove: (kind: string) => Promise<void>;
   setAIDisabled: (disabled: boolean) => Promise<void>;
+  setHarnessMode: (mode: HarnessMode) => Promise<void>;
   refreshModels: () => Promise<void>;
   reload: () => Promise<void>;
 };
@@ -131,6 +134,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [activeKind, setActiveKind] = useState<string | null>(null);
   const [aiDisabled, setAIDisabledState] = useState<boolean>(false);
+  const [harnessMode, setHarnessModeState] = useState<HarnessMode>("auto");
 
   const [selectedKind, setSelectedKind] = useState<string | null>(null);
   const [draftByKind, setDraftByKind] = useState<Record<string, ProviderDraft>>({});
@@ -197,6 +201,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
       setConfigs(data.configs);
       setActiveKind(data.active_provider_kind);
       setAIDisabledState(data.ai_disabled);
+      setHarnessModeState(data.harness_mode ?? "auto");
       // After reload, drop drafts for kinds whose saved row matches what we
       // just got back (the save probably succeeded). Keep drafts for kinds
       // that diverge so an in-flight edit isn't silently wiped.
@@ -427,6 +432,14 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     []
   );
 
+  const setHarnessMode = useCallback(async (mode: HarnessMode) => {
+    await apiFetch<unknown>("/ai/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ harness_mode: mode })
+    });
+    setHarnessModeState(mode);
+  }, []);
+
   const refreshModels = useCallback(async () => {
     if (!selectedKind) return;
     setLoadingModels(true);
@@ -469,6 +482,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     configs,
     activeKind,
     aiDisabled,
+    harnessMode,
     selectedKind,
     selectedConfig,
     selectedProvider,
@@ -491,6 +505,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     setActive,
     remove,
     setAIDisabled,
+    setHarnessMode,
     refreshModels,
     reload
   };

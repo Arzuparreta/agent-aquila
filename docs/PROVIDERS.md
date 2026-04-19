@@ -6,7 +6,7 @@ known to work end-to-end with the agent harness in this repo:
 | Tier              | Provider                       | Cost                       | Hardware            |
 | ----------------- | ------------------------------ | -------------------------- | ------------------- |
 | **Free cloud**    | Google AI Studio (Gemini 2.5)  | $0 (generous free tier)    | Anything            |
-| **Free local**    | Ollama (Qwen 2.5 7B)           | $0                         | RTX 3060 12GB ✅     |
+| **Free local**    | Ollama (watt-tool-8B / qwen3-coder) | $0                    | 8–24 GB VRAM tiered |
 | **Paid frontier** | OpenAI (GPT-5 / 4.1 / 4o)      | Pay-as-you-go              | Anything            |
 
 All three use the same `LLMClient.chat_with_tools` + `EmbeddingClient.embed_texts`
@@ -131,54 +131,47 @@ note that `pad_embedding()` will pad to 1536 — that's expected and harmless.
 
 ---
 
-## 2. Free local — Ollama + Qwen 2.5 7B (RTX 3060 12GB)
+## 2. Free local — Ollama (2026 tool-calling picks)
 
-The full local plan: nothing leaves your machine, no API keys anywhere. The
-combo below is the one the registry now defaults to and is sized for a
-12 GB GPU.
+Nothing leaves your machine; no API keys. Aquila uses a **dual harness**:
+
+- **Native** — OpenAI-style `tools=` + `tool_choice="required"` (works on cloud APIs and on Ollama with models that implement tool calling correctly).
+- **Prompted** — full tool JSON is embedded in the system prompt and the model emits `<tool_call>{"name":...,"arguments":...}</tool_call>` blocks. Used automatically for `qwen3` (non-coder) and Hermes-style models on Ollama when **Harness** is **Auto** (see [ollama#8421](https://github.com/ollama/ollama/issues/8421), [ollama#14601](https://github.com/ollama/ollama/issues/14601)).
+
+**Settings → Modo harness del agente**: `Auto` (recommended), `Native`, or `Prompted`.
+
+### Model tiers (VRAM ≈ Q4_K_M; verify on your GPU)
+
+| Tier | Model (`ollama pull …`) | Harness | Notes |
+|------|-------------------------|---------|--------|
+| 8 GB | `hengwen/watt-tool-8B` | native | BFCL-oriented 8B tool specialist; **registry default** chat/classify. |
+| 12 GB | `qwen3-coder:14b` | native | Strong coding + tool stack; Ollama’s 2026 engine improvements. |
+| 24 GB | `qwen3-coder:30b` | native | Heavier; best local quality/speed tradeoff if it fits. |
+| 8 GB | `allenporter/xlam:7b` | native | Salesforce xLAM family; action/tool-oriented. |
+| 8 GB | `qwen3:8b` | prompted | Base Qwen3 on Ollama: use **Auto** or **Prompted** — native `tools=` is unreliable until upstream fixes land. |
+| 8 GB | `hermes3:8b` | prompted | Nous Hermes; tag-style tool output — **Auto** selects prompted. |
+| 6 GB | `qwen2.5:7b-instruct` | native | Minimum “classic” instruct fallback; still solid for tool calling on many Ollama builds. |
+
+Reference benchmarks: [BFCL V4 leaderboard](http://gorilla.cs.berkeley.edu/leaderboard.html) (tool calling). Community notes: [OpenClaw + Ollama models 2026](https://clawdbook.org/blog/openclaw-best-ollama-models-2026).
 
 ### One-time install
 
-1. Install Ollama: <https://ollama.com/download> (Linux: `curl -fsSL https://ollama.com/install.sh | sh`).
-2. Make sure the daemon is running:
+1. Install Ollama: <https://ollama.com/download>.
+2. Daemon running: `curl -s http://localhost:11434/api/tags | jq .`
+3. Pull chat + embeddings (defaults in registry: watt-tool + nomic):
 
    ```bash
-   ollama serve &           # if not already running as a systemd unit
-   curl -s http://localhost:11434/api/tags | jq .
+   ollama pull hengwen/watt-tool-8B
+   ollama pull nomic-embed-text
    ```
-
-3. Pull the two models the registry defaults to:
-
-   ```bash
-   ollama pull qwen2.5:7b-instruct      # ~5 GB on disk, ~6 GB VRAM at Q4_K_M
-   ollama pull nomic-embed-text         # ~270 MB, 768-dim embeddings
-   ```
-
-   **Why these specifically?** `qwen2.5:7b-instruct` is the smallest model
-   in the Qwen 2.5 family that reliably honors the OpenAI-compat tool-calling
-   contract this harness depends on. Anything smaller (Gemma 3B/4B, Phi 3,
-   Llama 3.2 3B) will silently invent tool names and break the loop — the
-   agent has zero compensating shims by design (see the docstring at the top
-   of `app/services/agent_service.py`).
-
-   Stretch option if you have headroom: `ollama pull qwen2.5:14b-instruct`
-   (~9 GB VRAM at Q4 — tight on 12 GB, leave context short).
 
 ### Configure the app
 
-1. **Settings → Modelo de IA**.
-2. Provider: **Ollama**.
-3. Server URL:
-   - Backend running natively: `http://localhost:11434`
-   - Backend running in Docker (this repo's `docker-compose.yml`):
-     `http://host.docker.internal:11434` *(the compose file already maps
-     `host.docker.internal` to the host gateway via `extra_hosts`).*
-4. The form pre-fills with:
-   - Chat model: `qwen2.5:7b-instruct`
-   - Classify model: `qwen2.5:7b-instruct`
-   - Embedding model: `nomic-embed-text`
-5. **Probar conexión** should list every model you've pulled.
-6. **Guardar**.
+1. **Settings → Modelo de IA** → **Ollama**.
+2. Server URL: `http://localhost:11434` (host) or `http://host.docker.internal:11434` (backend in Docker).
+3. Chat model: start with `hengwen/watt-tool-8B` (or another row from the table).
+4. **Harness**: leave **Auto** unless you are debugging.
+5. **Probar conexión** → **Guardar**.
 
 ### Verify
 
@@ -186,32 +179,17 @@ combo below is the one the registry now defaults to and is sized for a
 docker compose exec backend python -m app.scripts.smoke_ai_provider
 ```
 
-Expected nuance:
-
-- **Tool calling**: `OK` for `qwen2.5:7b-instruct`. If you swapped in a
-  smaller model and see `model returned text instead of a tool call`, that
-  is the failure mode the harness was written to refuse to paper over —
-  switch back to a 7B+ tool-calling-capable model.
-- **JSON mode**: `OK`. Some Ollama builds reject `response_format=json_object`;
-  the smoke script auto-retries without it (the triage parser tolerates
-  loose JSON), so you may see a `WARN` line before the `OK`.
-- **Embeddings**: `OK`, dim 768, padded to 1536.
+- Prints **native** and, for Ollama, **prompted** tool checks. Either path may pass; **Auto** picks the right mode per model.
+- If native fails but prompted passes, you’ll see a `WARN` — that’s expected for `qwen3:8b`.
 
 ### Try it from the chat UI
 
-Same as the Gemini section. The first response will be slower than cloud
-models (5–15 s on a 3060 for `qwen2.5:7b-instruct` Q4) — that's the model
-inferring on your GPU, not a bug.
+First turn can take 5–20 s on a local GPU — normal.
 
 ### Tuning notes
 
-- Ollama keeps a model loaded in VRAM for `OLLAMA_KEEP_ALIVE` minutes after
-  the last request (default 5). For a single-user CRM that's perfect; bump
-  it (`OLLAMA_KEEP_ALIVE=60m`) if you find every prompt is paying re-load
-  cost.
-- If you want a smaller / faster classify model than the chat model, set
-  **Classify model** to e.g. `qwen2.5:3b-instruct` while keeping the chat
-  model on 7B. The harness will use it for inbox triage only.
+- `OLLAMA_KEEP_ALIVE` — keep the model loaded between turns.
+- **Classify model** can be smaller than chat if you split models (e.g. classify on CPU-light model).
 
 ---
 
@@ -296,7 +274,8 @@ Caveats:
   `backend/app/services/embedding_client.py`
 - Auto-padding to pgvector's 1536 dims:
   `backend/app/services/embedding_vector.py`
-- Agent harness contract (no compensating shims):
-  see the long docstring at the top of `backend/app/services/agent_service.py`
+- Agent workspace prompts: `backend/agent_workspace/` (`SOUL.md`, `AGENTS.md`)
+- Agent harness (native + prompted): `backend/app/services/agent_harness/` and
+  the loop in `backend/app/services/agent_service.py`
 - This smoke script:
   `backend/app/scripts/smoke_ai_provider.py`

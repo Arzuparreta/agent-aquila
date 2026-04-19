@@ -52,6 +52,8 @@ class ProviderDefinition:
     # If True, chat execution against this provider requires a custom client
     # because the HTTP shape is not OpenAI-compatible.
     chat_openai_compatible: bool = True
+    # Optional UI hints for chat model picks (Ollama pull names, etc.).
+    suggested_chat_models: tuple[str, ...] | None = None
 
 
 _API_KEY_FIELD = ProviderField(
@@ -107,11 +109,10 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
         id="ollama",
         label="Ollama",
         description=(
-            "Local models via Ollama. No API key required. Tested combo for the "
-            "agent loop on a 12GB GPU: qwen2.5:7b-instruct (chat) + "
-            "nomic-embed-text (embeddings, 768d auto-padded to 1536). "
-            "Pull them with `ollama pull qwen2.5:7b-instruct` and "
-            "`ollama pull nomic-embed-text`."
+            "Local models via Ollama. No API key required. For reliable native "
+            "tool calling use watt-tool-8B, qwen3-coder, or xLAM; qwen3 (non-coder) "
+            "uses the prompted harness automatically (see docs/PROVIDERS.md). "
+            "Embeddings: nomic-embed-text (768d, padded to 1536)."
         ),
         auth_kind="none",
         fields=(
@@ -126,11 +127,20 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
             ),
         ),
         default_base_url="http://localhost:11434",
-        default_chat_model="qwen2.5:7b-instruct",
+        default_chat_model="hengwen/watt-tool-8B",
         default_embedding_model="nomic-embed-text",
-        default_classify_model="qwen2.5:7b-instruct",
+        default_classify_model="hengwen/watt-tool-8B",
         test_strategy="ollama_tags",
         docs_url="https://ollama.com/download",
+        suggested_chat_models=(
+            "hengwen/watt-tool-8B",
+            "qwen3-coder:14b",
+            "qwen3-coder:30b",
+            "allenporter/xlam:7b",
+            "qwen3:8b",
+            "hermes3:8b",
+            "qwen2.5:7b-instruct",
+        ),
     ),
     ProviderDefinition(
         id="google",

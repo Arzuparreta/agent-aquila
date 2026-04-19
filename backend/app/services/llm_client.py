@@ -44,11 +44,13 @@ class ChatResponse:
     parsed function calls. ``raw_message`` is the unmodified ``message``
     object from the provider, useful for round-tripping back into the
     conversation history without losing provider-specific fields.
+    ``finish_reason`` is taken from ``choices[0].finish_reason`` when present.
     """
 
     content: str
     tool_calls: list[ChatToolCall] = field(default_factory=list)
     raw_message: dict[str, Any] = field(default_factory=dict)
+    finish_reason: str | None = None
 
     @property
     def has_tool_calls(self) -> bool:
@@ -83,6 +85,27 @@ class LLMClient:
         return str(response["choices"][0]["message"].get("content") or "")
 
     @staticmethod
+    async def chat_completion_full(
+        api_key: str,
+        settings_row: UserAISettings,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.2,
+    ) -> tuple[str, str | None, dict[str, Any]]:
+        """Chat completion without tools; returns content, finish_reason, raw message dict."""
+        body: dict[str, Any] = {
+            "model": model or settings_row.chat_model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        data = await LLMClient._post(api_key, settings_row, body=body)
+        choice = data["choices"][0]
+        message = choice.get("message") or {}
+        content = str(message.get("content") or "")
+        return content, choice.get("finish_reason"), dict(message)
+
+    @staticmethod
     async def chat_with_tools(
         api_key: str,
         settings_row: UserAISettings,
@@ -112,8 +135,11 @@ class LLMClient:
             "tool_choice": tool_choice,
         }
         data = await LLMClient._post(api_key, settings_row, body=body)
-        message = data["choices"][0]["message"]
-        return _parse_message(message)
+        choice = data["choices"][0]
+        message = choice["message"]
+        parsed = _parse_message(message)
+        parsed.finish_reason = choice.get("finish_reason")
+        return parsed
 
     @staticmethod
     async def _post(
@@ -181,7 +207,9 @@ def _parse_message(message: dict[str, Any]) -> ChatResponse:
                 raw_arguments=raw_args_str,
             )
         )
-    return ChatResponse(content=content, tool_calls=parsed, raw_message=dict(message))
+    return ChatResponse(
+        content=content, tool_calls=parsed, raw_message=dict(message), finish_reason=None
+    )
 
 
 def parse_json_object(text: str) -> dict[str, Any] | None:

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     # ``backend/skills/`` shipped with the app; override it to mount
     # a custom skill set from a docker volume without rebuilding.
     skills_dir: str = Field(default="", validation_alias="AQUILA_SKILLS_DIR")
+    # OpenClaw-style workspace (SOUL.md, AGENTS.md). Default: ``backend/agent_workspace``.
+    workspace_dir: str = Field(default="", validation_alias="AQUILA_WORKSPACE_DIR")
     # Heartbeat: when true, the worker runs ``agent_heartbeat`` every
     # ``agent_heartbeat_minutes`` minutes (defaults to off so freshly
     # cloned dev setups never spawn surprise LLM calls).

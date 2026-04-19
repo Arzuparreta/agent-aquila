@@ -72,6 +72,24 @@ export default function SettingsPage() {
                 />
                 Desactivar IA temporalmente
               </label>
+              <label className="flex flex-col gap-1 text-sm text-fg">
+                <span className="text-fg-muted">Modo harness del agente (herramientas)</span>
+                <select
+                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
+                  value={api.harnessMode}
+                  onChange={async (e) => {
+                    const v = e.target.value as "auto" | "native" | "prompted";
+                    await api.setHarnessMode(v);
+                  }}
+                >
+                  <option value="auto">Auto (recomendado — detecta Ollama qwen3/hermes)</option>
+                  <option value="native">Nativo (API tools + tool_choice)</option>
+                  <option value="prompted">Prompted (&lt;tool_call&gt; en texto)</option>
+                </select>
+                <span className="text-xs text-fg-subtle">
+                  Si un modelo local ignora tool calling, usa Auto o Prompted. Ver docs/PROVIDERS.md.
+                </span>
+              </label>
             </div>
 
             {api.loadError ? (
