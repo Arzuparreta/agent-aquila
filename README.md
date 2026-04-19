@@ -28,10 +28,21 @@ agent memory, a markdown-driven skills folder, and live OAuth tools for Gmail,
 Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams.
 
 There is no local mirror, no CRM, no triage classifier, no inbox machine
-learning. Every read goes straight to the upstream API; every write is either
-auto-applied (archive, label, mute, move to spam, calendar edits, file moves,
-Teams messages…) or — for the one truly destructive case, **sending email** —
-staged as a one-click human approval.
+learning. Every read goes straight to the upstream API and every write — label,
+archive, trash, mute, spam, create/update/delete calendar events, move/share
+Drive files, post to Teams chats, etc. — runs immediately against the live
+provider.
+
+The harness ships **one** approval gate out of the box, on outbound email
+(`email_send` / `email_reply`). That isn't because send is the only destructive
+thing the agent can do — it can already trash messages, delete events, post to
+channels, and so on without asking. It's because outbound email is the one
+write that's **visible to third parties and your reputation**, and an undo
+won't take it back. Everything else is auto-applied. If you don't want even
+that one gate, drop the entry from `_PROPOSAL_TOOLS` in
+[`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py).
+If you want more gates (e.g. delete-anything, post-to-Teams), add them the
+same way. The harness doesn't have a fixed opinion — you do.
 
 ## How it works
 
@@ -63,8 +74,9 @@ staged as a one-click human approval.
   files, share, move, trash. All auto-applied.
 - **Live Microsoft 365** — Outlook mail (read + write) and Teams messaging via
   Microsoft Graph. All auto-applied except sending email.
-- **Approval gate for sending email only.** Every other write executes
-  immediately; only `email_send` and `email_reply` are staged as proposals.
+- **One approval gate, on outbound email.** `email_send` and `email_reply`
+  produce a one-click approval card; every other write — trash, delete event,
+  post to channel, share file, etc. — auto-applies. Configurable per-tool.
 - **Persistent agent memory** — scratchpad with importance, tags and optional
   semantic recall.
 - **Skills folder** — markdown recipes the agent can list and load.
@@ -110,7 +122,12 @@ connectors** in the app and follow the on-page steps.
 | Post to Teams chats / channels                      | Auto-apply    |
 | Read of any kind                                    | Auto-apply    |
 
-Approvals live at `/proposals` and arrive as a card in the chat.
+Approvals live at `/proposals` and arrive as a card in the chat. The gate set
+isn't load-bearing — it's a one-line policy in
+[`backend/app/services/agent_tools.py`](backend/app/services/agent_tools.py)
+(`_PROPOSAL_TOOLS`) plus a matching kind in
+[`backend/app/services/capability_registry.py`](backend/app/services/capability_registry.py).
+Add or drop entries to make the agent more cautious or more autonomous.
 
 ## Choosing an AI model
 
