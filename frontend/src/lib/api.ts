@@ -94,8 +94,17 @@ async function readErrorPayload(
   return { message: raw, detail: undefined };
 }
 
+function readStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem("token");
+  } catch {
+    return null;
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const token = readStoredToken();
 
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -120,7 +129,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       (detail as Record<string, unknown>).kind === "needs_reauth";
 
     if (response.status === 401 && !isConnectorReauth && typeof window !== "undefined") {
-      localStorage.removeItem("token");
+      try {
+        localStorage.removeItem("token");
+      } catch {
+        /* ignore */
+      }
       window.location.href = "/login";
       throw new ApiError("Unauthorized", 401, detail);
     }

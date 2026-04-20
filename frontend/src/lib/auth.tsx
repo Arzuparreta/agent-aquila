@@ -18,19 +18,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authHydrated, setAuthHydrated] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("token");
-    if (stored) {
-      setTokenState(stored);
+    try {
+      const stored = localStorage.getItem("token");
+      if (stored) {
+        setTokenState(stored);
+      }
+    } catch {
+      // localStorage can throw (private mode, storage disabled, etc.); still unblock the shell.
+    } finally {
+      setAuthHydrated(true);
     }
-    setAuthHydrated(true);
   }, []);
 
   const setToken = (value: string | null) => {
     setTokenState(value);
-    if (value) {
-      localStorage.setItem("token", value);
-    } else {
-      localStorage.removeItem("token");
+    try {
+      if (value) {
+        localStorage.setItem("token", value);
+      } else {
+        localStorage.removeItem("token");
+      }
+    } catch {
+      // Persistence is best-effort; session still works for the current tab.
     }
   };
 
