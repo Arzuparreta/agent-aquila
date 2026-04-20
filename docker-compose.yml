@@ -97,6 +97,13 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    # The named volume hides image node_modules; an empty volume yields no `next` binary → exit 2 restart loop.
+    command:
+      [
+        "sh",
+        "-c",
+        "set -e; if [ ! -x node_modules/.bin/next ]; then echo 'frontend: populating node_modules volume...'; npm install; fi; exec npm run dev",
+      ]
     # Bind on all host interfaces so Tailscale/LAN IPs work (not only 127.0.0.1).
     # 3002 avoids clashing with other apps commonly bound to host :3000.
     ports:
