@@ -360,4 +360,6 @@ export type ChatSendResult = {
   user_message: ChatMessage;
   assistant_message: ChatMessage;
   error: string | null;
+  /** When true, poll ``GET /agent/runs/{assistant_message.agent_run_id}`` until completed/failed, then reload messages. */
+  agent_run_pending?: boolean;
 };

@@ -297,6 +297,23 @@ class GmailClient:
     async def untrash_thread(self, thread_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/threads/{thread_id}/untrash")
 
+    async def batch_modify_messages(
+        self,
+        *,
+        ids: list[str],
+        add_label_ids: list[str] | None = None,
+        remove_label_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """``messages.batchModify`` — up to 1000 ids per request (caller must chunk)."""
+        if not ids:
+            return {}
+        body: dict[str, Any] = {"ids": list(ids)}
+        if add_label_ids:
+            body["addLabelIds"] = list(add_label_ids)
+        if remove_label_ids:
+            body["removeLabelIds"] = list(remove_label_ids)
+        return await self._request("POST", "/messages/batchModify", json=body)
+
     # ------------------------------------------------------------------
     # Filters (requires gmail.settings.basic scope)
     # ------------------------------------------------------------------

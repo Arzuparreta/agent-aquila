@@ -23,9 +23,12 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.agent_run import AgentRun
+from app.models.chat_thread import ChatThread
 from app.models.user import User
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
+from app.services.chat_service import apply_agent_run_to_placeholder
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +111,69 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     logger.info("worker shutdown")
 
 
+async def run_chat_agent_turn(
+    ctx: dict[str, Any],
+    run_id: int,
+    user_id: int,
+    prior_messages: list[dict[str, str]] | None,
+    thread_context_hint: str | None,
+) -> dict[str, Any]:
+    """Background completion for ``POST /threads/{id}/messages`` (long agent turns)."""
+    del ctx
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await db.get(User, user_id)
+            run_row = await db.get(AgentRun, run_id)
+            if not user or not run_row or run_row.user_id != user_id:
+                logger.warning("run_chat_agent_turn skipped: missing user or run mismatch")
+                return {"ok": False, "reason": "not_found"}
+            if run_row.status != "pending":
+                return {"ok": True, "reason": "already_started", "status": run_row.status}
+            run_row.status = "running"
+            await db.commit()
+            read = await AgentService._execute_agent_loop(
+                db,
+                user,
+                run_row,
+                prior_messages=prior_messages,
+                thread_context_hint=thread_context_hint,
+                replay=None,
+            )
+            tid = run_row.chat_thread_id
+            if tid is None:
+                return {"ok": True, "run_id": run_id, "status": read.status}
+            thread = await db.get(ChatThread, tid)
+            if not thread or thread.user_id != user_id:
+                logger.warning("run_chat_agent_turn: thread %s missing for run %s", tid, run_id)
+                return {"ok": True, "run_id": run_id, "status": read.status}
+            await apply_agent_run_to_placeholder(
+                db, thread, agent_run_id=run_id, run_read=read
+            )
+            await db.commit()
+            return {"ok": True, "run_id": run_id, "status": read.status}
+    except Exception as exc:
+        logger.exception("run_chat_agent_turn failed run_id=%s", run_id)
+        try:
+            async with AsyncSessionLocal() as db:
+                user = await db.get(User, user_id)
+                run_row = await db.get(AgentRun, run_id)
+                if run_row and run_row.status not in ("completed", "failed"):
+                    run_row.status = "failed"
+                    run_row.error = (str(exc) or "Background agent job crashed.")[:2000]
+                    await db.commit()
+                if user and run_row and run_row.chat_thread_id:
+                    read = await AgentService.get_run(db, user, run_id)
+                    thread = await db.get(ChatThread, run_row.chat_thread_id)
+                    if read and thread and thread.user_id == user_id:
+                        await apply_agent_run_to_placeholder(
+                            db, thread, agent_run_id=run_id, run_read=read
+                        )
+                        await db.commit()
+        except Exception:
+            logger.exception("run_chat_agent_turn cleanup failed run_id=%s", run_id)
+        return {"ok": False, "run_id": run_id, "error": str(exc)[:200]}
+
+
 def _heartbeat_minutes() -> set[int]:
     step = max(1, min(60, settings.agent_heartbeat_minutes))
     return set(range(0, 60, step))
@@ -116,7 +182,7 @@ def _heartbeat_minutes() -> set[int]:
 class WorkerSettings:
     """ARQ discovers this class. Referenced as ``app.worker.WorkerSettings``."""
 
-    functions = [agent_heartbeat]
+    functions = [agent_heartbeat, run_chat_agent_turn]
     cron_jobs = [
         cron(agent_heartbeat, minute=_heartbeat_minutes(), run_at_startup=False),
     ]

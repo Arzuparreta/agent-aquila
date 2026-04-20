@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
 import type {
+  AgentRun,
   ChatMessage,
   ChatSendResult,
   ChatThread,
@@ -64,6 +65,25 @@ export function ChatThreadView({
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, sending]);
 
+  const pollAgentRunUntilDone = useCallback(
+    async (runId: number) => {
+      const terminal = new Set(["completed", "failed"]);
+      const maxTicks = 3000;
+      for (let i = 0; i < maxTicks; i++) {
+        const run = await apiFetch<AgentRun>(`/agent/runs/${runId}`);
+        if (terminal.has(run.status)) {
+          return run;
+        }
+        await new Promise((r) => window.setTimeout(r, 1200));
+      }
+      throw new ApiError(
+        "The assistant is still running after a long wait. Check that the worker container is up and Redis is reachable.",
+        408
+      );
+    },
+    []
+  );
+
   const retryFailedMessage = useCallback(
     async (failedMessageId: number) => {
       setSending(true);
@@ -78,6 +98,16 @@ export function ChatThreadView({
           return [...without, result.assistant_message];
         });
         onThreadUpdated(result.thread);
+        if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
+          setError(null);
+          try {
+            await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
+            await reload();
+          } catch (pollErr) {
+            setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.retryFailed"));
+          }
+          return;
+        }
         if (result.error) setError(result.error);
         else setError(null);
       } catch (err) {
@@ -86,7 +116,7 @@ export function ChatThreadView({
         setSending(false);
       }
     },
-    [thread.id, onThreadUpdated, t]
+    [thread.id, onThreadUpdated, pollAgentRunUntilDone, reload, t]
   );
 
   const onSend = useCallback(
@@ -113,6 +143,17 @@ export function ChatThreadView({
           return [...without, result.user_message, result.assistant_message];
         });
         onThreadUpdated(result.thread);
+        if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
+          setError(null);
+          refs.clear();
+          try {
+            await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
+            await reload();
+          } catch (pollErr) {
+            setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.sendFailed"));
+          }
+          return;
+        }
         if (result.error) setError(result.error);
         else setError(null);
         refs.clear();
@@ -124,7 +165,7 @@ export function ChatThreadView({
         setSending(false);
       }
     },
-    [thread.id, onThreadUpdated, refs, t]
+    [thread.id, onThreadUpdated, pollAgentRunUntilDone, refs, reload, t]
   );
 
   const updateMessage = useCallback((updated: ChatMessage) => {

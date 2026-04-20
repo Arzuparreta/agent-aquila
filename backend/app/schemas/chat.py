@@ -76,6 +76,9 @@ class MessageSendResult(BaseModel):
     user_message: MessageRead
     assistant_message: MessageRead
     error: str | None = None
+    #: When true, the assistant row is a placeholder; poll ``GET /agent/runs/{agent_run_id}``
+    #: until status is ``completed`` or ``failed``, then refresh thread messages.
+    agent_run_pending: bool = False
 
 
 class StartChatResponse(BaseModel):

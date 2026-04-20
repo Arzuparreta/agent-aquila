@@ -16,14 +16,14 @@ Endpoints:
 """
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
+from app.schemas.agent import AgentRunRead
 from app.schemas.chat import (
     MessageCreate,
     MessageRead,
@@ -32,12 +32,14 @@ from app.schemas.chat import (
     ThreadPatch,
     ThreadRead,
 )
+from app.services.agent_attachments import attachments_from_agent_run_read
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
-from app.services.capability_policy import risk_tier_for_kind
 from app.services.chat_service import (
     append_message,
+    apply_agent_run_to_placeholder,
     attachments_as_entity_refs,
+    get_message_by_agent_run,
     get_or_create_entity_thread,
     get_thread,
     get_thread_message,
@@ -51,9 +53,33 @@ from app.services.chat_service import (
     render_user_message,
     thread_to_read,
 )
-from app.services.pending_execution_service import preview_for_proposal_kind
+from app.services.job_queue import enqueue
 
 router = APIRouter(prefix="/threads", tags=["threads"], dependencies=[Depends(get_current_user)])
+
+_AGENT_REPLY_PLACEHOLDER = "\u2026"
+
+
+def _message_send_result(
+    thread,
+    user_msg,
+    asst_msg,
+    run,
+    *,
+    agent_run_pending: bool = False,
+) -> MessageSendResult:
+    cards = attachments_from_agent_run_read(run)
+    has_error_card = any(
+        isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
+        for c in cards
+    )
+    return MessageSendResult(
+        thread=thread_to_read(thread),
+        user_message=message_to_read(user_msg),
+        assistant_message=message_to_read(asst_msg),
+        error=run.error if (run.status != "completed" and not has_error_card) else None,
+        agent_run_pending=agent_run_pending,
+    )
 
 
 async def _build_thread_context_hint(db: AsyncSession, thread) -> str | None:
@@ -71,56 +97,6 @@ async def _build_thread_context_hint(db: AsyncSession, thread) -> str | None:
     return (
         f"Conversación dedicada al {thread.entity_type} #{thread.entity_id} ({thread.title})."
     )
-
-
-def _agent_run_to_attachments(run) -> list[dict[str, Any]]:
-    """Translate pending proposals and tool steps into inline chat cards.
-
-    Each card shape (frontend-aware):
-      - {"card_kind": "approval", "proposal_id": int, "kind": str, "summary": str,
-         "risk_tier": str, "preview": {...}}
-    Connector setup / oauth_authorize cards are emitted directly by the agent tools as
-    tool results; we surface those to the FE by inspecting agent steps. (The chat view
-    can also poll thread refs if the agent did not embed a card.)
-    """
-    out: list[dict[str, Any]] = []
-    for prop in run.pending_proposals or []:
-        out.append(
-            {
-                "card_kind": "approval",
-                "proposal_id": prop.id,
-                "kind": prop.kind,
-                "summary": prop.summary,
-                "risk_tier": prop.risk_tier or risk_tier_for_kind(prop.kind),
-                "preview": preview_for_proposal_kind(prop.kind, dict(prop.payload)),
-            }
-        )
-    # Surface any tool results that look like setup cards (connector_setup / oauth_authorize).
-    for step in run.steps or []:
-        if not step.payload:
-            continue
-        # Provider-error / key-decrypt steps emitted by the agent loop become
-        # inline chat cards so the UI can render the "Probar conexión" /
-        # "Abrir ajustes" affordances instead of dumping raw httpx text.
-        if step.kind == "provider_error" and isinstance(step.payload, dict):
-            payload = dict(step.payload)
-            payload.setdefault("card_kind", "provider_error")
-            out.append(payload)
-            continue
-        if step.kind == "key_decrypt_error" and isinstance(step.payload, dict):
-            payload = dict(step.payload)
-            payload.setdefault("card_kind", "key_decrypt_error")
-            out.append(payload)
-            continue
-        if step.kind != "tool":
-            continue
-        result = step.payload.get("result") if isinstance(step.payload, dict) else None
-        if isinstance(result, dict) and result.get("card_kind") in {
-            "connector_setup",
-            "oauth_authorize",
-        }:
-            out.append(result)
-    return out
 
 
 @router.get("", response_model=list[ThreadRead])
@@ -263,6 +239,92 @@ async def send_message(
         prior = prior[:-1]
 
     rendered = render_user_message(payload.content, payload.references)
+    hint = await _build_thread_context_hint(db, thread)
+
+    early = await AgentService.run_agent_invalid_preflight(
+        db, current_user, rendered, thread_id=thread.id
+    )
+    if early is not None:
+        cards = attachments_from_agent_run_read(early)
+        has_error_card = any(
+            isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
+            for c in cards
+        )
+        if early.assistant_reply:
+            assistant_text = early.assistant_reply
+        elif has_error_card:
+            assistant_text = ""
+        else:
+            assistant_text = early.error or ""
+        asst_msg = await append_message(
+            db,
+            thread,
+            role="assistant" if early.status == "completed" else "system",
+            content=assistant_text,
+            attachments=cards or None,
+            agent_run_id=early.id,
+        )
+        await db.commit()
+        await db.refresh(asst_msg)
+        await db.refresh(thread)
+        return _message_send_result(thread, user_msg, asst_msg, early)
+
+    use_async = settings.agent_async_runs and bool(settings.redis_url)
+    if use_async:
+        run_row = await AgentService.create_pending_agent_run(
+            db, current_user, rendered, thread_id=thread.id
+        )
+        asst_msg = await append_message(
+            db,
+            thread,
+            role="assistant",
+            content=_AGENT_REPLY_PLACEHOLDER,
+            agent_run_id=run_row.id,
+        )
+        await db.commit()
+        await db.refresh(asst_msg)
+        await db.refresh(thread)
+        enq = await enqueue(
+            "run_chat_agent_turn",
+            run_row.id,
+            current_user.id,
+            prior,
+            hint,
+            _job_id=f"agent_run:{run_row.id}",
+        )
+        if enq.get("queued"):
+            pending_read = AgentRunRead(
+                id=run_row.id,
+                status="pending",
+                user_message=rendered,
+                assistant_reply=None,
+                error=None,
+                root_trace_id=run_row.root_trace_id,
+                chat_thread_id=thread.id,
+                steps=[],
+                pending_proposals=[],
+            )
+            return _message_send_result(
+                thread, user_msg, asst_msg, pending_read, agent_run_pending=True
+            )
+        run_row.status = "running"
+        await db.commit()
+        read = await AgentService._execute_agent_loop(
+            db,
+            current_user,
+            run_row,
+            prior_messages=prior,
+            thread_context_hint=hint,
+            replay=None,
+        )
+        await apply_agent_run_to_placeholder(
+            db, thread, agent_run_id=run_row.id, run_read=read
+        )
+        await db.commit()
+        asst_final = await get_message_by_agent_run(db, thread, run_row.id)
+        assert asst_final is not None
+        await db.refresh(thread)
+        return _message_send_result(thread, user_msg, asst_final, read)
 
     run = await AgentService.run_agent(
         db,
@@ -270,16 +332,9 @@ async def send_message(
         rendered,
         prior_messages=prior,
         thread_id=thread.id,
-        thread_context_hint=await _build_thread_context_hint(db, thread),
+        thread_context_hint=hint,
     )
-
-    cards = _agent_run_to_attachments(run)
-    # When the agent loop already produced a structured error card
-    # (provider_error / key_decrypt_error), don't *also* dump `run.error` text
-    # into the message bubble or the top-of-thread banner — the card already
-    # shows message + actionable hint + a CTA, and duplicating it just clutters
-    # the conversation. Any partial assistant_reply produced before the failure
-    # is still rendered (preserving useful context).
+    cards = attachments_from_agent_run_read(run)
     has_error_card = any(
         isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
         for c in cards
@@ -290,7 +345,6 @@ async def send_message(
         assistant_text = ""
     else:
         assistant_text = run.error or ""
-
     asst_msg = await append_message(
         db,
         thread,
@@ -302,13 +356,7 @@ async def send_message(
     await db.commit()
     await db.refresh(asst_msg)
     await db.refresh(thread)
-
-    return MessageSendResult(
-        thread=thread_to_read(thread),
-        user_message=message_to_read(user_msg),
-        assistant_message=message_to_read(asst_msg),
-        error=run.error if (run.status != "completed" and not has_error_card) else None,
-    )
+    return _message_send_result(thread, user_msg, asst_msg, run)
 
 
 @router.post("/{thread_id}/messages/{message_id}/retry", response_model=MessageSendResult)
@@ -361,16 +409,102 @@ async def retry_failed_message(
     if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == user_msg.content:
         prior = prior[:-1]
 
+    hint = await _build_thread_context_hint(db, thread)
+
+    early = await AgentService.run_agent_invalid_preflight(
+        db, current_user, rendered, thread_id=thread.id
+    )
+    if early is not None:
+        cards = attachments_from_agent_run_read(early)
+        has_error_card = any(
+            isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
+            for c in cards
+        )
+        if early.assistant_reply:
+            assistant_text = early.assistant_reply
+        elif has_error_card:
+            assistant_text = ""
+        else:
+            assistant_text = early.error or ""
+        asst_msg = await append_message(
+            db,
+            thread,
+            role="assistant" if early.status == "completed" else "system",
+            content=assistant_text,
+            attachments=cards or None,
+            agent_run_id=early.id,
+        )
+        await db.commit()
+        await db.refresh(asst_msg)
+        await db.refresh(thread)
+        return _message_send_result(thread, user_msg, asst_msg, early)
+
+    use_async = settings.agent_async_runs and bool(settings.redis_url)
+    if use_async:
+        run_row = await AgentService.create_pending_agent_run(
+            db, current_user, rendered, thread_id=thread.id
+        )
+        asst_msg = await append_message(
+            db,
+            thread,
+            role="assistant",
+            content=_AGENT_REPLY_PLACEHOLDER,
+            agent_run_id=run_row.id,
+        )
+        await db.commit()
+        await db.refresh(asst_msg)
+        await db.refresh(thread)
+        enq = await enqueue(
+            "run_chat_agent_turn",
+            run_row.id,
+            current_user.id,
+            prior,
+            hint,
+            _job_id=f"agent_run:{run_row.id}",
+        )
+        if enq.get("queued"):
+            pending_read = AgentRunRead(
+                id=run_row.id,
+                status="pending",
+                user_message=rendered,
+                assistant_reply=None,
+                error=None,
+                root_trace_id=run_row.root_trace_id,
+                chat_thread_id=thread.id,
+                steps=[],
+                pending_proposals=[],
+            )
+            return _message_send_result(
+                thread, user_msg, asst_msg, pending_read, agent_run_pending=True
+            )
+        run_row.status = "running"
+        await db.commit()
+        read = await AgentService._execute_agent_loop(
+            db,
+            current_user,
+            run_row,
+            prior_messages=prior,
+            thread_context_hint=hint,
+            replay=None,
+        )
+        await apply_agent_run_to_placeholder(
+            db, thread, agent_run_id=run_row.id, run_read=read
+        )
+        await db.commit()
+        asst_final = await get_message_by_agent_run(db, thread, run_row.id)
+        assert asst_final is not None
+        await db.refresh(thread)
+        return _message_send_result(thread, user_msg, asst_final, read)
+
     run = await AgentService.run_agent(
         db,
         current_user,
         rendered,
         prior_messages=prior,
         thread_id=thread.id,
-        thread_context_hint=await _build_thread_context_hint(db, thread),
+        thread_context_hint=hint,
     )
-
-    cards = _agent_run_to_attachments(run)
+    cards = attachments_from_agent_run_read(run)
     has_error_card = any(
         isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
         for c in cards
@@ -381,7 +515,6 @@ async def retry_failed_message(
         assistant_text = ""
     else:
         assistant_text = run.error or ""
-
     asst_msg = await append_message(
         db,
         thread,
@@ -393,10 +526,4 @@ async def retry_failed_message(
     await db.commit()
     await db.refresh(asst_msg)
     await db.refresh(thread)
-
-    return MessageSendResult(
-        thread=thread_to_read(thread),
-        user_message=message_to_read(user_msg),
-        assistant_message=message_to_read(asst_msg),
-        error=run.error if (run.status != "completed" and not has_error_card) else None,
-    )
+    return _message_send_result(thread, user_msg, asst_msg, run)

@@ -50,6 +50,8 @@ Migrations run when the API starts. **First boot on an old database** may apply 
 | `backend` container **Exited (1)** right after `alembic upgrade head` | `docker logs <backend-container>` |
 | Log: **`StringDataRightTruncationError`**, **`character varying(32)`**, SQL mentions **`alembic_version`** | PostgreSQL’s `alembic_version.version_num` was too short for a migration’s `revision` string. **`backend/alembic/env.py`** widens that column automatically before upgrades; if the error returns, confirm that helper was not removed or bypassed. |
 | UI: **Server error (500)** and text about **Next.js proxy** / **`BACKEND_INTERNAL_URL`** | Usually the API never started—check **backend** logs first, not only `frontend`. |
+| Chat **stalls** on “…” after sending, or bulk Gmail tasks **never finish** | Ensure **`worker`** is running (`arq app.worker.WorkerSettings`), **`REDIS_URL`** is set, and **`AGENT_ASYNC_RUNS`** is not disabled. Chat agent turns are queued to the worker by default so long runs are not tied to a single HTTP request. |
+| **Step budget exceeded** | Raise **`AGENT_MAX_TOOL_STEPS`** (see `.env.example`) or use fewer tool rounds; **`gmail_trash_bulk_query`** clears an inbox in one tool for “delete everything”-style asks. |
 
 **Grep-friendly keywords for agents:** `StringDataRightTruncation`, `alembic_version`, `_widen_alembic_version_num`. Regression test: `backend/tests/test_alembic_version_column.py`.
 

@@ -1,9 +1,9 @@
 """Tiny ARQ enqueue helper.
 
-The ARQ worker registers only ``agent_heartbeat`` (see ``app.worker``).
-Connector setup does **not** enqueue mirror/sync jobs — Gmail, Calendar,
-and Drive reads go live to the provider. This helper is for future
-one-off background work.
+The worker registers ``agent_heartbeat`` and ``run_chat_agent_turn`` (see
+``app.worker``). Chat enqueues ``run_chat_agent_turn`` when
+``AGENT_ASYNC_RUNS`` is true and ``REDIS_URL`` is set so long agent turns
+do not block the HTTP request through the Next.js dev proxy.
 """
 from __future__ import annotations
 

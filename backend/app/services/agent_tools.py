@@ -311,6 +311,21 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         required=["thread_id"],
     ),
     _fn(
+        "gmail_trash_bulk_query",
+        "Trash **many** Gmail messages matching a search query using efficient "
+        "batch API calls (up to 1000 messages per request). Use when the user "
+        "wants to clear their inbox or delete everything matching a Gmail "
+        "search — **much** faster than ``gmail_trash_message`` in a loop. "
+        "Defaults to ``q='in:inbox'``. Hard cap ``max_messages`` (default 50000, "
+        "max 250000). Auto-applies. "
+        "Inputs: optional ``q``, ``connection_id``, ``max_messages``.",
+        {
+            **_CONNECTION_ID,
+            "q": {"type": "string"},
+            "max_messages": {"type": "integer", "minimum": 1, "maximum": 250000},
+        },
+    ),
+    _fn(
         "gmail_mark_read",
         "Convenience: remove the ``UNREAD`` label from a message OR thread. "
         "Auto-applies. Pass either ``message_id`` or ``thread_id``.",

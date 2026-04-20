@@ -21,7 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.models.user import User
+from app.schemas.agent import AgentRunRead
 from app.schemas.chat import EntityRef, MessageRead, ThreadRead
+from app.services.agent_attachments import attachments_from_agent_run_read
 
 # Maximum prior chat turns we hand to the LLM as conversation context. Older messages
 # are still persisted and visible to the artist, just not re-sent each turn.
@@ -293,6 +295,45 @@ def message_is_retriable_failed_turn(msg: ChatMessage) -> bool:
                 return True
         return False
     return msg.role == "system"
+
+
+async def get_message_by_agent_run(
+    db: AsyncSession, thread: ChatThread, agent_run_id: int
+) -> ChatMessage | None:
+    stmt = select(ChatMessage).where(
+        ChatMessage.thread_id == thread.id,
+        ChatMessage.agent_run_id == agent_run_id,
+    ).limit(1)
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def apply_agent_run_to_placeholder(
+    db: AsyncSession,
+    thread: ChatThread,
+    *,
+    agent_run_id: int,
+    run_read: AgentRunRead,
+) -> ChatMessage | None:
+    """Fill the assistant row created for an async agent run (placeholder ``\u2026``)."""
+    msg = await get_message_by_agent_run(db, thread, agent_run_id)
+    if not msg:
+        return None
+    cards = attachments_from_agent_run_read(run_read)
+    has_error_card = any(
+        isinstance(c, dict) and c.get("card_kind") in ("provider_error", "key_decrypt_error")
+        for c in cards
+    )
+    if run_read.assistant_reply:
+        msg.content = run_read.assistant_reply
+    elif has_error_card:
+        msg.content = ""
+    else:
+        msg.content = run_read.error or ""
+    msg.role = "assistant" if run_read.status == "completed" else "system"
+    msg.attachments = cards or None
+    thread.last_message_at = datetime.now(UTC)
+    await db.flush()
+    return msg
 
 
 def render_user_message(content: str, references: Iterable[EntityRef]) -> str:

@@ -375,6 +375,38 @@ class AgentService:
         return result
 
     @staticmethod
+    async def _tool_gmail_trash_bulk_query(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        q = str(args.get("q") or "in:inbox")
+        cap = min(max(int(args.get("max_messages") or 50_000), 1), 250_000)
+        client = await _gmail_client(db, row)
+        total = 0
+        page_token: str | None = None
+        capped = False
+        while total < cap:
+            page = await client.list_messages(page_token=page_token, q=q, max_results=500)
+            messages = page.get("messages") or []
+            ids = [str(m["id"]) for m in messages if isinstance(m, dict) and m.get("id")]
+            if not ids:
+                break
+            for i in range(0, len(ids), 1000):
+                chunk = ids[i : i + 1000]
+                await client.batch_modify_messages(ids=chunk, add_label_ids=["TRASH"])
+                total += len(chunk)
+                if total >= cap:
+                    capped = True
+                    break
+            if capped:
+                break
+            page_token = page.get("nextPageToken")
+            if not page_token:
+                break
+        gmail_cache_invalidate_connection(row.id)
+        return {"ok": True, "trashed_count": total, "q": q, "capped": capped}
+
+    @staticmethod
     async def _tool_gmail_mark_read(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
@@ -944,6 +976,7 @@ class AgentService:
         "gmail_trash_message": ("_tool_gmail_trash_message", False),
         "gmail_untrash_message": ("_tool_gmail_untrash_message", False),
         "gmail_trash_thread": ("_tool_gmail_trash_thread", False),
+        "gmail_trash_bulk_query": ("_tool_gmail_trash_bulk_query", False),
         "gmail_untrash_thread": ("_tool_gmail_untrash_thread", False),
         "gmail_mark_read": ("_tool_gmail_mark_read", False),
         "gmail_mark_unread": ("_tool_gmail_mark_unread", False),
@@ -1042,6 +1075,63 @@ class AgentService:
     # ReAct loop
     # ------------------------------------------------------------------
     @staticmethod
+    async def run_agent_invalid_preflight(
+        db: AsyncSession,
+        user: User,
+        message: str,
+        *,
+        thread_id: int | None = None,
+    ) -> AgentRunRead | None:
+        settings_row = await UserAISettingsService.get_or_create(db, user)
+        if settings_row.ai_disabled:
+            run = AgentRun(
+                user_id=user.id,
+                status="failed",
+                user_message=message,
+                error="AI is disabled for this user",
+                chat_thread_id=thread_id,
+            )
+            db.add(run)
+            await db.commit()
+            await db.refresh(run)
+            return AgentService._to_read(run, [], [])
+
+        api_key = await UserAISettingsService.get_api_key(db, user)
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
+            run = AgentRun(
+                user_id=user.id,
+                status="failed",
+                user_message=message,
+                error="API key not configured",
+                chat_thread_id=thread_id,
+            )
+            db.add(run)
+            await db.commit()
+            await db.refresh(run)
+            return AgentService._to_read(run, [], [])
+        return None
+
+    @staticmethod
+    async def create_pending_agent_run(
+        db: AsyncSession,
+        user: User,
+        message: str,
+        *,
+        thread_id: int | None = None,
+    ) -> AgentRun:
+        root_trace = new_trace_id()
+        run = AgentRun(
+            user_id=user.id,
+            status="pending",
+            user_message=message,
+            root_trace_id=root_trace,
+            chat_thread_id=thread_id,
+        )
+        db.add(run)
+        await db.flush()
+        return run
+
+    @staticmethod
     async def run_agent(
         db: AsyncSession,
         user: User,
@@ -1063,41 +1153,11 @@ class AgentService:
         ``replay``: when set, non-``final_answer`` tools consume scripted results from
           :class:`~app.services.agent_replay.AgentReplayContext` (regression tests).
         """
-        settings_row = await UserAISettingsService.get_or_create(db, user)
-        if settings_row.ai_disabled:
-            run = AgentRun(
-                user_id=user.id,
-                status="failed",
-                user_message=message,
-                error="AI is disabled for this user",
-            )
-            db.add(run)
-            await db.commit()
-            await db.refresh(run)
-            return AgentService._to_read(run, [], [])
-
-        api_key = await UserAISettingsService.get_api_key(db, user)
-        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
-            run = AgentRun(
-                user_id=user.id,
-                status="failed",
-                user_message=message,
-                error="API key not configured",
-            )
-            db.add(run)
-            await db.commit()
-            await db.refresh(run)
-            return AgentService._to_read(run, [], [])
-
-        turn_tools = get_tool_palette(user)
-        harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
-        effective = resolve_effective_mode(
-            harness_pref, settings_row.provider_kind, settings_row.chat_model
-        )
-        allow_native_fallback = effective == "native"
+        early = await AgentService.run_agent_invalid_preflight(db, user, message, thread_id=thread_id)
+        if early is not None:
+            return early
 
         root_trace = new_trace_id()
-        root_span = new_span_id()
         run = AgentRun(
             user_id=user.id,
             status="running",
@@ -1107,6 +1167,40 @@ class AgentService:
         )
         db.add(run)
         await db.flush()
+        return await AgentService._execute_agent_loop(
+            db,
+            user,
+            run,
+            prior_messages=prior_messages,
+            thread_context_hint=thread_context_hint,
+            replay=replay,
+        )
+
+    @staticmethod
+    async def _execute_agent_loop(
+        db: AsyncSession,
+        user: User,
+        run: AgentRun,
+        *,
+        prior_messages: list[dict[str, str]] | None = None,
+        thread_context_hint: str | None = None,
+        replay: AgentReplayContext | None = None,
+    ) -> AgentRunRead:
+        message = run.user_message
+        thread_id = run.chat_thread_id
+        settings_row = await UserAISettingsService.get_or_create(db, user)
+        api_key = await UserAISettingsService.get_api_key(db, user)
+        turn_tools = get_tool_palette(user)
+        harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
+        effective = resolve_effective_mode(
+            harness_pref, settings_row.provider_kind, settings_row.chat_model
+        )
+        allow_native_fallback = effective == "native"
+
+        root_trace = run.root_trace_id or new_trace_id()
+        if run.root_trace_id is None:
+            run.root_trace_id = root_trace
+        root_span = new_span_id()
 
         await emit_trace_event(
             db,
