@@ -1,5 +1,5 @@
 
-# Agent Aquila
+# Agent Aquila - Observable Life & Buisness Manager
 ```
         ⠀⠀⠀⠀⠀⠀⠀⠐⣶⠦⣄⣐⢤⡉⢷⡀⢹⡇⢠⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
         ⠀⠀⠀⠀⠀⠀⠀⠀⢹⣆⣯⣽⣿⣿⣷⣽⣦⣿⡌⣿⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
