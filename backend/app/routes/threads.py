@@ -16,6 +16,8 @@ Endpoints:
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +56,8 @@ from app.services.chat_service import (
     thread_to_read,
 )
 from app.services.job_queue import enqueue
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/threads", tags=["threads"], dependencies=[Depends(get_current_user)])
 
@@ -274,32 +278,38 @@ async def send_message(
         run_row = await AgentService.create_pending_agent_run(
             db, current_user, rendered, thread_id=thread.id
         )
+        run_id_snap = int(run_row.id)
+        root_trace_snap = run_row.root_trace_id
         asst_msg = await append_message(
             db,
             thread,
             role="assistant",
             content=_AGENT_REPLY_PLACEHOLDER,
-            agent_run_id=run_row.id,
+            agent_run_id=run_id_snap,
         )
         await db.commit()
         await db.refresh(asst_msg)
         await db.refresh(thread)
-        enq = await enqueue(
-            "run_chat_agent_turn",
-            run_row.id,
-            current_user.id,
-            prior,
-            hint,
-            _job_id=f"agent_run:{run_row.id}",
-        )
+        try:
+            enq = await enqueue(
+                "run_chat_agent_turn",
+                run_id_snap,
+                current_user.id,
+                prior,
+                hint,
+                _job_id=f"agent_run:{run_id_snap}",
+            )
+        except Exception:
+            logger.exception("failed to enqueue run_chat_agent_turn run_id=%s", run_id_snap)
+            enq = {"queued": False}
         if enq.get("queued"):
             pending_read = AgentRunRead(
-                id=run_row.id,
+                id=run_id_snap,
                 status="pending",
                 user_message=rendered,
                 assistant_reply=None,
                 error=None,
-                root_trace_id=run_row.root_trace_id,
+                root_trace_id=root_trace_snap,
                 chat_thread_id=thread.id,
                 steps=[],
                 pending_proposals=[],
@@ -307,6 +317,7 @@ async def send_message(
             return _message_send_result(
                 thread, user_msg, asst_msg, pending_read, agent_run_pending=True
             )
+        await db.refresh(run_row)
         run_row.status = "running"
         await db.commit()
         read = await AgentService._execute_agent_loop(
@@ -318,10 +329,10 @@ async def send_message(
             replay=None,
         )
         await apply_agent_run_to_placeholder(
-            db, thread, agent_run_id=run_row.id, run_read=read
+            db, thread, agent_run_id=run_id_snap, run_read=read
         )
         await db.commit()
-        asst_final = await get_message_by_agent_run(db, thread, run_row.id)
+        asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
         assert asst_final is not None
         await db.refresh(thread)
         return _message_send_result(thread, user_msg, asst_final, read)
@@ -444,32 +455,38 @@ async def retry_failed_message(
         run_row = await AgentService.create_pending_agent_run(
             db, current_user, rendered, thread_id=thread.id
         )
+        run_id_snap = int(run_row.id)
+        root_trace_snap = run_row.root_trace_id
         asst_msg = await append_message(
             db,
             thread,
             role="assistant",
             content=_AGENT_REPLY_PLACEHOLDER,
-            agent_run_id=run_row.id,
+            agent_run_id=run_id_snap,
         )
         await db.commit()
         await db.refresh(asst_msg)
         await db.refresh(thread)
-        enq = await enqueue(
-            "run_chat_agent_turn",
-            run_row.id,
-            current_user.id,
-            prior,
-            hint,
-            _job_id=f"agent_run:{run_row.id}",
-        )
+        try:
+            enq = await enqueue(
+                "run_chat_agent_turn",
+                run_id_snap,
+                current_user.id,
+                prior,
+                hint,
+                _job_id=f"agent_run:{run_id_snap}",
+            )
+        except Exception:
+            logger.exception("failed to enqueue run_chat_agent_turn run_id=%s", run_id_snap)
+            enq = {"queued": False}
         if enq.get("queued"):
             pending_read = AgentRunRead(
-                id=run_row.id,
+                id=run_id_snap,
                 status="pending",
                 user_message=rendered,
                 assistant_reply=None,
                 error=None,
-                root_trace_id=run_row.root_trace_id,
+                root_trace_id=root_trace_snap,
                 chat_thread_id=thread.id,
                 steps=[],
                 pending_proposals=[],
@@ -477,6 +494,7 @@ async def retry_failed_message(
             return _message_send_result(
                 thread, user_msg, asst_msg, pending_read, agent_run_pending=True
             )
+        await db.refresh(run_row)
         run_row.status = "running"
         await db.commit()
         read = await AgentService._execute_agent_loop(
@@ -488,10 +506,10 @@ async def retry_failed_message(
             replay=None,
         )
         await apply_agent_run_to_placeholder(
-            db, thread, agent_run_id=run_row.id, run_read=read
+            db, thread, agent_run_id=run_id_snap, run_read=read
         )
         await db.commit()
-        asst_final = await get_message_by_agent_run(db, thread, run_row.id)
+        asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
         assert asst_final is not None
         await db.refresh(thread)
         return _message_send_result(thread, user_msg, asst_final, read)
