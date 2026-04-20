@@ -6,8 +6,9 @@ description: Mute or spam a Gmail sender using filters and thread labels.
 # Silence a Gmail sender
 
 Stop a sender from cluttering the inbox. The user can ask "silence
-X", "mute this sender", or "send X to spam". Pick the right tool
-based on the verb they used.
+X", "mute this sender", or "send X to spam". Prefer
+``gmail_silence_sender`` when you have the sender email (and optional
+``thread_id`` / ``message_id`` for spam on the open thread).
 
 ## Mute (default — non-destructive)
 
@@ -15,27 +16,29 @@ Mute hides future threads from this sender from the inbox without
 deleting anything. Use when the user says "silenciar" / "mute" /
 "ignore for now".
 
-1. Call ``gmail_create_filter`` with:
-   - ``criteria.from`` = the sender's email address.
-   - ``action.removeLabelIds`` = ``["INBOX"]``.
-   - Optionally also ``action.addLabelIds`` = ``["MUTED"]`` if the
-     ``MUTED`` label exists (check via ``gmail_list_labels``).
+1. Call ``gmail_silence_sender`` with ``email`` = sender address and
+   ``mode="mute"`` (default), **or** ``gmail_create_filter`` with
+   ``criteria.from`` and ``action.removeLabelIds`` = ``["INBOX","UNREAD"]``.
 2. Confirm in chat which sender was silenced and how to undo it
    (Settings → Filters in Gmail).
 
-## Spam (destructive — sender goes to spam)
+## Spam (moves current mail to Spam; future mail skips inbox)
 
 Use when the user says "spam", "block", or "report as spam".
 
-1. For the *current* thread, call ``gmail_modify_thread`` with
-   ``addLabelIds=["SPAM"]`` and ``removeLabelIds=["INBOX"]`` so the
-   visible message moves immediately.
-2. Create a filter so future messages skip the inbox and go straight
-   to spam:
-   ``gmail_create_filter`` with ``criteria.from`` = sender,
-   ``action.addLabelIds`` = ``["SPAM"]``,
-   ``action.removeLabelIds`` = ``["INBOX"]``.
-3. Confirm to the user; both actions auto-apply (no proposal).
+Gmail **rejects** ``SPAM`` in filter ``addLabelIds`` (HTTP 400). You
+cannot auto-route *future* incoming mail into the Spam folder via the
+filters API.
+
+1. Call ``gmail_silence_sender`` with ``email``, ``mode="spam"``, and
+   ``thread_id`` or ``message_id`` for the mail in context so it moves
+   to Spam immediately, **or** call ``gmail_modify_thread`` /
+   ``gmail_modify_message`` with ``add_label_ids=["SPAM"]`` and
+   ``remove_label_ids=["INBOX"]`` then ``gmail_silence_sender`` for the
+   filter.
+2. The tool creates a filter with only ``removeLabelIds`` (skip inbox,
+   mark read) for future mail — same shape as mute.
+3. Confirm to the user; actions auto-apply (no proposal).
 
 ## Remember
 

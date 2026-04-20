@@ -646,7 +646,8 @@ const en = {
   "inbox.error.update": "Could not update.",
   "inbox.error.archive": "Could not archive.",
   "inbox.error.trash": "Could not move to trash.",
-  "inbox.silence.spamOk": "Marked as spam: {email}",
+  "inbox.silence.spamOk":
+    "Spam folder for this thread; future mail from {email} will skip your inbox.",
   "inbox.silence.muteOk": "Muted: {email}",
   "inbox.error.filter": "Could not create Gmail filter.",
   "inbox.error.startChat": "Could not start chat.",
@@ -673,7 +674,7 @@ const en = {
   "silence.muteLabel": "Mute",
   "silence.muteHint": "Skip inbox, mark as read.",
   "silence.spamLabel": "Spam",
-  "silence.spamHint": "Move to Gmail Spam."
+  "silence.spamHint": "This thread → Spam; future mail skips inbox (no API auto-spam)."
 } as const;
 
 const es: Record<keyof typeof en, string> = {
@@ -1314,7 +1315,8 @@ const es: Record<keyof typeof en, string> = {
   "inbox.error.update": "No se pudo actualizar.",
   "inbox.error.archive": "No se pudo archivar.",
   "inbox.error.trash": "No se pudo mover a la papelera.",
-  "inbox.silence.spamOk": "Marcado como spam: {email}",
+  "inbox.silence.spamOk":
+    "Este hilo en Spam; el correo futuro de {email} saltará la bandeja de entrada.",
   "inbox.silence.muteOk": "Silenciado: {email}",
   "inbox.error.filter": "No se pudo crear el filtro de Gmail.",
   "inbox.error.startChat": "No se pudo iniciar el chat.",
@@ -1341,7 +1343,8 @@ const es: Record<keyof typeof en, string> = {
   "silence.muteLabel": "Silenciar",
   "silence.muteHint": "Salta la bandeja, marca como leído.",
   "silence.spamLabel": "Spam",
-  "silence.spamHint": "Mueve a Spam de Gmail."
+  "silence.spamHint":
+    "Este hilo → Spam; el futuro salta la bandeja (sin auto-spam por API)."
 };
 
 export type TranslationKey = keyof typeof en;

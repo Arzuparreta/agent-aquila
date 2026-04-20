@@ -13,8 +13,8 @@ export type SilenceMode = "mute" | "spam";
  *   - "Silenciar / Mute"  — creates a Gmail filter that skips the inbox and
  *     marks future messages from this sender as read, then hides the current
  *     thread from the inbox view.
- *   - "Spam"               — creates a Gmail filter that hard-routes the
- *     sender to SPAM and applies SPAM to the current thread.
+ *   - "Spam"               — moves the current thread to Spam (modify), then
+ *     adds a skip-inbox filter for future mail (Gmail filters cannot set SPAM).
  *
  * Cancel restores the inbox without touching Gmail.
  */

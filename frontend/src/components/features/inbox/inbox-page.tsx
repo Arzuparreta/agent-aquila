@@ -82,7 +82,7 @@ function parseLoadError(
  * - ``page_token``-based pagination via Gmail's own cursor.
  * - Per-row actions auto-execute against Gmail (mark read/unread, archive,
  *   trash, reply via chat, "Silenciar" opens a tiny modal that mutes or
- *   spams the sender directly in Gmail using a server-side filter).
+ *   spam moves the thread via modify then adds a skip-inbox filter).
  *
  * Reads ``?msg=<gmail-id>`` from the URL on mount so deep links land on the
  * right detail.
@@ -308,24 +308,10 @@ export function InboxPage() {
   const onConfirmSilence = useCallback(
     async (target: SilenceTarget, mode: SilenceMode) => {
       try {
-        // A server-side Gmail filter is the only way to make the action
-        // sticky for *future* messages from this sender. We always create
-        // it; the action set varies by mode (skip-inbox+mark-read for mute,
-        // hard SPAM label for spam).
-        const action =
-          mode === "spam"
-            ? { addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] }
-            : { removeLabelIds: ["INBOX", "UNREAD"] };
-        await apiFetch(`/gmail/filters`, {
-          method: "POST",
-          body: JSON.stringify({
-            criteria: { from: target.senderEmail },
-            action,
-          }),
-        });
-
-        // For the current message in front of the user, also apply the
-        // change immediately so the row visibly disappears from the inbox.
+        // Gmail API rejects SPAM in filter addLabelIds — only thread/message
+        // modify can move mail to Spam. For future mail we use the same
+        // skip-inbox+mark-read filter as mute (Gmail has no API to force
+        // the Spam folder on incoming mail via filters).
         if (mode === "spam") {
           await apiFetch(`/gmail/threads/${target.threadId}/modify`, {
             method: "POST",
@@ -334,7 +320,18 @@ export function InboxPage() {
               remove_label_ids: ["INBOX"],
             }),
           });
-        } else {
+        }
+
+        const filterAction = { removeLabelIds: ["INBOX", "UNREAD"] };
+        await apiFetch(`/gmail/filters`, {
+          method: "POST",
+          body: JSON.stringify({
+            criteria: { from: target.senderEmail },
+            action: filterAction,
+          }),
+        });
+
+        if (mode === "mute") {
           await apiFetch(`/gmail/threads/${target.threadId}/modify`, {
             method: "POST",
             body: JSON.stringify({

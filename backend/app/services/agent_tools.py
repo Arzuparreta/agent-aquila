@@ -332,18 +332,21 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     ),
     _fn(
         "gmail_silence_sender",
-        "High-level helper to silence a sender end-to-end: creates a Gmail "
-        "filter that removes ``INBOX`` for future mail from that sender, "
-        "and (optionally, when ``mode='spam'``) also marks them as spam. "
+        "Silence a sender: creates a Gmail filter so future mail skips the inbox "
+        "and is marked read. "
+        "``mode='spam'``: Gmail **cannot** put SPAM on filter actions — pass "
+        "``thread_id`` or ``message_id`` to move **that** mail to Spam via "
+        "modify; future mail still only gets the inbox-skipping filter. "
         "Auto-applies. "
-        "Inputs: ``email`` (required, sender address), ``mode`` "
-        "(``mute`` (default) — skip inbox; ``spam`` — also mark as spam), "
-        "optional ``connection_id``. "
-        "Returns: the filter id + a human summary.",
+        "Inputs: ``email`` (required), ``mode`` (``mute`` default, ``spam``), "
+        "optional ``thread_id`` / ``message_id`` (for spam on existing mail), "
+        "``connection_id``.",
         {
             **_CONNECTION_ID,
             "email": {"type": "string"},
             "mode": {"type": "string", "enum": ["mute", "spam"]},
+            "thread_id": {"type": "string"},
+            "message_id": {"type": "string"},
         },
         required=["email"],
     ),
@@ -354,6 +357,8 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         "sender' workflow; reach for this tool for richer rules (subject "
         "match, has-attachment, etc.). Requires the ``gmail.settings.basic`` "
         "scope. "
+        "Do **not** put ``SPAM`` in ``action.addLabelIds`` — Gmail returns "
+        "400; use ``gmail_modify_*`` to move mail to Spam. "
         "Inputs: ``criteria`` (Gmail filter criteria object — keys like "
         "``from``, ``to``, ``subject``, ``query``, ``hasAttachment``), "
         "``action`` (object with ``addLabelIds`` / ``removeLabelIds`` / "

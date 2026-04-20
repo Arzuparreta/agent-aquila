@@ -51,8 +51,8 @@ The Gmail tools are thin wrappers over Google's search syntax — favour `q=` ov
 - "Léeme este correo" (with `gmail_msg` in context) → `gmail_get_message` with that id and `format="full"`.
 - "Archiva esto" → `gmail_modify_message` with `remove_label_ids=["INBOX"]`.
 - "Márcalo como leído" → `gmail_modify_message` with `remove_label_ids=["UNREAD"]`.
-- "Silencia a este remitente" → `gmail_create_filter` with `criteria={"from": "<email>"}` and `action={"removeLabelIds": ["INBOX","UNREAD"]}`; then `gmail_modify_thread` to apply it to the current thread too.
-- "Mándalo a spam" → same filter shape but `action={"addLabelIds":["SPAM"], "removeLabelIds":["INBOX"]}`.
+- "Silencia a este remitente" → `gmail_silence_sender` with `email` and `mode="mute"`, or `gmail_create_filter` with `action={"removeLabelIds": ["INBOX","UNREAD"]}` plus `gmail_modify_thread` on the current thread.
+- "Mándalo a spam" → `gmail_modify_thread` (or `gmail_modify_message`) with `add_label_ids=["SPAM"]`, `remove_label_ids=["INBOX"]` on the current item, then `gmail_silence_sender` with `mode="spam"` and the same `thread_id`/`message_id` so a filter also skips inbox for future mail. **Never** put `SPAM` in a filter `addLabelIds` — Gmail rejects it.
 - "Borra esto" → `gmail_trash_message` (the user can still recover it from Gmail's trash).
 
 If a tool returns `"error"` containing `gmail_rate_limited` or `upstream 429`, stop calling Gmail tools this turn and answer with a short note that Gmail is throttling and you'll retry shortly. Do NOT loop on the same tool — wait the suggested seconds.

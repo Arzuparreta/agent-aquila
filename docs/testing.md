@@ -79,7 +79,10 @@ Useful variants:
 | `test_capability_registry.py` | No | Registry keys for the only two proposal kinds the agent can produce (`email_send`, `email_reply`) and their preview helpers |
 | `test_ai_providers.py` | No | AI provider adapters (OpenAI, Ollama, Anthropic, OpenRouter, Azure, LiteLLM, custom OpenAI-compatible): URLs, headers, parsing, error codes — HTTP mocked via `httpx.AsyncClient` patches |
 | `test_ai_routes.py` | No | Provider registry enumeration, API key sentinel resolution, Pydantic normalization for user AI settings |
-| `test_agent_tools.py` | Mostly yes | Agent tool catalogue invariants: every tool is in exactly one bucket (auto-apply or proposal), every tool is dispatched, and `propose_email_send` / `propose_email_reply` are the only proposal tools |
+| `test_agent_tools.py` | No | Catalogue structure only: bucket disjointness + `_DISPATCH` coverage (behavioral Gmail tests live in `test_gmail_*.py`, not duplicated per-tool here) |
+| `test_gmail_client.py` | No | Gmail 429 parsing; mocked `httpx` asserts REST JSON shapes (`modify_*` → camelCase `addLabelIds`, `create_filter` body) |
+| `test_gmail_routes.py` | No | FastAPI `TestClient`: `snake_case` request bodies on `/gmail/.../modify` forward correctly to the client |
+| `test_gmail_silence_sender.py` | Yes | `gmail_silence_sender`: filter action never adds `SPAM`; spam + `thread_id` calls `modify_thread` before `create_filter` |
 
 ---
 
@@ -103,6 +106,6 @@ There is no Playwright/Cypress suite for the chat or inbox yet. After changing t
 
 | Area | Runner | Needs DB |
 |------|--------|----------|
-| `test_alembic_version_column`, `test_capability_registry`, `test_ai_providers`, `test_ai_routes` | `pytest` | No |
-| `test_agent_tools` (except registry test) | `pytest` | Yes (skips if unreachable) |
+| `test_alembic_version_column`, `test_capability_registry`, `test_ai_providers`, `test_ai_routes`, `test_agent_tools`, `test_gmail_client`, `test_gmail_routes` | `pytest` | No |
+| `test_gmail_silence_sender`, `test_chat_threads_list`, `test_agent_trace_channel` | `pytest` | Yes (skips if unreachable) |
 | Frontend | `npm run lint` | No |

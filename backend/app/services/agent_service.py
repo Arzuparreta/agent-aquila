@@ -416,31 +416,65 @@ class AgentService:
     async def _tool_gmail_silence_sender(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        """High-level: create a filter that mutes (or spams) future mail.
+        """Create a skip-inbox filter; optionally move one thread/msg to Spam.
 
-        ``mode='mute'`` (default): future messages skip the inbox.
-        ``mode='spam'``: same, plus the SPAM label is applied.
+        Gmail **filters** cannot list **SPAM** in ``addLabelIds`` (API 400).
+        For ``mode='spam'``, pass ``thread_id`` or ``message_id`` to move that
+        mail to Spam via modify; future mail only gets the inbox-skipping filter.
         """
         email = str(args.get("email") or "").strip()
         if not email:
             return {"error": "email (sender address) is required"}
         mode = str(args.get("mode") or "mute").lower()
+        if mode not in ("mute", "spam"):
+            return {"error": "mode must be 'mute' or 'spam'"}
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         criteria = {"from": email}
-        action: dict[str, Any] = {"removeLabelIds": ["INBOX"]}
+        action: dict[str, Any] = {"removeLabelIds": ["INBOX", "UNREAD"]}
+        moved_to_spam = False
         if mode == "spam":
-            action["addLabelIds"] = ["SPAM"]
+            tid = args.get("thread_id")
+            mid = args.get("message_id")
+            if tid:
+                await client.modify_thread(
+                    str(tid),
+                    add_label_ids=["SPAM"],
+                    remove_label_ids=["INBOX"],
+                )
+                gmail_cache_invalidate_connection(row.id)
+                moved_to_spam = True
+            elif mid:
+                m = str(mid)
+                await client.modify_message(
+                    m,
+                    add_label_ids=["SPAM"],
+                    remove_label_ids=["INBOX"],
+                )
+                gmail_cache_invalidate_message(row.id, m)
+                moved_to_spam = True
         result = await client.create_filter(criteria=criteria, action=action)
+        if mode == "spam":
+            if moved_to_spam:
+                summary = (
+                    f"Moved the selected mail to Spam. Future mail from {email} will skip "
+                    "the inbox (Gmail filters cannot assign the Spam label to new mail)."
+                )
+            else:
+                summary = (
+                    f"Filter created: future mail from {email} will skip the inbox. "
+                    "To move existing mail to Spam, call again with thread_id or message_id "
+                    "(filters cannot use the SPAM label)."
+                )
+        else:
+            summary = f"Future mail from {email} will skip the inbox and be marked read."
         return {
             "ok": True,
             "mode": mode,
             "sender": email,
             "filter_id": result.get("id"),
-            "summary": (
-                f"Future mail from {email} will skip the inbox"
-                + (" and be marked as spam." if mode == "spam" else ".")
-            ),
+            "moved_to_spam": moved_to_spam if mode == "spam" else None,
+            "summary": summary,
         }
 
     @staticmethod
