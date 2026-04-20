@@ -8,7 +8,7 @@ import type { ChatThread } from "@/types/api";
 
 import { ThreadActionsMenu } from "./thread-actions-menu";
 
-// Threads no longer mirror first-class CRM entities. Any non-general thread
+// Threads no longer mirror first-class CRM entities. Any entity-bound thread
 // kind (gmail_message, calendar_event, drive_file, …) gets a generic chip.
 const KIND_BADGES: Record<string, string> = {
   gmail_message: "📩",
@@ -34,7 +34,7 @@ export function ChatThreadList({
   loading,
   error,
   onPick,
-  onCreateGeneral,
+  onThreadListChanged,
   onRenameThread,
   onTogglePinThread,
   onToggleArchiveThread,
@@ -45,7 +45,7 @@ export function ChatThreadList({
   loading: boolean;
   error: string | null;
   onPick: (id: number) => void;
-  onCreateGeneral: () => Promise<void> | void;
+  onThreadListChanged: () => Promise<void> | void;
   onRenameThread: (id: number, title: string) => Promise<void> | void;
   onTogglePinThread: (id: number, next: boolean) => Promise<void> | void;
   onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
@@ -60,7 +60,7 @@ export function ChatThreadList({
       method: "POST",
       body: JSON.stringify({ title: t("chat.threadList.newThreadTitle") })
     });
-    await onCreateGeneral();
+    await onThreadListChanged();
     onPick(created.id);
   };
 

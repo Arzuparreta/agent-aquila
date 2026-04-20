@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from typing import Any, Iterable
 
 from sqlalchemy import desc, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat_message import ChatMessage
@@ -33,45 +32,6 @@ def _entity_label_default(entity_type: str | None, entity_id: int | None) -> str
     if entity_type and entity_id:
         return f"{entity_type.capitalize()} #{entity_id}"
     return "General"
-
-
-async def get_or_create_general_thread(db: AsyncSession, user: User) -> ChatThread:
-    """Return the user's *default* general thread, creating it on first call.
-
-    Identified by ``is_default = TRUE`` (not by the broader
-    ``kind='general' AND entity IS NULL`` predicate, which also matches
-    free-form "Nueva conversación" threads). Uses Postgres
-    ``INSERT ... ON CONFLICT DO NOTHING`` against the partial unique index
-    ``uq_chat_threads_user_default`` so two concurrent requests can race
-    safely — the loser falls through to the SELECT and returns the winner's
-    row.
-    """
-    select_default = select(ChatThread).where(
-        ChatThread.user_id == user.id,
-        ChatThread.is_default.is_(True),
-    )
-    row = (await db.execute(select_default)).scalar_one_or_none()
-    if row:
-        return row
-
-    insert_stmt = (
-        pg_insert(ChatThread)
-        .values(
-            user_id=user.id,
-            kind="general",
-            entity_type=None,
-            entity_id=None,
-            title="General",
-            is_default=True,
-        )
-        # Must match ``uq_chat_threads_user_default`` predicate exactly (`= true`). Using
-        # ``.is_(True)`` compiles to ``IS true``, which Postgres rejects for inference.
-        .on_conflict_do_nothing(index_elements=["user_id"], index_where=(ChatThread.is_default == True))  # noqa: E712
-    )
-    await db.execute(insert_stmt)
-    await db.flush()
-    row = (await db.execute(select_default)).scalar_one()
-    return row
 
 
 async def get_or_create_entity_thread(

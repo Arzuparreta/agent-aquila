@@ -39,7 +39,6 @@ from app.services.chat_service import (
     append_message,
     attachments_as_entity_refs,
     get_or_create_entity_thread,
-    get_or_create_general_thread,
     get_thread,
     get_thread_message,
     history_for_agent,
@@ -130,9 +129,6 @@ async def get_threads(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[ThreadRead]:
-    # Ensure the artist always has a "General" thread to land on.
-    await get_or_create_general_thread(db, current_user)
-    await db.commit()
     rows = await list_threads(db, current_user, include_archived=include_archived)
     return [thread_to_read(r) for r in rows]
 
@@ -158,7 +154,7 @@ async def create_thread(
         row = ChatThread(
             user_id=current_user.id,
             kind="general",
-            title=(payload.title or "Nueva conversación")[:255],
+            title=(payload.title or "New chat")[:255],
         )
         db.add(row)
         await db.flush()

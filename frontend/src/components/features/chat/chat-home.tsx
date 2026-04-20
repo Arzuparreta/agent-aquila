@@ -10,6 +10,21 @@ import { ChatThreadList } from "./thread-list";
 import { ChatThreadView } from "./thread-view";
 import { ChatTopBar } from "./top-bar";
 
+/** Dedupes concurrent bootstrap POSTs (e.g. React Strict Mode double mount). */
+let bootstrapActiveChatInFlight: Promise<ChatThread> | null = null;
+
+function requestBootstrapActiveChat(title: string): Promise<ChatThread> {
+  if (!bootstrapActiveChatInFlight) {
+    bootstrapActiveChatInFlight = apiFetch<ChatThread>("/threads", {
+      method: "POST",
+      body: JSON.stringify({ title })
+    }).finally(() => {
+      bootstrapActiveChatInFlight = null;
+    });
+  }
+  return bootstrapActiveChatInFlight;
+}
+
 /**
  * Root mobile-first chat surface. Layout:
  *   - On phones: thread view fills the screen; the thread list slides in as an
@@ -36,7 +51,19 @@ export function ChatHome() {
         const qs = includeArchived ? "?include_archived=true" : "";
         const rows = await apiFetch<ChatThread[]>(`/threads${qs}`);
         setThreads(rows);
-        setActiveId((prev) => prev ?? rows.find((r) => !r.archived)?.id ?? rows[0]?.id ?? null);
+        setActiveId((prev) => {
+          const ids = new Set(rows.map((r) => r.id));
+          if (prev != null && ids.has(prev)) return prev;
+          if (!includeArchived) {
+            return rows.find((r) => !r.archived)?.id ?? rows[0]?.id ?? null;
+          }
+          return (
+            rows.find((r) => r.archived)?.id ??
+            rows.find((r) => !r.archived)?.id ??
+            rows[0]?.id ??
+            null
+          );
+        });
         setError(null);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : t("chat.errors.loadThreadList"));
@@ -59,9 +86,35 @@ export function ChatHome() {
   }, [statusMessage]);
 
   const visibleThreads = useMemo(
-    () => threads.filter((t) => (showArchived ? t.archived : !t.archived)),
+    () => threads.filter((th) => (showArchived ? th.archived : !th.archived)),
     [threads, showArchived]
   );
+
+  // Active tab: always show a chat (like ChatGPT / Gemini). Create one if the list is empty.
+  useEffect(() => {
+    if (showArchived || loading || error || visibleThreads.length > 0) return;
+    let cancelled = false;
+    void requestBootstrapActiveChat(t("chat.threadList.newThreadTitle"))
+      .then((created) => {
+        if (cancelled) return;
+        setThreads((prev) => {
+          if (prev.some((x) => x.id === created.id)) return prev;
+          return [...prev, created].sort(threadSortFn);
+        });
+        setActiveId(created.id);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setStatusMessage({
+          kind: "error",
+          text: err instanceof ApiError ? err.message : t("chat.errors.bootstrapChat")
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showArchived, loading, error, visibleThreads.length, t]);
 
   // Honor `?thread=NN` deep-links from push notifications.
   useEffect(() => {
@@ -72,7 +125,7 @@ export function ChatHome() {
   }, [threads.length]);
 
   const activeThread = useMemo(
-    () => threads.find((t) => t.id === activeId) ?? null,
+    () => threads.find((th) => th.id === activeId) ?? null,
     [threads, activeId]
   );
 
@@ -83,7 +136,7 @@ export function ChatHome() {
 
   const onThreadUpdated = useCallback((updated: ChatThread) => {
     setThreads((prev) => {
-      const next = prev.map((t) => (t.id === updated.id ? updated : t));
+      const next = prev.map((th) => (th.id === updated.id ? updated : th));
       return next.sort(threadSortFn);
     });
   }, []);
@@ -96,10 +149,10 @@ export function ChatHome() {
   const pickNextActiveAfter = useCallback(
     (allThreads: ChatThread[], removedId: number, archivedFlag: boolean) => {
       const candidates = allThreads.filter(
-        (t) => t.id !== removedId && (archivedFlag ? t.archived : !t.archived)
+        (th) => th.id !== removedId && (archivedFlag ? th.archived : !th.archived)
       );
       const sorted = [...candidates].sort(threadSortFn);
-      return sorted[0]?.id ?? allThreads.find((t) => t.id !== removedId)?.id ?? null;
+      return sorted[0]?.id ?? allThreads.find((th) => th.id !== removedId)?.id ?? null;
     },
     []
   );
@@ -111,7 +164,7 @@ export function ChatHome() {
           method: "PATCH",
           body: JSON.stringify({ title })
         });
-        setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn));
+        setThreads((prev) => prev.map((th) => (th.id === id ? updated : th)).sort(threadSortFn));
         setStatusMessage({ kind: "ok", text: t("chat.status.renamed") });
       } catch (err) {
         setStatusMessage({
@@ -131,7 +184,7 @@ export function ChatHome() {
           method: "PATCH",
           body: JSON.stringify({ pinned: next })
         });
-        setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn));
+        setThreads((prev) => prev.map((th) => (th.id === id ? updated : th)).sort(threadSortFn));
         setStatusMessage({
           kind: "ok",
           text: next ? t("chat.status.pinned") : t("chat.status.unpinned")
@@ -154,10 +207,10 @@ export function ChatHome() {
           body: JSON.stringify({ archived: next })
         });
         setThreads((prev) => {
-          const merged = prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn);
+          const merged = prev.map((th) => (th.id === id ? updated : th)).sort(threadSortFn);
           // If the active thread just left the visible list, pick another.
           if (id === activeId) {
-            const inView = merged.some((t) => t.id === id && (showArchived ? t.archived : !t.archived));
+            const inView = merged.some((th) => th.id === id && (showArchived ? th.archived : !th.archived));
             if (!inView) {
               setActiveId(pickNextActiveAfter(merged, id, showArchived));
             }
@@ -193,7 +246,7 @@ export function ChatHome() {
       try {
         await apiFetch<Record<string, never>>(`/threads/${id}`, { method: "DELETE" });
         setThreads((prev) => {
-          const remaining = prev.filter((t) => t.id !== id);
+          const remaining = prev.filter((th) => th.id !== id);
           if (id === activeId) {
             setActiveId(pickNextActiveAfter(remaining, id, showArchived));
           }
@@ -210,6 +263,10 @@ export function ChatHome() {
     },
     [activeId, pickNextActiveAfter, showArchived, t]
   );
+
+  const onThreadListChanged = useCallback(async () => {
+    await refreshThreads();
+  }, [refreshThreads]);
 
   return (
     <div className="app-shell bg-surface-base text-fg">
@@ -272,9 +329,7 @@ export function ChatHome() {
             loading={loading}
             error={error}
             onPick={onPickThread}
-            onCreateGeneral={async () => {
-              await refreshThreads();
-            }}
+            onThreadListChanged={onThreadListChanged}
             onRenameThread={onRenameThread}
             onTogglePinThread={onTogglePinThread}
             onToggleArchiveThread={onToggleArchiveThread}
@@ -299,9 +354,7 @@ export function ChatHome() {
                 loading={loading}
                 error={error}
                 onPick={onPickThread}
-                onCreateGeneral={async () => {
-                  await refreshThreads();
-                }}
+                onThreadListChanged={onThreadListChanged}
                 onRenameThread={onRenameThread}
                 onTogglePinThread={onTogglePinThread}
                 onToggleArchiveThread={onToggleArchiveThread}
