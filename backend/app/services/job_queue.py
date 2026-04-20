@@ -1,9 +1,9 @@
 """Tiny ARQ enqueue helper.
 
-After the OpenClaw refactor the only background job is
-``agent_heartbeat`` (see ``app.worker``); the request path no longer
-enqueues sync jobs. This helper is kept around so future tools can
-schedule one-off background work.
+The ARQ worker registers only ``agent_heartbeat`` (see ``app.worker``).
+Connector setup does **not** enqueue mirror/sync jobs — Gmail, Calendar,
+and Drive reads go live to the provider. This helper is for future
+one-off background work.
 """
 from __future__ import annotations
 

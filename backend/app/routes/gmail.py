@@ -22,11 +22,13 @@ The connection id is passed as a query parameter (``connection_id=...``)
 on every endpoint. If it is omitted, the router falls back to the user's
 single Gmail connection — convenient because almost every user has only
 one. Multi-account users get a clear 400 telling them to disambiguate.
+
+Metadata responses (``format=metadata``) are TTL-cached in
+``app.services.gmail_metadata_cache`` and shared with agent Gmail tools.
 """
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -41,6 +43,14 @@ from app.services.connectors.gmail_client import (
     GmailAPIError,
     GmailClient,
     GmailRateLimited,
+)
+from app.services.gmail_metadata_cache import (
+    get_message_metadata,
+    invalidate_connection,
+    invalidate_message,
+    put_message_metadata,
+    get_thread as cache_get_thread,
+    put_thread as cache_put_thread,
 )
 from app.services.oauth import TokenManager
 from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
@@ -135,65 +145,7 @@ def _wrap_api_error(exc: GmailAPIError) -> HTTPException:
     )
 
 
-# ---------------------------------------------------------------------------
-# In-process metadata cache
-# ---------------------------------------------------------------------------
-# Gmail's `messages.list` returns only `{id, threadId}` so the inbox needs
-# one `messages.get(format=metadata)` per row to render. That's an N+1
-# storm against Gmail's per-user QPS cap (which is *very* tight on the
-# free tier — we hit 429s with ~25 metadata fetches in parallel).
-#
-# We cache each metadata payload for a few minutes keyed by
-# (connection_id, message_id). Message metadata barely changes (label_ids
-# do, but the inbox view re-applies optimistic updates anyway) and the
-# cache is naturally small because users only look at a few hundred ids
-# at most. This single change collapses the cost of a re-render — or a
-# StrictMode double-fire — from N upstream calls to 0.
-_META_CACHE: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
-_META_TTL_SECONDS = 5 * 60
-_META_MAX_ENTRIES = 2_000
-
-
-def _meta_cache_get(connection_id: int, message_id: str) -> dict[str, Any] | None:
-    entry = _META_CACHE.get((connection_id, message_id))
-    if not entry:
-        return None
-    expires_at, payload = entry
-    if expires_at < time.monotonic():
-        _META_CACHE.pop((connection_id, message_id), None)
-        return None
-    return payload
-
-
-def _meta_cache_put(connection_id: int, message_id: str, payload: dict[str, Any]) -> None:
-    if len(_META_CACHE) >= _META_MAX_ENTRIES:
-        # Cheap eviction: drop the oldest 10% by re-creating the dict from
-        # the youngest entries. We don't need LRU precision — anything that
-        # bounds memory under sustained load is fine.
-        ordered = sorted(_META_CACHE.items(), key=lambda kv: kv[1][0], reverse=True)
-        keep = dict(ordered[: int(_META_MAX_ENTRIES * 0.9)])
-        _META_CACHE.clear()
-        _META_CACHE.update(keep)
-    _META_CACHE[(connection_id, message_id)] = (
-        time.monotonic() + _META_TTL_SECONDS,
-        payload,
-    )
-
-
-def _meta_cache_invalidate(connection_id: int, message_id: str) -> None:
-    _META_CACHE.pop((connection_id, message_id), None)
-
-
-def _meta_cache_invalidate_connection(connection_id: int) -> None:
-    """Drop every cached row for ``connection_id``.
-
-    Used after thread-level mutations (modify_thread, trash_thread, …)
-    where we don't cheaply know which message ids are affected.
-    """
-    for key in [k for k in _META_CACHE if k[0] == connection_id]:
-        _META_CACHE.pop(key, None)
-
-
+# Metadata TTL cache: ``app.services.gmail_metadata_cache`` (shared with agent tools).
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
@@ -276,7 +228,7 @@ async def list_messages(
 
     async def _fetch(mid: str) -> dict[str, Any] | None:
         nonlocal rate_limit_hit
-        cached = _meta_cache_get(row.id, mid)
+        cached = get_message_metadata(row.id, mid)
         if cached is not None:
             return cached
         async with sem:
@@ -291,7 +243,7 @@ async def list_messages(
                 return None
             except GmailAPIError:
                 return None
-        _meta_cache_put(row.id, mid, payload)
+        put_message_metadata(row.id, mid, payload)
         return payload
 
     fetched = await asyncio.gather(*(_fetch(str(m["id"])) for m in msg_refs if m.get("id")))
@@ -314,11 +266,18 @@ async def get_message(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     row = await _resolve_gmail_connection(db, current_user, connection_id)
+    if format == "metadata":
+        cached = get_message_metadata(row.id, message_id)
+        if cached is not None:
+            return cached
     client = await _client_for(db, row)
     try:
-        return await client.get_message(message_id, format=format)
+        payload = await client.get_message(message_id, format=format)
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
+    if format == "metadata":
+        put_message_metadata(row.id, message_id, payload)
+    return payload
 
 
 @router.post("/messages/{message_id}/modify")
@@ -339,7 +298,7 @@ async def modify_message(
         )
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
-    _meta_cache_invalidate(row.id, message_id)
+    invalidate_message(row.id, message_id)
     return result
 
 
@@ -356,7 +315,7 @@ async def trash_message(
         result = await client.trash_message(message_id)
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
-    _meta_cache_invalidate(row.id, message_id)
+    invalidate_message(row.id, message_id)
     return result
 
 
@@ -373,7 +332,7 @@ async def untrash_message(
         result = await client.untrash_message(message_id)
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
-    _meta_cache_invalidate(row.id, message_id)
+    invalidate_message(row.id, message_id)
     return result
 
 
@@ -409,11 +368,18 @@ async def get_thread(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     row = await _resolve_gmail_connection(db, current_user, connection_id)
+    if format == "metadata":
+        cached = cache_get_thread(row.id, thread_id, format)
+        if cached is not None:
+            return cached
     client = await _client_for(db, row)
     try:
-        return await client.get_thread(thread_id, format=format)
+        payload = await client.get_thread(thread_id, format=format)
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
+    if format == "metadata":
+        cache_put_thread(row.id, thread_id, format, payload)
+    return payload
 
 
 @router.post("/threads/{thread_id}/modify")
@@ -434,7 +400,7 @@ async def modify_thread(
         )
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
-    _meta_cache_invalidate_connection(row.id)
+    invalidate_connection(row.id)
     return result
 
 
@@ -451,7 +417,7 @@ async def trash_thread(
         result = await client.trash_thread(thread_id)
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
-    _meta_cache_invalidate_connection(row.id)
+    invalidate_connection(row.id)
     return result
 
 
@@ -468,7 +434,7 @@ async def untrash_thread(
         result = await client.untrash_thread(thread_id)
     except GmailAPIError as exc:
         raise _wrap_api_error(exc)
-    _meta_cache_invalidate_connection(row.id)
+    invalidate_connection(row.id)
     return result
 
 

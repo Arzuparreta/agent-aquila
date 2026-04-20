@@ -9,20 +9,34 @@ Walk through unread Gmail in priority order and decide what to do with
 each message. Use this when the user says "triage my inbox", "what
 needs my attention?", or runs as part of the daily heartbeat.
 
+## Quota-conscious rules
+
+- Keep ``max_results`` small (e.g. **10–15** per list). Prefer **several
+  focused lists** (e.g. ``is:unread in:inbox``, then ``is:starred``) over
+  one huge pull.
+- After ``gmail_list_messages``, **group rows by ``threadId``** and call
+  ``gmail_get_thread`` once per thread with ``format="metadata"`` instead
+  of calling ``gmail_get_message`` on every message id. One thread call
+  returns the whole conversation metadata — far fewer Gmail API requests
+  than N separate ``gmail_get_message`` calls.
+- Use ``gmail_get_message`` with ``format="full"`` only when you must read
+  the body of a specific message.
+
 ## Inputs
 
 - The user's primary Gmail connection (use ``gmail_list_messages`` with
-  ``q="is:unread"`` and a small ``max_results`` like 25).
+  ``q="is:unread in:inbox"`` and a small ``max_results``).
 - Any "ignore" or "promote" rules already saved in agent memory under
   the ``triage_rules`` tag (recall with ``recall_memory``).
 
 ## Steps
 
-1. List unread messages from the inbox: call ``gmail_list_messages``
-   with ``q="is:unread in:inbox"``.
-2. For each id, call ``gmail_get_message`` (format ``metadata`` is
-   usually enough — pull the snippet + headers, body only when needed).
-3. Classify the message in your head as:
+1. List unread messages from the inbox: ``gmail_list_messages`` with
+   ``q="is:unread in:inbox"`` and ``max_results`` ≤ 15.
+2. Merge ids by ``threadId``; for each distinct thread call
+   ``gmail_get_thread(thread_id=..., format="metadata")`` to inspect
+   subjects, snippets, and labels for all messages in that thread.
+3. Classify each thread (or standout message) in your head as:
    - ``urgent`` — blocking the user; surface it explicitly.
    - ``actionable`` — needs a reply or task within a day; summarise.
    - ``noise`` — newsletters, receipts, automated; recommend muting

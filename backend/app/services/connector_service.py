@@ -25,56 +25,6 @@ _REQUIRED_SCOPES_BY_PROVIDER: dict[str, frozenset[str]] = {
 }
 
 
-# Single source of truth: provider id -> (resource, initial-sync job name).
-# Both the OAuth callback and the manual "submit credentials" path use this
-# so that EVERY new connection automatically kicks off its initial sync —
-# the artist should never need to wait for the next 5-minute cron tick to
-# see their data appear, and we should never have a connection sitting in
-# the DB without a corresponding sync job.
-_INITIAL_SYNC_BY_PROVIDER: dict[str, tuple[str, str]] = {
-    "google_gmail": ("gmail", "gmail_initial_sync"),
-    "google_calendar": ("calendar", "calendar_initial_sync"),
-    "google_drive": ("drive", "drive_initial_sync"),
-    "graph_mail": ("graph_mail", "graph_mail_initial_sync"),
-    "graph_calendar": ("graph_calendar", "graph_calendar_initial_sync"),
-    "graph_onedrive": ("graph_drive", "graph_drive_initial_sync"),
-}
-
-
-async def enqueue_initial_sync_for_connection(connection: ConnectorConnection) -> bool:
-    """Best-effort: enqueue the initial sync for a freshly-created connection.
-
-    Returns ``True`` if a job was enqueued (or attempted), ``False`` if the
-    provider has no associated sync (e.g. ``microsoft_teams``). Failures are
-    swallowed and logged because a missing Redis or worker should never
-    prevent the user from completing the connection setup itself.
-    """
-    mapping = _INITIAL_SYNC_BY_PROVIDER.get(connection.provider)
-    if mapping is None:
-        return False
-    resource, job_name = mapping
-    try:
-        from app.services.job_queue import enqueue as enqueue_job
-
-        await enqueue_job(
-            job_name,
-            connection.id,
-            job_id=f"{resource}-initial-{connection.id}",
-            allow_inline=False,
-        )
-        return True
-    except Exception:  # pragma: no cover — best effort
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "failed to enqueue initial sync for connection %s/%s",
-            connection.id,
-            connection.provider,
-            exc_info=True,
-        )
-        return False
-
-
 class ConnectorService:
     @staticmethod
     def encrypt_credentials(data: dict[str, Any]) -> str:
@@ -110,10 +60,6 @@ class ConnectorService:
         db.add(row)
         await db.commit()
         await db.refresh(row)
-        # Kick off an initial sync immediately so the artist sees their data
-        # appear without waiting for the next cron tick. Best-effort: a
-        # missing worker shouldn't fail the connection-create call.
-        await enqueue_initial_sync_for_connection(row)
         return row
 
     @staticmethod

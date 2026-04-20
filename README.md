@@ -23,7 +23,7 @@
 
 **Self-hosted agentic harness delivered as a personal assistant, focused on observability and control** — your accounts, your keys, your machine. Chat with an agent that can work in **Gmail, Calendar, Drive, Outlook, and Teams** the same way you would.
 
-Persistent **memory** (what to remember across sessions) and **skills** (markdown recipes in `backend/skills/`) keep behaviour consistent. An optional **heartbeat** job can wake the agent on a schedule.
+Persistent **memory** (what to remember across sessions) and **skills** (markdown recipes in `backend/skills/`) keep behaviour consistent. An optional **heartbeat** job can wake the agent on a schedule. By default the heartbeat **does not** instruct the model to scan Gmail (`AGENT_HEARTBEAT_CHECK_GMAIL=false`), so background ticks do not burn Gmail API quota; see [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md).
 
 ---
 
@@ -96,3 +96,5 @@ Sending or replying **from the agent** is the only action that shows an approval
 - [`docs/SKILLS.md`](docs/SKILLS.md) — authoring skills  
 - [`docs/testing.md`](docs/testing.md) — tests  
 - [`docs/MANUAL_QA.md`](docs/MANUAL_QA.md) — manual checks  
+- [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md) — Gmail API usage, heartbeat, SQL to audit tool calls  
+- [`docs/GMAIL_WATCH.md`](docs/GMAIL_WATCH.md) — design: Gmail Pub/Sub / `users.watch` (Phase B)  

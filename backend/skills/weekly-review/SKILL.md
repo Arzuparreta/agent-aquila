@@ -11,10 +11,12 @@ last week and what is on deck this week, in 5 bullets or fewer.
 
 ## Steps
 
-1. Pull the last 7 days of Gmail with
-   ``gmail_list_messages(q="newer_than:7d in:inbox")``. Skim subjects
-   + snippets only — don't fetch full bodies unless the subject is
-   ambiguous.
+1. Pull a **small** slice of recent Gmail with
+   ``gmail_list_messages(q="newer_than:7d in:inbox", max_results=15)``.
+   Group results by ``threadId`` and use ``gmail_get_thread`` with
+   ``format="metadata"`` once per thread to skim subjects and snippets —
+   avoid calling ``gmail_get_message`` per message. Fetch full bodies only
+   when a subject line is ambiguous.
 2. Pull next 7 days of calendar events with
    ``calendar_list_events(time_min=<now>, time_max=<now+7d>)``.
 3. Recall any recent goals/preferences from agent memory:

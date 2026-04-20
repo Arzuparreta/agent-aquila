@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     agent_heartbeat_minutes: int = Field(
         default=15, ge=1, le=1440, validation_alias="AGENT_HEARTBEAT_MINUTES"
     )
+    # When false (default), heartbeat does not instruct the model to scan Gmail —
+    # avoids surprise Gmail API volume. Set true only if you want proactive inbox checks.
+    agent_heartbeat_check_gmail: bool = Field(
+        default=False, validation_alias="AGENT_HEARTBEAT_CHECK_GMAIL"
+    )
     # full = all connector tools; compact = smaller palette (see agent_tools.tools_for_palette_mode).
     agent_tool_palette: str = Field(default="full", validation_alias="AGENT_TOOL_PALETTE")
     # When true, HTTP channel stub and binding helpers are enabled (gateway integration).

@@ -6,11 +6,11 @@ Run with::
 
 After the OpenClaw refactor we no longer ingest Gmail / Calendar / Drive
 mirrors. The worker exists solely to give the agent a periodic
-heartbeat — a tiny prompt that wakes the agent up so it can check its
-inbox, recall recent memories, and decide if anything needs to be
-followed up. The heartbeat is **off by default** so freshly cloned dev
-setups never spawn surprise LLM calls; flip ``AGENT_HEARTBEAT_ENABLED``
-to enable it.
+heartbeat — a tiny prompt that wakes the agent on a schedule. Gmail is
+**not** part of the default prompt (see ``AGENT_HEARTBEAT_CHECK_GMAIL``);
+that avoids burning Gmail API quota in the background. The heartbeat is
+**off by default** (``AGENT_HEARTBEAT_ENABLED``) so dev setups never spawn
+surprise LLM calls.
 """
 from __future__ import annotations
 
@@ -34,13 +34,27 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.redis_url or "redis://localhost:6379/0")
 
 
-HEARTBEAT_PROMPT = (
+HEARTBEAT_PROMPT_WITH_GMAIL = (
     "Heartbeat tick. Take a quick look at the user's inbox using your "
     "Gmail tools. If anything obviously needs the user's attention "
     "(a real reply or a decision), record a short note via "
     "``upsert_memory`` so it surfaces in the next chat. If nothing is "
     "urgent, simply reply 'nothing to do'."
 )
+
+HEARTBEAT_PROMPT_LIGHT = (
+    "Heartbeat tick. Briefly check whether anything needs follow-up: "
+    "use ``recall_memory`` for open items, and calendar tools if the user "
+    "cares about upcoming events. Do **not** open Gmail unless the user "
+    "has previously asked for proactive mail checks. If nothing needs "
+    "attention, reply with exactly: nothing to do"
+)
+
+
+def _heartbeat_prompt() -> str:
+    if settings.agent_heartbeat_check_gmail:
+        return HEARTBEAT_PROMPT_WITH_GMAIL
+    return HEARTBEAT_PROMPT_LIGHT
 
 
 async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
@@ -65,7 +79,7 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
                 summaries.append({"user_id": user.id, "status": "rate_limited"})
                 continue
             try:
-                run = await AgentService.run_agent(db, user, HEARTBEAT_PROMPT)
+                run = await AgentService.run_agent(db, user, _heartbeat_prompt())
                 summaries.append(
                     {
                         "user_id": user.id,

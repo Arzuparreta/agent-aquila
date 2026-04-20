@@ -77,6 +77,14 @@ from app.services.connectors.gcal_client import CalendarAPIError, GoogleCalendar
 from app.services.connectors.gmail_client import GmailAPIError, GmailClient
 from app.services.connectors.drive_client import DriveAPIError, GoogleDriveClient
 from app.services.connectors.graph_client import GraphAPIError, GraphClient
+from app.services.gmail_metadata_cache import (
+    get_message_metadata,
+    get_thread as gmail_cache_get_thread,
+    invalidate_connection as gmail_cache_invalidate_connection,
+    invalidate_message as gmail_cache_invalidate_message,
+    put_message_metadata,
+    put_thread as gmail_cache_put_thread,
+)
 from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
 from app.services.oauth import TokenManager
@@ -250,20 +258,34 @@ class AgentService:
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        mid = str(args["message_id"])
+        fmt = str(args.get("format") or "full")
+        if fmt == "metadata":
+            cached = get_message_metadata(row.id, mid)
+            if cached is not None:
+                return cached
         client = await _gmail_client(db, row)
-        return await client.get_message(
-            str(args["message_id"]), format=str(args.get("format") or "full")
-        )
+        payload = await client.get_message(mid, format=fmt)
+        if fmt == "metadata":
+            put_message_metadata(row.id, mid, payload)
+        return payload
 
     @staticmethod
     async def _tool_gmail_get_thread(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        tid = str(args["thread_id"])
+        fmt = str(args.get("format") or "metadata")
+        if fmt == "metadata":
+            cached = gmail_cache_get_thread(row.id, tid, fmt)
+            if cached is not None:
+                return cached
         client = await _gmail_client(db, row)
-        return await client.get_thread(
-            str(args["thread_id"]), format=str(args.get("format") or "metadata")
-        )
+        payload = await client.get_thread(tid, format=fmt)
+        if fmt == "metadata":
+            gmail_cache_put_thread(row.id, tid, fmt, payload)
+        return payload
 
     @staticmethod
     async def _tool_gmail_list_labels(
@@ -287,11 +309,14 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
-        return await client.modify_message(
-            str(args["message_id"]),
+        mid = str(args["message_id"])
+        result = await client.modify_message(
+            mid,
             add_label_ids=args.get("add_label_ids"),
             remove_label_ids=args.get("remove_label_ids"),
         )
+        gmail_cache_invalidate_message(row.id, mid)
+        return result
 
     @staticmethod
     async def _tool_gmail_modify_thread(
@@ -299,11 +324,13 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
-        return await client.modify_thread(
+        result = await client.modify_thread(
             str(args["thread_id"]),
             add_label_ids=args.get("add_label_ids"),
             remove_label_ids=args.get("remove_label_ids"),
         )
+        gmail_cache_invalidate_connection(row.id)
+        return result
 
     @staticmethod
     async def _tool_gmail_trash_message(
@@ -311,7 +338,10 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
-        return await client.trash_message(str(args["message_id"]))
+        mid = str(args["message_id"])
+        result = await client.trash_message(mid)
+        gmail_cache_invalidate_message(row.id, mid)
+        return result
 
     @staticmethod
     async def _tool_gmail_untrash_message(
@@ -319,7 +349,10 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
-        return await client.untrash_message(str(args["message_id"]))
+        mid = str(args["message_id"])
+        result = await client.untrash_message(mid)
+        gmail_cache_invalidate_message(row.id, mid)
+        return result
 
     @staticmethod
     async def _tool_gmail_trash_thread(
@@ -327,7 +360,9 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
-        return await client.trash_thread(str(args["thread_id"]))
+        result = await client.trash_thread(str(args["thread_id"]))
+        gmail_cache_invalidate_connection(row.id)
+        return result
 
     @staticmethod
     async def _tool_gmail_untrash_thread(
@@ -335,7 +370,9 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
-        return await client.untrash_thread(str(args["thread_id"]))
+        result = await client.untrash_thread(str(args["thread_id"]))
+        gmail_cache_invalidate_connection(row.id)
+        return result
 
     @staticmethod
     async def _tool_gmail_mark_read(
@@ -344,13 +381,16 @@ class AgentService:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         if args.get("thread_id"):
-            return await client.modify_thread(
+            out = await client.modify_thread(
                 str(args["thread_id"]), remove_label_ids=["UNREAD"]
             )
+            gmail_cache_invalidate_connection(row.id)
+            return out
         if args.get("message_id"):
-            return await client.modify_message(
-                str(args["message_id"]), remove_label_ids=["UNREAD"]
-            )
+            mid = str(args["message_id"])
+            out = await client.modify_message(mid, remove_label_ids=["UNREAD"])
+            gmail_cache_invalidate_message(row.id, mid)
+            return out
         return {"error": "either message_id or thread_id is required"}
 
     @staticmethod
@@ -360,13 +400,16 @@ class AgentService:
         row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         if args.get("thread_id"):
-            return await client.modify_thread(
+            out = await client.modify_thread(
                 str(args["thread_id"]), add_label_ids=["UNREAD"]
             )
+            gmail_cache_invalidate_connection(row.id)
+            return out
         if args.get("message_id"):
-            return await client.modify_message(
-                str(args["message_id"]), add_label_ids=["UNREAD"]
-            )
+            mid = str(args["message_id"])
+            out = await client.modify_message(mid, add_label_ids=["UNREAD"])
+            gmail_cache_invalidate_message(row.id, mid)
+            return out
         return {"error": "either message_id or thread_id is required"}
 
     @staticmethod

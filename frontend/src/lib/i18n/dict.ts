@@ -409,8 +409,8 @@ const en = {
   "connectors.errors.queueFailed": "Failed to queue sync",
   "connectors.errors.startOAuth": "Failed to start {vendor} OAuth",
 
-  "connectors.oauth.successWithAccount": "{provider} connected as {account}. Initial sync scheduled.",
-  "connectors.oauth.success": "{provider} connected. Initial sync scheduled.",
+  "connectors.oauth.successWithAccount": "{provider} connected as {account}.",
+  "connectors.oauth.success": "{provider} connected.",
   "connectors.oauth.error": "Sign-in failed: {error}",
   "connectors.oauth.errorWithDetail": "Sign-in failed: {error} — {detail}",
   "connectors.oauth.publicUrlFallback": "(set Public URL above)",
@@ -1082,9 +1082,8 @@ const es: Record<keyof typeof en, string> = {
   "connectors.errors.queueFailed": "No se pudo encolar la sincronización",
   "connectors.errors.startOAuth": "No se pudo iniciar el OAuth de {vendor}",
 
-  "connectors.oauth.successWithAccount":
-    "{provider} conectado como {account}. Sincronización inicial programada.",
-  "connectors.oauth.success": "{provider} conectado. Sincronización inicial programada.",
+  "connectors.oauth.successWithAccount": "{provider} conectado como {account}.",
+  "connectors.oauth.success": "{provider} conectado.",
   "connectors.oauth.error": "Falló el inicio de sesión: {error}",
   "connectors.oauth.errorWithDetail": "Falló el inicio de sesión: {error} — {detail}",
   "connectors.oauth.publicUrlFallback": "(define la URL pública arriba)",
