@@ -1,3 +1,5 @@
+
+# Agent Aquila
 ```
         ⠀⠀⠀⠀⠀⠀⠀⠐⣶⠦⣄⣐⢤⡉⢷⡀⢹⡇⢠⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
         ⠀⠀⠀⠀⠀⠀⠀⠀⢹⣆⣯⣽⣿⣿⣷⣽⣦⣿⡌⣿⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -17,8 +19,6 @@
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   ⠀⠀⠀⠀⠀⠀     ⠀⠀⠀⠀⠀⠀⠀⠀⠘⠿⣿⣿⠻⣿⡿⣿⢿⣷⣤⣤⡤
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   ⠀⠀⠀⠀⠀⠀⠀     ⠀⠀⠀⠀⠀⠀⠀⣿⠇⠀⢻⣇⠙⠣⣌⣻⣏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ```
-
-# Agent Aquila
 
 **Self-hosted agentic harness delivered as a personal assistant, focused on observability and control** — your accounts, your keys, your machine. Chat with an agent that can work in **Gmail, Calendar, Drive, Outlook, and Teams** the same way you would.
 
