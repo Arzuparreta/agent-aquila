@@ -3,7 +3,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -21,6 +21,29 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def _widen_alembic_version_num(connection: Connection) -> None:
+    """Alembic defaults ``alembic_version.version_num`` to VARCHAR(32); longer revision ids fail on upgrade."""
+    if connection.dialect.name != "postgresql":
+        return
+    row = connection.execute(
+        text(
+            """
+            SELECT character_maximum_length
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'alembic_version'
+              AND column_name = 'version_num'
+            """
+        )
+    ).fetchone()
+    if row is None or row[0] is None:
+        return
+    if row[0] >= 255:
+        return
+    connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"))
+    connection.commit()
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -35,6 +58,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    _widen_alembic_version_num(connection)
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()
