@@ -147,6 +147,50 @@ def _conversation_trace_snapshot(
         return "[]"
 
 
+# ``GET /agent/runs/{id}`` must stay small enough for browsers and Next.js dev rewrites;
+# Gmail/Calendar tool results can be megabytes of JSON.
+_MAX_STEP_PAYLOAD_JSON_CHARS = 20_000
+
+
+def _trim_step_payload_for_client(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Shrink persisted step payloads before returning them over HTTP."""
+    if payload is None:
+        return None
+    try:
+        serialized = json.dumps(payload, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return {"_serialization_error": True}
+    if len(serialized) <= _MAX_STEP_PAYLOAD_JSON_CHARS:
+        return payload
+    if isinstance(payload, dict) and "result" in payload:
+        slim = dict(payload)
+        res = slim.get("result")
+        if isinstance(res, (dict, list)):
+            try:
+                res_raw = json.dumps(res, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                slim["result"] = {"_truncated": True}
+                return slim
+            if len(res_raw) > 8000:
+                slim["result"] = {
+                    "_truncated": True,
+                    "_approx_chars": len(res_raw),
+                    "_preview": res_raw[:8000] + "…",
+                }
+            try:
+                slim_raw = json.dumps(slim, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                pass
+            else:
+                if len(slim_raw) <= _MAX_STEP_PAYLOAD_JSON_CHARS:
+                    return slim
+    return {
+        "_truncated": True,
+        "_approx_chars": len(serialized),
+        "_preview": serialized[:8000] + "…",
+    }
+
+
 def _approx_prompt_tokens(messages: list[dict[str, Any]]) -> int:
     """Rough token estimate for trace metrics (not billing-accurate)."""
     try:
@@ -1615,7 +1659,9 @@ class AgentService:
                 span_id=r.span_id,
                 parent_span_id=r.parent_span_id,
                 step_index=r.step_index,
-                payload=r.payload,
+                payload=_trim_step_payload_for_client(r.payload)
+                if isinstance(r.payload, dict)
+                else r.payload,
                 created_at=r.created_at,
             )
             for r in rows
@@ -1626,7 +1672,16 @@ class AgentService:
         run = await db.get(AgentRun, run_id)
         if not run or run.user_id != user.id:
             return None
-        steps = await AgentService._load_steps(db, run.id)
+        steps_raw = await AgentService._load_steps(db, run.id)
+        steps = [
+            AgentStepRead(
+                step_index=s.step_index,
+                kind=s.kind,
+                name=s.name,
+                payload=_trim_step_payload_for_client(s.payload),
+            )
+            for s in steps_raw
+        ]
         pr = await db.execute(
             select(PendingProposal).where(
                 PendingProposal.run_id == run_id, PendingProposal.user_id == user.id
