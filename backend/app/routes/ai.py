@@ -41,6 +41,7 @@ from app.services.ai_providers.adapters import (
     test_connection as adapter_test_connection,
 )
 from app.services.user_ai_settings_service import UserAISettingsService, coerce_harness_mode
+from app.services.user_time_context import normalize_time_format
 
 router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[Depends(get_current_user)])
 
@@ -170,6 +171,8 @@ async def list_provider_configs(
         active_provider_kind=active,
         ai_disabled=prefs.ai_disabled,
         harness_mode=coerce_harness_mode(prefs),
+        user_timezone=getattr(prefs, "user_timezone", None),
+        time_format=normalize_time_format(getattr(prefs, "time_format", None)),  # type: ignore[arg-type]
         configs=[_row_to_read(r, active_kind=active) for r in rows],
     )
 

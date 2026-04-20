@@ -48,6 +48,8 @@ export type GmailMessagePart = {
 
 export type HarnessMode = "auto" | "native" | "prompted";
 
+export type TimeFormatPreference = "auto" | "12" | "24";
+
 export type UserAISettings = {
   provider_kind: string;
   base_url: string | null;
@@ -58,6 +60,8 @@ export type UserAISettings = {
   has_api_key: boolean;
   extras: Record<string, unknown> | null;
   harness_mode: HarnessMode;
+  user_timezone: string | null;
+  time_format: TimeFormatPreference;
 };
 
 export type ProviderFieldType = "text" | "password" | "url" | "select";
@@ -150,6 +154,8 @@ export type ProviderConfigsResponse = {
   active_provider_kind: string | null;
   ai_disabled: boolean;
   harness_mode: HarnessMode;
+  user_timezone: string | null;
+  time_format: TimeFormatPreference;
   configs: ProviderConfig[];
 };
 

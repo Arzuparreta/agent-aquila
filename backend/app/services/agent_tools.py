@@ -235,6 +235,12 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         "and ``needs_reauth`` (true when the granted scopes no longer cover "
         "what the agent needs).",
     ),
+    _fn(
+        "get_session_time",
+        "Return the server's current date and time in the user's configured "
+        "time zone (same values as the system prompt's clock block). Use when "
+        "you need a fresh timestamp during a long turn or after ambiguity.",
+    ),
 ]
 
 

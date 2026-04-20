@@ -13,7 +13,8 @@ import {
   ProviderConfigsResponse,
   ProviderConfigUpsertRequest,
   STORED_API_KEY_SENTINEL,
-  TestConnectionResult
+  TestConnectionResult,
+  TimeFormatPreference
 } from "@/types/api";
 
 /**
@@ -84,6 +85,8 @@ export type UseProviderConfigsApi = {
   activeKind: string | null;
   aiDisabled: boolean;
   harnessMode: HarnessMode;
+  userTimezone: string;
+  timeFormat: TimeFormatPreference;
 
   selectedKind: string | null;
   selectedConfig: ProviderConfig | null;
@@ -110,6 +113,9 @@ export type UseProviderConfigsApi = {
   remove: (kind: string) => Promise<void>;
   setAIDisabled: (disabled: boolean) => Promise<void>;
   setHarnessMode: (mode: HarnessMode) => Promise<void>;
+  setUserTimezone: (tz: string | null) => Promise<void>;
+  applyBrowserTimeZone: () => Promise<void>;
+  setTimeFormat: (tf: TimeFormatPreference) => Promise<void>;
   refreshModels: () => Promise<void>;
   reload: () => Promise<void>;
 };
@@ -135,6 +141,8 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   const [activeKind, setActiveKind] = useState<string | null>(null);
   const [aiDisabled, setAIDisabledState] = useState<boolean>(false);
   const [harnessMode, setHarnessModeState] = useState<HarnessMode>("auto");
+  const [userTimezone, setUserTimezoneState] = useState<string>("");
+  const [timeFormat, setTimeFormatState] = useState<TimeFormatPreference>("auto");
 
   const [selectedKind, setSelectedKind] = useState<string | null>(null);
   const [draftByKind, setDraftByKind] = useState<Record<string, ProviderDraft>>({});
@@ -202,6 +210,8 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
       setActiveKind(data.active_provider_kind);
       setAIDisabledState(data.ai_disabled);
       setHarnessModeState(data.harness_mode ?? "auto");
+      setUserTimezoneState(data.user_timezone ?? "");
+      setTimeFormatState(data.time_format ?? "auto");
       // After reload, drop drafts for kinds whose saved row matches what we
       // just got back (the save probably succeeded). Keep drafts for kinds
       // that diverge so an in-flight edit isn't silently wiped.
@@ -440,6 +450,33 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     setHarnessModeState(mode);
   }, []);
 
+  const setUserTimezone = useCallback(async (tz: string | null) => {
+    const trimmed = (tz ?? "").trim();
+    await apiFetch<unknown>("/ai/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ user_timezone: trimmed ? trimmed : null })
+    });
+    setUserTimezoneState(trimmed);
+  }, []);
+
+  const applyBrowserTimeZone = useCallback(async () => {
+    let z = "UTC";
+    try {
+      z = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    } catch {
+      /* keep UTC */
+    }
+    await setUserTimezone(z);
+  }, [setUserTimezone]);
+
+  const setTimeFormat = useCallback(async (tf: TimeFormatPreference) => {
+    await apiFetch<unknown>("/ai/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ time_format: tf })
+    });
+    setTimeFormatState(tf);
+  }, []);
+
   const refreshModels = useCallback(async () => {
     if (!selectedKind) return;
     setLoadingModels(true);
@@ -483,6 +520,8 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     activeKind,
     aiDisabled,
     harnessMode,
+    userTimezone,
+    timeFormat,
     selectedKind,
     selectedConfig,
     selectedProvider,
@@ -506,6 +545,9 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     remove,
     setAIDisabled,
     setHarnessMode,
+    setUserTimezone,
+    applyBrowserTimeZone,
+    setTimeFormat,
     refreshModels,
     reload
   };

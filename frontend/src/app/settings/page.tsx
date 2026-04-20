@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ProviderForm } from "@/components/features/ai-settings/provider-form";
 import { ProviderList } from "@/components/features/ai-settings/provider-list";
@@ -16,6 +16,8 @@ import { ThemeSection } from "@/components/features/theme/theme-section";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
 import { useTranslation } from "@/lib/i18n";
+import { listIanaTimeZones } from "@/lib/timezones";
+import type { TimeFormatPreference } from "@/types/api";
 
 /**
  * Technical / advanced settings.
@@ -33,6 +35,12 @@ export default function SettingsPage() {
   const { providers, loading: providersLoading } = useProviderRegistry();
   const api = useProviderConfigs({ providers, providersLoading });
   const [aiToggleSaving, setAiToggleSaving] = useState(false);
+  const [tzDraft, setTzDraft] = useState("");
+  const tzOptions = useMemo(() => listIanaTimeZones(), []);
+
+  useEffect(() => {
+    setTzDraft(api.userTimezone);
+  }, [api.userTimezone]);
 
   return (
     <ProtectedPage>
@@ -89,6 +97,55 @@ export default function SettingsPage() {
                 <span className="text-xs text-fg-subtle">
                   Si un modelo local ignora tool calling, usa Auto o Prompted. Ver docs/PROVIDERS.md.
                 </span>
+              </label>
+              <div className="flex min-w-[16rem] flex-col gap-1 text-sm text-fg">
+                <span className="text-fg-muted">Zona horaria del agente (IANA)</span>
+                <input
+                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
+                  list="iana-timezones"
+                  value={tzDraft}
+                  onChange={(e) => setTzDraft(e.target.value)}
+                  onBlur={() => {
+                    const t = tzDraft.trim();
+                    if (t !== (api.userTimezone || "").trim()) {
+                      void api.setUserTimezone(t || null);
+                    }
+                  }}
+                  placeholder="Europe/Madrid"
+                  autoComplete="off"
+                />
+                <datalist id="iana-timezones">
+                  {tzOptions.map((z) => (
+                    <option key={z} value={z} />
+                  ))}
+                </datalist>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-border bg-surface-muted px-2 py-1 text-xs text-fg hover:bg-surface-base"
+                    onClick={() => void api.applyBrowserTimeZone()}
+                  >
+                    Usar zona del navegador
+                  </button>
+                </div>
+                <span className="text-xs text-fg-subtle">
+                  El reloj del sistema (hoy / mañana / citas) usa esta zona. Déjalo vacío para UTC.
+                </span>
+              </div>
+              <label className="flex min-w-[12rem] flex-col gap-1 text-sm text-fg">
+                <span className="text-fg-muted">Formato de hora (agente)</span>
+                <select
+                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
+                  value={api.timeFormat}
+                  onChange={(e) => {
+                    const v = e.target.value as TimeFormatPreference;
+                    void api.setTimeFormat(v);
+                  }}
+                >
+                  <option value="auto">24 h (automático)</option>
+                  <option value="24">24 h</option>
+                  <option value="12">12 h (AM/PM)</option>
+                </select>
               </label>
             </div>
 

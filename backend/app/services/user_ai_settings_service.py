@@ -28,6 +28,7 @@ from app.services.ai_provider_config_service import (
     ProviderConfigUpsert,
 )
 from app.services.ai_providers import normalize_provider_id
+from app.services.user_time_context import normalize_time_format
 
 HarnessMode = Literal["auto", "native", "prompted"]
 
@@ -65,6 +66,8 @@ class UserAISettingsService:
             has_api_key=False,  # Filled in by callers that have access to db; safe default.
             extras=row.extras,
             harness_mode=coerce_harness_mode(row),
+            user_timezone=getattr(row, "user_timezone", None),
+            time_format=normalize_time_format(getattr(row, "time_format", None)),  # type: ignore[arg-type]
         )
 
     @staticmethod
@@ -81,6 +84,8 @@ class UserAISettingsService:
             has_api_key=bool(active and active.has_api_key),
             extras=row.extras,
             harness_mode=coerce_harness_mode(row),
+            user_timezone=getattr(row, "user_timezone", None),
+            time_format=normalize_time_format(getattr(row, "time_format", None)),  # type: ignore[arg-type]
         )
 
     @staticmethod
@@ -111,6 +116,16 @@ class UserAISettingsService:
             if hm not in ("auto", "native", "prompted"):
                 raise ValueError(f"Invalid harness_mode: {data['harness_mode']!r}")
             prefs.harness_mode = hm
+
+        if "user_timezone" in data:
+            tz = data["user_timezone"]
+            if tz is None or (isinstance(tz, str) and not tz.strip()):
+                prefs.user_timezone = None
+            else:
+                prefs.user_timezone = str(tz).strip()[:128]
+
+        if "time_format" in data and data["time_format"] is not None:
+            prefs.time_format = normalize_time_format(str(data["time_format"]))
 
         # Pick the target provider for this update. When the client doesn't
         # name one, we keep operating on the currently-active one (or fall

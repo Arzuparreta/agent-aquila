@@ -29,6 +29,8 @@ class UserAISettingsRead(BaseModel):
     has_api_key: bool
     extras: dict[str, Any] | None = None
     harness_mode: Literal["auto", "native", "prompted"] = "auto"
+    user_timezone: str | None = None
+    time_format: Literal["auto", "12", "24"] = "auto"
 
 
 class UserAISettingsUpdate(BaseModel):
@@ -39,6 +41,8 @@ class UserAISettingsUpdate(BaseModel):
     classify_model: str | None = None
     ai_disabled: bool | None = None
     harness_mode: Literal["auto", "native", "prompted"] | None = None
+    user_timezone: str | None = None
+    time_format: Literal["auto", "12", "24"] | None = None
     api_key: str | None = Field(
         default=None,
         description="When set, replaces the stored key. Send empty string to clear.",
@@ -166,6 +170,8 @@ class ProviderConfigsResponse(BaseModel):
     active_provider_kind: str | None = None
     ai_disabled: bool = False
     harness_mode: Literal["auto", "native", "prompted"] = "auto"
+    user_timezone: str | None = None
+    time_format: Literal["auto", "12", "24"] = "auto"
     configs: list[ProviderConfigRead] = Field(default_factory=list)
 
 

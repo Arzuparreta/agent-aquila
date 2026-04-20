@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.models.user import User
 from app.services.agent_harness.selector import HarnessMode
 from app.services.agent_memory_service import AgentMemoryService
+from app.services.user_time_context import build_datetime_context_section, normalize_time_format
 
 _DEFAULT_SOUL = """# Persona
 
@@ -159,8 +160,10 @@ async def build_system_prompt(
     harness_mode: HarnessMode,
     thread_context_hint: str | None = None,
     tenant_hint: str | None = None,
+    user_timezone: str | None = None,
+    time_format: str = "auto",
 ) -> str:
-    """Assemble system prompt: SOUL + AGENTS + tools + memory + thread hint."""
+    """Assemble system prompt: SOUL + AGENTS + tools + memory + clock + thread hint."""
     del tenant_hint
     soul = _read_file("SOUL.md", _DEFAULT_SOUL)
     agents = _read_file("AGENTS.md", _DEFAULT_AGENTS)
@@ -169,6 +172,12 @@ async def build_system_prompt(
     memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
     if memory_blob:
         parts.append(memory_blob)
+    parts.append(
+        build_datetime_context_section(
+            user_timezone=user_timezone,
+            time_format=normalize_time_format(time_format),
+        )
+    )
     if thread_context_hint:
         parts.append(f"Thread context: {thread_context_hint.strip()}")
     return "\n\n".join(parts)

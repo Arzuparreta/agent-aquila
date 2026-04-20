@@ -69,6 +69,7 @@ from app.services.proposal_service import proposal_to_read
 from app.services.skills_service import list_skills as _list_skills
 from app.services.skills_service import load_skill as _load_skill
 from app.services.user_ai_settings_service import UserAISettingsService
+from app.services.user_time_context import normalize_time_format, session_time_result
 
 # Provider id sets used by ``_resolve_connection``.
 _GMAIL_PROVIDERS = ("google_gmail", "gmail")
@@ -647,6 +648,17 @@ class AgentService:
         }
 
     @staticmethod
+    async def _tool_get_session_time(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del args
+        prefs = await UserAISettingsService.get_or_create(db, user)
+        return session_time_result(
+            user_timezone=getattr(prefs, "user_timezone", None),
+            time_format=getattr(prefs, "time_format", None) or "auto",
+        )
+
+    @staticmethod
     async def _tool_start_connector_setup(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
@@ -824,6 +836,7 @@ class AgentService:
         "teams_list_teams": ("_tool_teams_list_teams", False),
         "teams_list_channels": ("_tool_teams_list_channels", False),
         "list_connectors": ("_tool_list_connectors", False),
+        "get_session_time": ("_tool_get_session_time", False),
         # Auto-apply Gmail
         "gmail_modify_message": ("_tool_gmail_modify_message", False),
         "gmail_modify_thread": ("_tool_gmail_modify_thread", False),
@@ -980,6 +993,8 @@ class AgentService:
             tool_palette=turn_tools,
             harness_mode=effective,
             thread_context_hint=thread_context_hint,
+            user_timezone=getattr(settings_row, "user_timezone", None),
+            time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
         )
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
@@ -1048,6 +1063,8 @@ class AgentService:
                         tool_palette=turn_tools,
                         harness_mode="prompted",
                         thread_context_hint=thread_context_hint,
+                        user_timezone=getattr(settings_row, "user_timezone", None),
+                        time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
                     )
                     conversation[0] = {"role": "system", "content": system_prompt}
                     raw_text, finish_reason, raw_msg = await LLMClient.chat_completion_full(
