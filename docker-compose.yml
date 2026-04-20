@@ -51,6 +51,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Migrations: if backend exits here, check logs for Alembic errors (e.g. alembic_version
+    # VARCHAR(32) vs long revision ids — mitigated in backend/alembic/env.py).
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"

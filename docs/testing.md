@@ -75,6 +75,7 @@ Useful variants:
 
 | Module | DB | Summary |
 |--------|----|---------|
+| `test_alembic_version_column.py` | No | Alembic `alembic_version.version_num` guard in `alembic/env.py` (long `revision` ids vs legacy VARCHAR(32)); see README Troubleshooting |
 | `test_capability_registry.py` | No | Registry keys for the only two proposal kinds the agent can produce (`email_send`, `email_reply`) and their preview helpers |
 | `test_ai_providers.py` | No | AI provider adapters (OpenAI, Ollama, Anthropic, OpenRouter, Azure, LiteLLM, custom OpenAI-compatible): URLs, headers, parsing, error codes — HTTP mocked via `httpx.AsyncClient` patches |
 | `test_ai_routes.py` | No | Provider registry enumeration, API key sentinel resolution, Pydantic normalization for user AI settings |
@@ -102,6 +103,6 @@ There is no Playwright/Cypress suite for the chat or inbox yet. After changing t
 
 | Area | Runner | Needs DB |
 |------|--------|----------|
-| `test_capability_registry`, `test_ai_providers`, `test_ai_routes` | `pytest` | No |
+| `test_alembic_version_column`, `test_capability_registry`, `test_ai_providers`, `test_ai_routes` | `pytest` | No |
 | `test_agent_tools` (except registry test) | `pytest` | Yes (skips if unreachable) |
 | Frontend | `npm run lint` | No |

@@ -1,5 +1,38 @@
+"""Alembic async environment.
+
+Operational triage (for humans and coding agents)
+-------------------------------------------------
+**Symptom A — backend container exits during startup**
+
+- ``docker compose ps``: ``backend`` is ``Exited (1)``.
+- Logs show ``alembic upgrade head`` then::
+
+    asyncpg.exceptions.StringDataRightTruncationError: value too long for type character varying(32)
+    [SQL: UPDATE alembic_version SET version_num='...']
+
+**Symptom B — UI shows 500 / Next.js proxy / BACKEND_INTERNAL_URL**
+
+- Often the API never reached Uvicorn because migrations aborted (check backend logs first).
+
+**Cause**
+
+Alembic creates ``alembic_version.version_num`` as **VARCHAR(32)** by default. A
+migration's ``revision`` string longer than 32 characters fails the version-row
+UPDATE even when the migration DDL itself is valid.
+
+**Mitigation**
+
+:func:`_widen_alembic_version_num` runs before :func:`context.run_migrations`
+and widens the column to :data:`ALEMBIC_VERSION_NUM_MAX_LENGTH` on PostgreSQL.
+See also ``README.md`` (Troubleshooting) and ``.cursor/rules/alembic-version-column.mdc``.
+
+**Grep anchors**
+
+``StringDataRightTruncation``, ``alembic_version``, ``VARCHAR(32)``
+"""
 from __future__ import annotations
 
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -20,9 +53,19 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+_log = logging.getLogger("alembic.env")
+
+# Widen alembic_version.version_num to at least this many characters (Postgres).
+# Keep in sync with ``backend/tests/test_alembic_version_column.py``.
+ALEMBIC_VERSION_NUM_MAX_LENGTH = 255
+
 
 def _widen_alembic_version_num(connection: Connection) -> None:
-    """Alembic defaults ``alembic_version.version_num`` to VARCHAR(32); longer revision ids fail on upgrade."""
+    """Ensure ``alembic_version.version_num`` can store long ``revision`` strings.
+
+    Alembic's default is VARCHAR(32); see module docstring for failure mode
+    (``StringDataRightTruncation`` on ``UPDATE alembic_version``).
+    """
     if connection.dialect.name != "postgresql":
         return
     row = connection.execute(
@@ -38,10 +81,22 @@ def _widen_alembic_version_num(connection: Connection) -> None:
     ).fetchone()
     if row is None or row[0] is None:
         return
-    if row[0] >= 255:
+    prev = row[0]
+    if prev >= ALEMBIC_VERSION_NUM_MAX_LENGTH:
         return
-    connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"))
+    connection.execute(
+        text(
+            f"ALTER TABLE alembic_version ALTER COLUMN version_num "
+            f"TYPE VARCHAR({ALEMBIC_VERSION_NUM_MAX_LENGTH})"
+        )
+    )
     connection.commit()
+    _log.info(
+        "Widened alembic_version.version_num from VARCHAR(%s) to VARCHAR(%s) "
+        "(Alembic default 32 is too short for some revision ids; see alembic/env.py docstring).",
+        prev,
+        ALEMBIC_VERSION_NUM_MAX_LENGTH,
+    )
 
 
 def run_migrations_offline() -> None:

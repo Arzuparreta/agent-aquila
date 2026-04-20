@@ -43,6 +43,16 @@ docker compose up --build
 
 Migrations run when the API starts. **First boot on an old database** may apply a destructive migration that drops legacy mirror/CRM tables — back up if you care about that data.
 
+### Troubleshooting: backend exits, UI 500 / proxy error
+
+| What you see | What to check |
+|----------------|---------------|
+| `backend` container **Exited (1)** right after `alembic upgrade head` | `docker logs <backend-container>` |
+| Log: **`StringDataRightTruncationError`**, **`character varying(32)`**, SQL mentions **`alembic_version`** | PostgreSQL’s `alembic_version.version_num` was too short for a migration’s `revision` string. **`backend/alembic/env.py`** widens that column automatically before upgrades; if the error returns, confirm that helper was not removed or bypassed. |
+| UI: **Server error (500)** and text about **Next.js proxy** / **`BACKEND_INTERNAL_URL`** | Usually the API never started—check **backend** logs first, not only `frontend`. |
+
+**Grep-friendly keywords for agents:** `StringDataRightTruncation`, `alembic_version`, `_widen_alembic_version_num`. Regression test: `backend/tests/test_alembic_version_column.py`.
+
 Connect providers under **Settings → External connectors**. If you already had Gmail linked, you may need to reconnect once so the grant includes `gmail.settings.basic` (filters for mute/spam); the UI shows a banner when scopes are missing.
 
 ---
