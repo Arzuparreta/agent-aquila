@@ -1,5 +1,6 @@
 "use client";
 
+import { intlLocaleTag, useTranslation } from "@/lib/i18n";
 import type { ChatCard, ChatMessage } from "@/types/api";
 
 import { ApprovalCard } from "./cards/approval-card";
@@ -8,8 +9,8 @@ import { KeyDecryptErrorCard } from "./cards/key-decrypt-error-card";
 import { OAuthCard } from "./cards/oauth-card";
 import { ProviderErrorCard } from "./cards/provider-error-card";
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+function formatTime(iso: string, localeTag: string): string {
+  return new Date(iso).toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
 }
 
 export function MessageBubble({
@@ -23,6 +24,8 @@ export function MessageBubble({
   onRetryFailedMessage?: (messageId: number) => void;
   retryDisabled?: boolean;
 }) {
+  const { t, locale } = useTranslation();
+  const localeTag = intlLocaleTag(locale);
   const isUser = message.role === "user";
   const isEvent = message.role === "event";
   const isSystem = message.role === "system";
@@ -76,11 +79,11 @@ export function MessageBubble({
             onClick={() => onRetryFailedMessage?.(message.id)}
             className="self-start rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Reintentar
+            {t("chat.message.retry")}
           </button>
         ) : null}
         <div className={`text-xs text-fg-subtle ${isUser ? "text-right" : "text-left"}`}>
-          {formatTime(message.created_at)}
+          {formatTime(message.created_at, localeTag)}
         </div>
       </div>
     </div>

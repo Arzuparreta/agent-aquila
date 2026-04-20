@@ -50,19 +50,16 @@ export default function SettingsPage() {
             href="/"
             className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-muted"
           >
-            ← Volver al chat
+            {t("settings.technical.backToChat")}
           </Link>
-          <h1 className="text-base font-semibold">Ajustes técnicos</h1>
+          <h1 className="text-base font-semibold">{t("settings.technical.title")}</h1>
         </header>
         <main className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-4">
           <Card>
             <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold">Modelos de IA</h2>
-                <p className="mt-1 text-xs text-fg-subtle">
-                  Trae tu propia clave (BYOK). Guarda varios proveedores y cambia el activo
-                  cuando quieras — tus claves se conservan cifradas por separado.
-                </p>
+                <h2 className="text-base font-semibold">{t("settings.technical.aiModelsTitle")}</h2>
+                <p className="mt-1 text-xs text-fg-subtle">{t("settings.technical.aiModelsIntro")}</p>
               </div>
               <label className="inline-flex items-center gap-2 text-sm text-fg">
                 <input
@@ -78,10 +75,10 @@ export default function SettingsPage() {
                     }
                   }}
                 />
-                Desactivar IA temporalmente
+                {t("settings.technical.disableAiTemp")}
               </label>
               <label className="flex flex-col gap-1 text-sm text-fg">
-                <span className="text-fg-muted">Modo harness del agente (herramientas)</span>
+                <span className="text-fg-muted">{t("settings.technical.harnessLabel")}</span>
                 <select
                   className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
                   value={api.harnessMode}
@@ -90,16 +87,14 @@ export default function SettingsPage() {
                     await api.setHarnessMode(v);
                   }}
                 >
-                  <option value="auto">Auto (recomendado — detecta Ollama qwen3/hermes)</option>
-                  <option value="native">Nativo (API tools + tool_choice)</option>
-                  <option value="prompted">Prompted (&lt;tool_call&gt; en texto)</option>
+                  <option value="auto">{t("settings.technical.harness.auto")}</option>
+                  <option value="native">{t("settings.technical.harness.native")}</option>
+                  <option value="prompted">{t("settings.technical.harness.prompted")}</option>
                 </select>
-                <span className="text-xs text-fg-subtle">
-                  Si un modelo local ignora tool calling, usa Auto o Prompted. Ver docs/PROVIDERS.md.
-                </span>
+                <span className="text-xs text-fg-subtle">{t("settings.technical.harnessHint")}</span>
               </label>
               <div className="flex min-w-[16rem] flex-col gap-1 text-sm text-fg">
-                <span className="text-fg-muted">Zona horaria del agente (IANA)</span>
+                <span className="text-fg-muted">{t("settings.technical.timezoneLabel")}</span>
                 <input
                   className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
                   list="iana-timezones"
@@ -125,15 +120,13 @@ export default function SettingsPage() {
                     className="rounded-md border border-border bg-surface-muted px-2 py-1 text-xs text-fg hover:bg-surface-base"
                     onClick={() => void api.applyBrowserTimeZone()}
                   >
-                    Usar zona del navegador
+                    {t("settings.technical.useBrowserTz")}
                   </button>
                 </div>
-                <span className="text-xs text-fg-subtle">
-                  El reloj del sistema (hoy / mañana / citas) usa esta zona. Déjalo vacío para UTC.
-                </span>
+                <span className="text-xs text-fg-subtle">{t("settings.technical.timezoneHint")}</span>
               </div>
               <label className="flex min-w-[12rem] flex-col gap-1 text-sm text-fg">
-                <span className="text-fg-muted">Formato de hora (agente)</span>
+                <span className="text-fg-muted">{t("settings.technical.timeFormatLabel")}</span>
                 <select
                   className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
                   value={api.timeFormat}
@@ -142,9 +135,9 @@ export default function SettingsPage() {
                     void api.setTimeFormat(v);
                   }}
                 >
-                  <option value="auto">24 h (automático)</option>
-                  <option value="24">24 h</option>
-                  <option value="12">12 h (AM/PM)</option>
+                  <option value="auto">{t("settings.technical.timeFormat.auto")}</option>
+                  <option value="24">{t("settings.technical.timeFormat.24")}</option>
+                  <option value="12">{t("settings.technical.timeFormat.12")}</option>
                 </select>
               </label>
             </div>
@@ -159,7 +152,7 @@ export default function SettingsPage() {
             ) : null}
 
             {api.loading && providers.length === 0 ? (
-              <p className="text-sm text-fg-subtle">Cargando proveedores…</p>
+              <p className="text-sm text-fg-subtle">{t("settings.providersLoading")}</p>
             ) : (
               <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
                 <ProviderList
@@ -188,26 +181,23 @@ export default function SettingsPage() {
           </Card>
 
           <Card>
-            <h2 className="mb-1 text-base font-semibold">Conectores</h2>
-            <p className="mb-3 text-xs text-fg-subtle">
-              Casi siempre tu mánager te guiará para conectar Gmail, Outlook o Google Drive
-              desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.
-            </p>
+            <h2 className="mb-1 text-base font-semibold">{t("settings.connectorsCardTitle")}</h2>
+            <p className="mb-3 text-xs text-fg-subtle">{t("settings.connectorsCardIntro")}</p>
             <ConnectorsSection />
           </Card>
 
           <Card>
-            <h2 className="mb-1 text-base font-semibold">Memoria del agente</h2>
+            <h2 className="mb-1 text-base font-semibold">{t("settings.memorySectionTitle")}</h2>
             <MemorySection />
           </Card>
 
           <Card>
-            <h2 className="mb-1 text-base font-semibold">Habilidades del agente</h2>
+            <h2 className="mb-1 text-base font-semibold">{t("settings.skillsSectionTitle")}</h2>
             <SkillsSection />
           </Card>
 
           <Card>
-            <h2 className="mb-1 text-base font-semibold">Mantenimiento</h2>
+            <h2 className="mb-1 text-base font-semibold">{t("settings.maintenanceSectionTitle")}</h2>
             <MaintenanceSection />
           </Card>
         </main>

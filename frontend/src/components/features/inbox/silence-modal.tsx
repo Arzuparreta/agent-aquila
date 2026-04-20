@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { useTranslation } from "@/lib/i18n";
+
 export type SilenceMode = "mute" | "spam";
 
 /**
@@ -27,6 +29,7 @@ export function SilenceModal({
   onCancel: () => void;
   onConfirm: (mode: SilenceMode) => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState<SilenceMode | null>(null);
 
   useEffect(() => {
@@ -49,11 +52,8 @@ export function SilenceModal({
       aria-modal="true"
     >
       <div className="w-full max-w-md rounded-xl border border-border-subtle bg-surface-elevated p-5 shadow-xl">
-        <h2 className="text-base font-semibold text-fg">Silenciar remitente</h2>
-        <p className="mt-1 text-sm text-fg-muted">
-          Aplicaremos esta acción directamente en tu cuenta de Gmail (filtro
-          permanente para futuros correos).
-        </p>
+        <h2 className="text-base font-semibold text-fg">{t("silence.title")}</h2>
+        <p className="mt-1 text-sm text-fg-muted">{t("silence.intro")}</p>
         <div className="mt-3 rounded-md bg-surface-muted px-3 py-2 text-sm">
           <div className="font-medium text-fg">
             {senderName || senderEmail}
@@ -71,10 +71,8 @@ export function SilenceModal({
             className="rounded-md bg-surface-muted px-3 py-2 text-sm font-medium text-fg hover:bg-surface-inset disabled:opacity-60"
           >
             <div className="flex flex-col items-start text-left">
-              <span>Silenciar / Mute</span>
-              <span className="text-[11px] font-normal text-fg-subtle">
-                Salta la bandeja, marca como leído.
-              </span>
+              <span>{t("silence.muteLabel")}</span>
+              <span className="text-[11px] font-normal text-fg-subtle">{t("silence.muteHint")}</span>
             </div>
           </button>
           <button
@@ -84,10 +82,8 @@ export function SilenceModal({
             className="rounded-md bg-rose-700/40 px-3 py-2 text-sm font-medium text-rose-100 hover:bg-rose-700/60 disabled:opacity-60"
           >
             <div className="flex flex-col items-start text-left">
-              <span>Spam / Spam</span>
-              <span className="text-[11px] font-normal text-rose-200/80">
-                Mueve a Spam de Gmail.
-              </span>
+              <span>{t("silence.spamLabel")}</span>
+              <span className="text-[11px] font-normal text-rose-200/80">{t("silence.spamHint")}</span>
             </div>
           </button>
         </div>
@@ -99,7 +95,7 @@ export function SilenceModal({
             disabled={busy !== null}
             className="rounded-md px-3 py-1.5 text-sm text-fg-muted hover:bg-interactive-hover disabled:opacity-60"
           >
-            Cancelar
+            {t("common.cancel")}
           </button>
         </div>
       </div>

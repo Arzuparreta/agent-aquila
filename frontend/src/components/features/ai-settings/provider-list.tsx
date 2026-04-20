@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { AIProvider, ProviderConfig } from "@/types/api";
 
@@ -34,6 +35,7 @@ export function ProviderList({
   onSelect,
   onStartNew
 }: ProviderListProps) {
+  const { t } = useTranslation();
   const [adding, setAdding] = useState(false);
 
   const configuredKinds = new Set(configs.map((c) => c.provider_kind));
@@ -43,14 +45,14 @@ export function ProviderList({
     <aside className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
-          Proveedores
+          {t("providerRail.title")}
         </h3>
-        <span className="text-xs text-fg-subtle">{configs.length} guardados</span>
+        <span className="text-xs text-fg-subtle">{t("providerRail.savedCount", { count: configs.length })}</span>
       </div>
       <ul className="flex flex-col gap-1.5">
         {configs.length === 0 ? (
           <li className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-fg-subtle">
-            Aún no has guardado ningún proveedor. Añade uno abajo para empezar.
+            {t("providerRail.empty")}
           </li>
         ) : null}
         {configs.map((cfg) => {
@@ -76,12 +78,12 @@ export function ProviderList({
                     <span className="truncate text-sm font-medium text-fg">{label}</span>
                     {isActive ? (
                       <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                        Activo
+                        {t("providerRail.active")}
                       </span>
                     ) : null}
                   </span>
                   <span className="mt-0.5 flex items-center gap-2 text-xs text-fg-subtle">
-                    <span className="truncate">{cfg.chat_model || "(sin modelo)"}</span>
+                    <span className="truncate">{cfg.chat_model || t("providerRail.noModel")}</span>
                   </span>
                 </span>
                 <StatusPill
@@ -103,11 +105,11 @@ export function ProviderList({
               onClick={() => setAdding(true)}
               className="w-full justify-center text-sm"
             >
-              + Añadir proveedor
+              {t("providerRail.addProvider")}
             </Button>
           ) : (
             <div className="rounded-md border border-border bg-surface-muted p-2">
-              <div className="mb-1 px-1 text-xs font-medium text-fg-subtle">Elige un proveedor:</div>
+              <div className="mb-1 px-1 text-xs font-medium text-fg-subtle">{t("providerRail.chooseProvider")}</div>
               <ul className="flex flex-col gap-0.5">
                 {providersByIdAvailable.map((p) => (
                   <li key={p.id}>
@@ -130,7 +132,7 @@ export function ProviderList({
                 onClick={() => setAdding(false)}
                 className="mt-1 block w-full rounded px-2 py-1 text-xs text-fg-subtle hover:bg-interactive-hover"
               >
-                Cancelar
+                {t("common.cancel")}
               </button>
             </div>
           )}

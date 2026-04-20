@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { intlLocaleTag, useTranslation } from "@/lib/i18n";
 
 type MemoryRow = {
   id: number;
@@ -20,6 +21,7 @@ type MemoryRow = {
  * elsewhere via the ``upsert_memory`` tool.
  */
 export function MemorySection() {
+  const { t, locale } = useTranslation();
   const [rows, setRows] = useState<MemoryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -30,9 +32,9 @@ export function MemorySection() {
       setRows(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cargar la memoria.");
+      setError(err instanceof ApiError ? err.message : t("memory.loadError"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -40,27 +42,23 @@ export function MemorySection() {
 
   const onDelete = useCallback(
     async (key: string) => {
-      if (!confirm(`¿Borrar la memoria "${key}"?`)) return;
+      if (!confirm(t("memory.deleteConfirm", { key }))) return;
       setBusy(key);
       try {
         await apiFetch(`/memory/${encodeURIComponent(key)}`, { method: "DELETE" });
         setRows((prev) => prev?.filter((r) => r.key !== key) ?? null);
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "No se pudo borrar.");
+        setError(err instanceof ApiError ? err.message : t("memory.deleteError"));
       } finally {
         setBusy(null);
       }
     },
-    [],
+    [t],
   );
 
   return (
     <div className="grid gap-2">
-      <p className="text-xs text-fg-subtle">
-        Lo que el agente recuerda entre conversaciones (preferencias, hechos
-        recurrentes, etc.). Puedes borrar entradas que ya no apliquen — el agente
-        seguirá actualizándolas por su cuenta cuando aprenda algo nuevo.
-      </p>
+      <p className="text-xs text-fg-subtle">{t("memory.intro")}</p>
       {error ? (
         <div
           role="alert"
@@ -70,12 +68,9 @@ export function MemorySection() {
         </div>
       ) : null}
       {rows === null ? (
-        <p className="text-xs text-fg-subtle">Cargando…</p>
+        <p className="text-xs text-fg-subtle">{t("common.loading")}</p>
       ) : rows.length === 0 ? (
-        <p className="text-xs text-fg-subtle">
-          Aún no hay memorias. El agente las creará a medida que aprenda cosas
-          tuyas.
-        </p>
+        <p className="text-xs text-fg-subtle">{t("memory.empty")}</p>
       ) : (
         <ul className="divide-y divide-border-subtle rounded-md border border-border-subtle bg-surface-elevated">
           {rows.map((row) => (
@@ -103,7 +98,7 @@ export function MemorySection() {
                   disabled={busy === row.key}
                   className="shrink-0 rounded-md px-2 py-0.5 text-xs text-rose-300 hover:bg-rose-700/30 disabled:opacity-60"
                 >
-                  Borrar
+                  {t("memory.delete")}
                 </button>
               </div>
               <p className="whitespace-pre-wrap text-xs text-fg-muted">
@@ -111,7 +106,9 @@ export function MemorySection() {
               </p>
               {row.updated_at ? (
                 <div className="text-[11px] text-fg-subtle">
-                  Actualizado {new Date(row.updated_at).toLocaleString("es-ES")}
+                  {t("memory.updated", {
+                    when: new Date(row.updated_at).toLocaleString(intlLocaleTag(locale))
+                  })}
                 </div>
               ) : null}
             </li>

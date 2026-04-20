@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { AIHealth } from "@/types/api";
 
@@ -28,6 +29,7 @@ const REFRESH_MS = 60_000;
  *   gris    = AI disabled by user
  */
 export function AIStatusBadge() {
+  const { t } = useTranslation();
   const [health, setHealth] = useState<AIHealth | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,14 +59,14 @@ export function AIStatusBadge() {
 
   if (loading || !health) return null;
 
-  const tone = resolveTone(health);
+  const tone = resolveTone(health, t);
   const title = health.message ?? tone.label;
 
   return (
     <Link
       href="/settings"
       title={title}
-      aria-label={`Estado de IA: ${title}`}
+      aria-label={t("aiStatus.aria", { status: title })}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
         tone.borderCls,
@@ -78,10 +80,13 @@ export function AIStatusBadge() {
   );
 }
 
-function resolveTone(health: AIHealth): Tone {
+function resolveTone(
+  health: AIHealth,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string
+): Tone {
   if (health.ai_disabled) {
     return {
-      label: "IA desactivada",
+      label: t("aiStatus.disabled"),
       dot: "bg-slate-400",
       textCls: "text-fg-subtle",
       borderCls: "border-border"
@@ -89,15 +94,16 @@ function resolveTone(health: AIHealth): Tone {
   }
   if (health.needs_setup || !health.active_provider_kind) {
     return {
-      label: "Configura IA",
+      label: t("aiStatus.configure"),
       dot: "bg-amber-400",
       textCls: "text-amber-700 dark:text-amber-300",
       borderCls: "border-amber-300 dark:border-amber-900/40"
     };
   }
   if (health.last_test?.ok === false) {
+    const name = providerName(health.active_provider_kind) || t("aiStatus.shortName");
     return {
-      label: providerName(health.active_provider_kind) + " · error",
+      label: name + t("aiStatus.errorSuffix"),
       dot: "bg-rose-500",
       textCls: "text-rose-700 dark:text-rose-300",
       borderCls: "border-rose-300 dark:border-rose-900/40"
@@ -105,14 +111,14 @@ function resolveTone(health: AIHealth): Tone {
   }
   if (health.last_test?.ok === true) {
     return {
-      label: providerName(health.active_provider_kind),
+      label: providerName(health.active_provider_kind) || t("aiStatus.shortName"),
       dot: "bg-emerald-500",
       textCls: "text-emerald-700 dark:text-emerald-300",
       borderCls: "border-emerald-300 dark:border-emerald-900/40"
     };
   }
   return {
-    label: providerName(health.active_provider_kind),
+    label: providerName(health.active_provider_kind) || t("aiStatus.shortName"),
     dot: "bg-slate-400",
     textCls: "text-fg-subtle",
     borderCls: "border-border"
@@ -120,7 +126,7 @@ function resolveTone(health: AIHealth): Tone {
 }
 
 function providerName(kind: string | null): string {
-  if (!kind) return "IA";
+  if (!kind) return "";
   switch (kind) {
     case "openai":
     case "openai_compatible":

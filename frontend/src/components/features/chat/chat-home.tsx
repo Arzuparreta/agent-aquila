@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import type { ChatThread } from "@/types/api";
 
 import { ChatThreadList } from "./thread-list";
@@ -20,6 +21,7 @@ import { ChatTopBar } from "./top-bar";
  * single-user-per-instance app and the chat surface owns most of the live data.
  */
 export function ChatHome() {
+  const { t } = useTranslation();
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -37,12 +39,12 @@ export function ChatHome() {
         setActiveId((prev) => prev ?? rows.find((r) => !r.archived)?.id ?? rows[0]?.id ?? null);
         setError(null);
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "No se pudo cargar la lista.");
+        setError(err instanceof ApiError ? err.message : t("chat.errors.loadThreadList"));
       } finally {
         setLoading(false);
       }
     },
-    [showArchived]
+    [showArchived, t]
   );
 
   useEffect(() => {
@@ -110,16 +112,16 @@ export function ChatHome() {
           body: JSON.stringify({ title })
         });
         setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn));
-        setStatusMessage({ kind: "ok", text: "Conversación renombrada." });
+        setStatusMessage({ kind: "ok", text: t("chat.status.renamed") });
       } catch (err) {
         setStatusMessage({
           kind: "error",
-          text: err instanceof ApiError ? err.message : "No se pudo renombrar."
+          text: err instanceof ApiError ? err.message : t("chat.errors.renameFailed")
         });
         throw err;
       }
     },
-    []
+    [t]
   );
 
   const onTogglePinThread = useCallback(
@@ -132,16 +134,16 @@ export function ChatHome() {
         setThreads((prev) => prev.map((t) => (t.id === id ? updated : t)).sort(threadSortFn));
         setStatusMessage({
           kind: "ok",
-          text: next ? "Conversación fijada arriba." : "Fijación quitada."
+          text: next ? t("chat.status.pinned") : t("chat.status.unpinned")
         });
       } catch (err) {
         setStatusMessage({
           kind: "error",
-          text: err instanceof ApiError ? err.message : "No se pudo actualizar."
+          text: err instanceof ApiError ? err.message : t("chat.errors.updateFailed")
         });
       }
     },
-    []
+    [t]
   );
 
   const onToggleArchiveThread = useCallback(
@@ -164,10 +166,10 @@ export function ChatHome() {
         });
         setStatusMessage({
           kind: "ok",
-          text: next ? "Conversación archivada." : "Conversación restaurada.",
+          text: next ? t("chat.status.archived") : t("chat.status.restored"),
           action: next && !showArchived
             ? {
-                label: "Ver archivadas",
+                label: t("chat.status.viewArchived"),
                 onClick: () => {
                   setShowArchived(true);
                   setActiveId(id);
@@ -179,11 +181,11 @@ export function ChatHome() {
       } catch (err) {
         setStatusMessage({
           kind: "error",
-          text: err instanceof ApiError ? err.message : "No se pudo archivar."
+          text: err instanceof ApiError ? err.message : t("chat.errors.archiveFailed")
         });
       }
     },
-    [activeId, pickNextActiveAfter, refreshThreads, showArchived]
+    [activeId, pickNextActiveAfter, refreshThreads, showArchived, t]
   );
 
   const onDeleteThread = useCallback(
@@ -197,22 +199,22 @@ export function ChatHome() {
           }
           return remaining;
         });
-        setStatusMessage({ kind: "ok", text: "Conversación eliminada." });
+        setStatusMessage({ kind: "ok", text: t("chat.status.deleted") });
       } catch (err) {
         setStatusMessage({
           kind: "error",
-          text: err instanceof ApiError ? err.message : "No se pudo eliminar."
+          text: err instanceof ApiError ? err.message : t("chat.errors.deleteFailed")
         });
         throw err;
       }
     },
-    [activeId, pickNextActiveAfter, showArchived]
+    [activeId, pickNextActiveAfter, showArchived, t]
   );
 
   return (
     <div className="app-shell bg-surface-base text-fg">
       <ChatTopBar
-        title={activeThread?.title ?? "Mánager"}
+        title={activeThread?.title ?? t("chat.defaultTitle")}
         activeThread={activeThread}
         onOpenDrawer={() => setDrawerOpen(true)}
         onRenameThread={onRenameThread}
@@ -245,7 +247,7 @@ export function ChatHome() {
             type="button"
             onClick={() => setStatusMessage(null)}
             className="rounded p-0.5 text-fg-muted hover:bg-interactive-hover-strong hover:text-fg"
-            aria-label="Cerrar mensaje"
+            aria-label={t("chat.dismissToast")}
           >
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path d="M6 6l12 12M6 18 18 6" />
@@ -309,7 +311,7 @@ export function ChatHome() {
             <button
               onClick={() => setDrawerOpen(false)}
               className="flex-1 bg-scrim"
-              aria-label="Cerrar menú"
+              aria-label={t("chat.closeDrawer")}
             />
           </div>
         ) : null}
@@ -322,9 +324,7 @@ export function ChatHome() {
             />
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-fg-subtle">
-              {loading
-                ? "Cargando…"
-                : "No hay conversaciones todavía. Empieza escribiendo cualquier cosa."}
+              {loading ? t("chat.empty.loading") : t("chat.empty.noThreadsYet")}
             </div>
           )}
         </main>
@@ -347,17 +347,18 @@ function ArchiveTabs({
   showArchived: boolean;
   onChange: (next: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const tabClass = (active: boolean) =>
     `flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition ${
       active ? "border-b-2 border-primary text-fg" : "text-fg-subtle hover:text-fg-muted"
     }`;
   return (
     <div className="flex border-b border-border-subtle">
-      <button onClick={() => onChange(false)} className={tabClass(!showArchived)}>
-        Activas
+      <button type="button" onClick={() => onChange(false)} className={tabClass(!showArchived)}>
+        {t("chat.archive.active")}
       </button>
-      <button onClick={() => onChange(true)} className={tabClass(showArchived)}>
-        Archivadas
+      <button type="button" onClick={() => onChange(true)} className={tabClass(showArchived)}>
+        {t("chat.archive.archived")}
       </button>
     </div>
   );

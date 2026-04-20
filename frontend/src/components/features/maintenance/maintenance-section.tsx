@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { apiFetch, ApiError } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 
 /**
  * Settings card body that lets the artist hard-delete the legacy auto-spawned
@@ -13,6 +14,7 @@ import { apiFetch, ApiError } from "@/lib/api";
  * never destroys real conversations.
  */
 export function MaintenanceSection() {
+  const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -27,12 +29,12 @@ export function MaintenanceSection() {
       });
       setResult(
         res.deleted === 0
-          ? "No había conversaciones automáticas que limpiar."
-          : `Eliminadas ${res.deleted} conversaciones automáticas.`
+          ? t("maintenance.resultNone")
+          : t("maintenance.resultCount", { count: res.deleted })
       );
       setConfirmOpen(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo limpiar.");
+      setError(err instanceof ApiError ? err.message : t("maintenance.errorClean"));
     } finally {
       setPending(false);
     }
@@ -40,29 +42,24 @@ export function MaintenanceSection() {
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-fg-subtle">
-        Borra las conversaciones que se generaron automáticamente para correos
-        entrantes (por ejemplo &ldquo;Mozilla&rdquo;, &ldquo;LinkedIn&rdquo;,
-        &ldquo;Correo · X&rdquo;) en las que nunca llegaste a escribir nada.
-        Las conversaciones reales en las que sí participaste no se tocan.
-      </p>
+      <p className="text-xs text-fg-subtle">{t("maintenance.intro")}</p>
       <div className="flex items-center gap-3">
         <Button
           onClick={() => setConfirmOpen(true)}
           className="bg-red-600 text-white hover:bg-red-700"
           disabled={pending}
         >
-          Limpiar conversaciones automáticas
+          {t("maintenance.button")}
         </Button>
         {result ? <span className="text-sm text-emerald-700">{result}</span> : null}
         {error ? <span className="text-sm text-rose-600">{error}</span> : null}
       </div>
       <ConfirmDialog
         open={confirmOpen}
-        title="¿Borrar conversaciones automáticas?"
-        description="Se eliminarán de forma permanente todas las conversaciones generadas automáticamente por correos / contactos / eventos en las que no escribiste nada."
-        confirmLabel="Borrar"
-        cancelLabel="Cancelar"
+        title={t("maintenance.confirmTitle")}
+        description={t("maintenance.confirmDescription")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
         pending={pending}
         onConfirm={onConfirm}
         onCancel={() => setConfirmOpen(false)}

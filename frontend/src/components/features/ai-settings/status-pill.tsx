@@ -1,5 +1,6 @@
 "use client";
 
+import { intlLocaleTag, useTranslation, type Locale, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { ProviderTestStatus } from "@/types/api";
 
@@ -11,6 +12,8 @@ type StatusPillProps = {
   showLabel?: boolean;
 };
 
+type TFn = (key: TranslationKey, params?: Record<string, string | number>) => string;
+
 /**
  * Coloured dot + optional label that summarises a provider's last test
  * result. Used in the rail (one per provider card) and in the chat top bar
@@ -21,9 +24,10 @@ type StatusPillProps = {
  *   gris   = never tested OR no API key (for providers that need one)
  */
 export function StatusPill({ status, hasApiKey, authNone, size = "sm", showLabel = false }: StatusPillProps) {
-  const tone = resolveTone(status, hasApiKey, authNone);
+  const { t, locale } = useTranslation();
+  const tone = resolveTone(t, status, hasApiKey, authNone);
   const dotSize = size === "sm" ? "h-2 w-2" : "h-2.5 w-2.5";
-  const tooltip = describe(status, hasApiKey, authNone);
+  const tooltip = describe(t, locale, status, hasApiKey, authNone);
   return (
     <span
       className={cn(
@@ -40,54 +44,67 @@ export function StatusPill({ status, hasApiKey, authNone, size = "sm", showLabel
   );
 }
 
-function resolveTone(status: ProviderTestStatus, hasApiKey: boolean, authNone?: boolean) {
+function resolveTone(t: TFn, status: ProviderTestStatus, hasApiKey: boolean, authNone?: boolean) {
   if (status?.ok === true) {
     return {
-      label: "Conectado",
+      label: t("statusPill.connected"),
       dot: "bg-emerald-500",
       text: "text-emerald-700 dark:text-emerald-300"
     };
   }
   if (status?.ok === false) {
     return {
-      label: "Error",
+      label: t("statusPill.error"),
       dot: "bg-rose-500",
       text: "text-rose-700 dark:text-rose-300"
     };
   }
   if (!hasApiKey && !authNone) {
     return {
-      label: "Sin clave",
+      label: t("statusPill.noKey"),
       dot: "bg-amber-400",
       text: "text-amber-700 dark:text-amber-300"
     };
   }
   return {
-    label: "Sin probar",
+    label: t("statusPill.notTested"),
     dot: "bg-slate-400",
     text: "text-fg-subtle"
   };
 }
 
-function describe(status: ProviderTestStatus, hasApiKey: boolean, authNone?: boolean): string {
+function describe(
+  t: TFn,
+  locale: Locale,
+  status: ProviderTestStatus,
+  hasApiKey: boolean,
+  authNone?: boolean
+): string {
+  const tag = intlLocaleTag(locale);
   if (status?.ok === true) {
-    const when = status.at ? ` (${formatRelative(status.at)})` : "";
-    return `Conectado${when}: ${status.message ?? ""}`;
+    const when = status.at ? ` (${formatRelative(t, tag, status.at)})` : "";
+    return t("statusPill.tooltip.connected", {
+      when,
+      message: status.message ?? ""
+    });
   }
   if (status?.ok === false) {
-    const when = status.at ? ` (${formatRelative(status.at)})` : "";
-    return `Error${when}: ${status.message ?? "fallo en la última prueba"}`;
+    const when = status.at ? ` (${formatRelative(t, tag, status.at)})` : "";
+    return t("statusPill.tooltip.error", {
+      when,
+      message: status.message ?? t("statusPill.lastTestFailed")
+    });
   }
-  if (!hasApiKey && !authNone) return "Falta la API key";
-  return "Aún sin probar — pulsa Probar conexión";
+  if (!hasApiKey && !authNone) return t("statusPill.tooltip.noKey");
+  return t("statusPill.tooltip.notTested");
 }
 
-function formatRelative(iso: string): string {
+function formatRelative(t: TFn, localeTag: string, iso: string): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return iso;
   const diffSec = Math.round((Date.now() - then) / 1000);
-  if (diffSec < 60) return `hace ${diffSec}s`;
-  if (diffSec < 3600) return `hace ${Math.round(diffSec / 60)} min`;
-  if (diffSec < 86_400) return `hace ${Math.round(diffSec / 3600)} h`;
-  return new Date(iso).toLocaleString();
+  if (diffSec < 60) return t("time.relative.seconds", { seconds: diffSec });
+  if (diffSec < 3600) return t("time.relative.minutes", { minutes: Math.round(diffSec / 60) });
+  if (diffSec < 86_400) return t("time.relative.hours", { hours: Math.round(diffSec / 3600) });
+  return new Date(iso).toLocaleString(localeTag);
 }

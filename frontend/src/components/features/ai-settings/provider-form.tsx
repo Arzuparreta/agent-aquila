@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { AIProvider, ProviderConfig } from "@/types/api";
 
@@ -25,6 +26,7 @@ type ProviderFormProps = {
  * actions: probar, guardar, usar como activo.
  */
 export function ProviderForm({ api }: ProviderFormProps) {
+  const { t } = useTranslation();
   const {
     selectedKind,
     selectedConfig,
@@ -62,7 +64,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
   if (!selectedKind || !selectedProvider) {
     return (
       <div className="flex min-h-[16rem] flex-col items-center justify-center rounded-md border border-dashed border-border bg-surface-muted/40 p-6 text-center text-sm text-fg-subtle">
-        Selecciona un proveedor de la izquierda o pulsa &quot;+ Añadir proveedor&quot; para empezar.
+        {t("providerForm.selectPrompt")}
       </div>
     );
   }
@@ -82,7 +84,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
             size="md"
           />
         ) : (
-          <span className="text-xs text-fg-subtle">Nuevo (sin guardar)</span>
+          <span className="text-xs text-fg-subtle">{t("providerForm.newUnsaved")}</span>
         )}
         {selectedProvider.docs_url ? (
           <a
@@ -91,7 +93,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
             rel="noreferrer"
             className="text-xs text-primary underline-offset-4 hover:underline"
           >
-            Documentación ↗
+            {t("providerForm.docs")}
           </a>
         ) : null}
       </header>
@@ -103,22 +105,23 @@ export function ProviderForm({ api }: ProviderFormProps) {
           draft={draft}
           storedApiKey={Boolean(selectedConfig?.has_api_key)}
           onChange={(patch) => updateDraft(patch)}
+          t={t}
         />
 
         <TestConnectionButton onTest={() => void test()} pending={testing} result={testResult} />
 
         <ModelSelector
-          label="Modelo de chat"
+          label={t("settings.chatModel")}
           required
           value={draft.chatModel}
           onChange={(v) => updateDraft({ chatModel: v })}
           models={models}
           loading={loadingModels}
           capability="chat"
-          helpText={modelHelpText(selectedProvider, models, loadingModels)}
+          helpText={modelHelpText(t, selectedProvider, models, loadingModels)}
         />
         <ModelSelector
-          label="Modelo de embeddings"
+          label={t("settings.embeddingModel")}
           required
           value={draft.embeddingModel}
           onChange={(v) => updateDraft({ embeddingModel: v })}
@@ -128,15 +131,15 @@ export function ProviderForm({ api }: ProviderFormProps) {
         />
 
         <details className="rounded-md border border-border bg-surface-muted/40 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-fg-muted">Avanzado</summary>
+          <summary className="cursor-pointer text-sm font-medium text-fg-muted">{t("advanced.summary")}</summary>
           <div className="mt-3 grid gap-3">
             <ModelSelector
-              label="Modelo de clasificación (opcional)"
+              label={t("settings.classifyModel")}
               value={draft.classifyModel}
               onChange={(v) => updateDraft({ classifyModel: v })}
               models={models}
               loading={loadingModels}
-              helpText="Si lo dejas vacío usamos el modelo de chat también para clasificar."
+              helpText={t("providerForm.classifyHelpInline")}
             />
             {selectedConfig?.has_api_key ? (
               <Button
@@ -144,7 +147,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
                 onClick={() => updateDraft({ apiKey: "" })}
                 className="self-start text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/40"
               >
-                Borrar clave guardada al guardar
+                {t("providerForm.clearKeyOnSave")}
               </Button>
             ) : null}
             {selectedConfig ? (
@@ -153,7 +156,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
                 onClick={() => {
                   if (
                     window.confirm(
-                      `¿Eliminar la configuración de ${selectedProvider.label}? Esto borra la API key cifrada de este proveedor para tu usuario.`
+                      t("providerForm.deleteConfirm", { label: selectedProvider.label })
                     )
                   ) {
                     void remove(selectedKind);
@@ -161,7 +164,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
                 }}
                 className="self-start border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-300 dark:hover:bg-rose-950/40"
               >
-                Eliminar este proveedor
+                {t("providerForm.deleteProvider")}
               </Button>
             ) : null}
           </div>
@@ -180,7 +183,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
       <footer className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-elevated px-4 py-3">
         {isDirty ? (
           <Button type="button" onClick={discardDraft} className="text-fg-muted">
-            Descartar cambios
+            {t("providerForm.discardChanges")}
           </Button>
         ) : null}
         <Button
@@ -192,7 +195,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
             (!isDirty || saving) && "cursor-not-allowed opacity-60 hover:opacity-60"
           )}
         >
-          {saving ? "Guardando…" : isNew ? "Crear" : "Guardar cambios"}
+          {saving ? t("common.saving") : isNew ? t("providerForm.create") : t("providerForm.saveChanges")}
         </Button>
         {selectedConfig && !isActive ? (
           <Button
@@ -200,7 +203,7 @@ export function ProviderForm({ api }: ProviderFormProps) {
             onClick={() => void setActive(selectedKind)}
             className="border-emerald-500 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
           >
-            Usar este proveedor
+            {t("providerForm.useAsActive")}
           </Button>
         ) : null}
       </footer>
@@ -212,12 +215,14 @@ function ProviderInputs({
   provider,
   draft,
   storedApiKey,
-  onChange
+  onChange,
+  t
 }: {
   provider: AIProvider;
   draft: ProviderDraft;
   storedApiKey: boolean;
   onChange: (patch: Partial<ProviderDraft>) => void;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }) {
   return (
     <div className="grid gap-3">
@@ -225,7 +230,7 @@ function ProviderInputs({
         const id = `pf-${provider.id}-${f.key}`;
         if (f.key === "api_key") {
           const placeholder = storedApiKey
-            ? "•••••• (clave guardada — escribe para reemplazar)"
+            ? t("providerForm.apiKeyPlaceholderStored")
             : f.placeholder || "sk-...";
           return (
             <div key={f.key} className="grid gap-1">
@@ -262,9 +267,10 @@ function ProviderInputs({
               />
               {f.help ? <p className="text-xs text-fg-subtle">{f.help}</p> : null}
               {provider.id === "ollama" ? (
-                <p className="text-xs text-fg-subtle">
-                  No incluyas <code>/v1</code> — lo añadimos automáticamente al llamar al endpoint compatible con OpenAI.
-                </p>
+                <p
+                  className="text-xs text-fg-subtle"
+                  dangerouslySetInnerHTML={{ __html: t("providerForm.ollamaBaseUrlHint") }}
+                />
               ) : null}
             </div>
           );
@@ -293,22 +299,22 @@ function ProviderInputs({
   );
 }
 
-function modelHelpText(provider: AIProvider, models: import("@/types/api").ModelInfo[], loading: boolean): string | undefined {
+function modelHelpText(
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  provider: AIProvider,
+  models: import("@/types/api").ModelInfo[],
+  loading: boolean
+): string | undefined {
   if (loading) return undefined;
   const hints =
     provider.suggested_chat_models && provider.suggested_chat_models.length > 0
-      ? `Modelos sugeridos: ${provider.suggested_chat_models.join(", ")}.`
+      ? t("providerForm.modelSuggested", { list: provider.suggested_chat_models.join(", ") })
       : null;
   if (models.length === 0) {
     if (provider.id === "ollama") {
-      return [
-        "No conseguimos listar tus modelos. Asegúrate de que Ollama está corriendo y prueba la conexión.",
-        hints
-      ]
-        .filter(Boolean)
-        .join(" ");
+      return [t("providerForm.ollamaListFailed"), hints].filter(Boolean).join(" ");
     }
-    return [hints, "Pulsa Probar conexión para refrescar la lista de modelos disponibles."].filter(Boolean).join(" ");
+    return [hints, t("providerForm.pressTestToRefresh")].filter(Boolean).join(" ");
   }
   return hints ?? undefined;
 }

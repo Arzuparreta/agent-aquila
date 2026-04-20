@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 
 type Card = {
   card_kind: "approval";
@@ -13,14 +14,19 @@ type Card = {
   preview: Record<string, unknown>;
 };
 
-const RISK_LABEL: Record<string, string> = {
-  low: "Bajo",
-  medium: "Medio",
-  high: "Alto",
-  external: "Externo"
-};
+function riskLabel(t: (key: TranslationKey) => string, tier: string): string {
+  const map: Record<string, TranslationKey> = {
+    low: "cards.approval.risk.low",
+    medium: "cards.approval.risk.medium",
+    high: "cards.approval.risk.high",
+    external: "cards.approval.risk.external"
+  };
+  const key = map[tier];
+  return key ? t(key) : tier;
+}
 
 export function ApprovalCard({ card }: { card: Card }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +38,7 @@ export function ApprovalCard({ card }: { card: Card }) {
       await apiFetch(`/agent/proposals/${card.proposal_id}/${action}`, { method: "POST" });
       setStatus(action === "approve" ? "approved" : "rejected");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Acción fallida.");
+      setError(err instanceof ApiError ? err.message : t("cards.approval.actionFailed"));
     } finally {
       setBusy(false);
     }
@@ -45,13 +51,13 @@ export function ApprovalCard({ card }: { card: Card }) {
           {card.kind}
         </span>
         <span className="text-amber-200/80">
-          Riesgo: {RISK_LABEL[card.risk_tier] ?? card.risk_tier}
+          {t("cards.approval.risk")} {riskLabel(t, card.risk_tier)}
         </span>
       </div>
-      <div className="mb-2 font-medium">{card.summary || "Acción propuesta"}</div>
+      <div className="mb-2 font-medium">{card.summary || t("cards.approval.proposedAction")}</div>
       {Object.keys(card.preview ?? {}).length > 0 ? (
         <details className="mb-2 text-xs text-amber-100/90">
-          <summary className="cursor-pointer">Ver detalles</summary>
+          <summary className="cursor-pointer">{t("cards.approval.viewDetails")}</summary>
           <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px]">
             {JSON.stringify(card.preview, null, 2)}
           </pre>
@@ -60,23 +66,25 @@ export function ApprovalCard({ card }: { card: Card }) {
       {status === "pending" ? (
         <div className="flex flex-wrap gap-2">
           <button
+            type="button"
             onClick={() => act("approve")}
             disabled={busy}
             className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-400 disabled:opacity-50"
           >
-            ✓ Aprobar
+            {t("cards.approval.approve")}
           </button>
           <button
+            type="button"
             onClick={() => act("reject")}
             disabled={busy}
             className="rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
           >
-            ✕ Rechazar
+            {t("cards.approval.reject")}
           </button>
         </div>
       ) : (
         <div className="text-xs font-semibold text-amber-100">
-          {status === "approved" ? "✓ Aprobado." : "✕ Rechazado."}
+          {status === "approved" ? t("cards.approval.approved") : t("cards.approval.rejected")}
         </div>
       )}
       {error ? <div className="mt-1 text-xs text-rose-300">{error}</div> : null}

@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useTranslation } from "@/lib/i18n";
 import type { GmailMessageRow } from "@/types/api";
 
 /**
@@ -35,13 +36,14 @@ export function EmailActionsMenu({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const triggerSize = variant === "bar" ? "p-2" : "p-1";
   const isUnread = message.is_unread;
 
   const trigger = (
     <button
       type="button"
-      aria-label="Acciones del correo"
+      aria-label={t("inbox.email.actionsAria")}
       className={`rounded-md ${triggerSize} text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg`}
       onClick={(e) => e.stopPropagation()}
     >
@@ -62,21 +64,21 @@ export function EmailActionsMenu({
   return (
     <DropdownMenu trigger={trigger} align="end" open={open} onOpenChange={onOpenChange}>
       <DropdownMenuItem onSelect={() => onMarkRead(message, isUnread)}>
-        {isUnread ? "Marcar como leído" : "Marcar como no leído"}
+        {isUnread ? t("inbox.email.markRead") : t("inbox.email.markUnread")}
       </DropdownMenuItem>
       <DropdownMenuItem onSelect={() => onStartChat(message)}>
-        Iniciar chat sobre este correo
+        {t("inbox.email.startChat")}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem onSelect={() => onArchive(message)}>
-        Archivar
+        {t("inbox.email.archive")}
       </DropdownMenuItem>
       <DropdownMenuItem destructive onSelect={() => onTrash(message)}>
-        Mover a papelera
+        {t("inbox.email.trash")}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem destructive onSelect={() => onSilence(message)}>
-        Silenciar remitente…
+        {t("inbox.email.silence")}
       </DropdownMenuItem>
     </DropdownMenu>
   );

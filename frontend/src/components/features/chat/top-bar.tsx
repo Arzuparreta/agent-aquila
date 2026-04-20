@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useTranslation } from "@/lib/i18n";
 import type { ChatThread } from "@/types/api";
 
 import { AIStatusBadge } from "./ai-status-badge";
@@ -33,6 +34,7 @@ export function ChatTopBar({
   onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
   onDeleteThread: (id: number) => Promise<void> | void;
 }) {
+  const { t } = useTranslation();
   const { logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState<number>(0);
@@ -88,7 +90,7 @@ export function ChatTopBar({
       <button
         onClick={onOpenDrawer}
         className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover md:hidden"
-        aria-label="Abrir conversaciones"
+        aria-label={t("chat.topBar.openConversations")}
       >
         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
           <path d="M3 6h18M3 12h18M3 18h18" />
@@ -109,8 +111,8 @@ export function ChatTopBar({
       <Link
         href="/inbox"
         className="relative rounded-md p-2 text-fg-muted hover:bg-interactive-hover"
-        aria-label="Bandeja"
-        title="Bandeja"
+        aria-label={t("chat.topBar.inbox")}
+        title={t("chat.topBar.inbox")}
       >
         <svg
           viewBox="0 0 24 24"
@@ -132,7 +134,7 @@ export function ChatTopBar({
         <button
           onClick={() => setMenuOpen((v) => !v)}
           className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover"
-          aria-label="Menú"
+          aria-label={t("chat.topBar.menu")}
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
             <circle cx="12" cy="5" r="1.5" />
@@ -150,7 +152,7 @@ export function ChatTopBar({
               className="block px-3 py-2 hover:bg-interactive-hover"
               onClick={() => setMenuOpen(false)}
             >
-              Ajustes técnicos (avanzado)
+              {t("chat.topBar.technicalSettings")}
             </Link>
             <button
               onClick={() => {
@@ -159,7 +161,7 @@ export function ChatTopBar({
               }}
               className="block w-full px-3 py-2 text-left text-rose-600 hover:bg-interactive-hover"
             >
-              Cerrar sesión
+              {t("nav.logout")}
             </button>
           </div>
         ) : null}

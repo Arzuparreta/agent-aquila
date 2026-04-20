@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 import type {
   ChatMessage,
   ChatSendResult,
@@ -33,6 +34,7 @@ export function ChatThreadView({
   thread: ChatThread;
   onThreadUpdated: (thread: ChatThread) => void;
 }) {
+  const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -48,11 +50,11 @@ export function ChatThreadView({
       setMessages(rows);
       setError(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cargar la conversación.");
+      setError(err instanceof ApiError ? err.message : t("chat.threadView.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [thread.id]);
+  }, [thread.id, t]);
 
   useEffect(() => {
     void reload();
@@ -79,12 +81,12 @@ export function ChatThreadView({
         if (result.error) setError(result.error);
         else setError(null);
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "El reintento falló.");
+        setError(err instanceof ApiError ? err.message : t("chat.threadView.retryFailed"));
       } finally {
         setSending(false);
       }
     },
-    [thread.id, onThreadUpdated]
+    [thread.id, onThreadUpdated, t]
   );
 
   const onSend = useCallback(
@@ -116,13 +118,13 @@ export function ChatThreadView({
         refs.clear();
       } catch (err) {
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-        setError(err instanceof ApiError ? err.message : "El envío falló.");
+        setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));
         throw err;
       } finally {
         setSending(false);
       }
     },
-    [thread.id, onThreadUpdated, refs]
+    [thread.id, onThreadUpdated, refs, t]
   );
 
   const updateMessage = useCallback((updated: ChatMessage) => {
@@ -132,7 +134,7 @@ export function ChatThreadView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div ref={scrollerRef} className="scroll-stealth min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {loading ? <div className="text-center text-base text-fg-subtle">Cargando…</div> : null}
+        {loading ? <div className="text-center text-base text-fg-subtle">{t("common.loading")}</div> : null}
         {error ? (
           <div className="mx-auto mb-3 max-w-md rounded-md bg-rose-900/40 px-3 py-2 text-base text-rose-100">
             {error}
@@ -140,8 +142,7 @@ export function ChatThreadView({
         ) : null}
         {!loading && messages.length === 0 ? (
           <div className="mx-auto mt-12 max-w-sm text-center text-base text-fg-subtle">
-            Hola. Cuéntame qué necesitas y me encargo. También puedo avisarte cuando llegue
-            algo importante (correos, eventos, propuestas).
+            {t("chat.threadView.emptyHint")}
           </div>
         ) : null}
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
@@ -156,7 +157,7 @@ export function ChatThreadView({
           ))}
           {sending ? (
             <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted">
-              Pensando…
+              {t("chat.threadView.thinking")}
             </div>
           ) : null}
         </div>

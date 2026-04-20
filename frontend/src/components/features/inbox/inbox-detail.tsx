@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { useChatReferences } from "@/components/features/chat/reference-context";
 import { apiFetch, ApiError } from "@/lib/api";
+import { intlLocaleTag, useTranslation } from "@/lib/i18n";
 import type {
   GmailMessageFull,
   GmailMessagePart,
@@ -108,6 +109,7 @@ export function InboxDetail({
   onStartChat: (msg: GmailMessageRow) => void;
   onMarkRead: (msg: GmailMessageRow, next: boolean) => void;
 }) {
+  const { t, locale } = useTranslation();
   const router = useRouter();
   const refs = useChatReferences();
   const [full, setFull] = useState<GmailMessageFull | null>(null);
@@ -125,18 +127,14 @@ export function InboxDetail({
         if (!cancelled) setFull(data);
       } catch (err) {
         if (!cancelled) {
-          setError(
-            err instanceof ApiError
-              ? err.message
-              : "No se pudo cargar el correo.",
-          );
+          setError(err instanceof ApiError ? err.message : t("inbox.detail.loadError"));
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [messageId]);
+  }, [messageId, t]);
 
   if (error) {
     return (
@@ -145,7 +143,7 @@ export function InboxDetail({
           <button
             onClick={onClose}
             className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover md:hidden"
-            aria-label="Volver"
+            aria-label={t("common.back")}
           >
             ←
           </button>
@@ -157,7 +155,7 @@ export function InboxDetail({
   if (!full) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
-        Cargando…
+        {t("common.loading")}
       </div>
     );
   }
@@ -180,13 +178,13 @@ export function InboxDetail({
         <button
           onClick={onClose}
           className="rounded-md p-2 text-fg-muted hover:bg-interactive-hover md:hidden"
-          aria-label="Volver"
+          aria-label={t("common.back")}
         >
           ←
         </button>
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold">
-            {row.subject || "(sin asunto)"}
+            {row.subject || t("inbox.noSubject")}
           </div>
           <div className="truncate text-xs text-fg-subtle">
             {row.sender_name ? `${row.sender_name} · ` : ""}
@@ -209,23 +207,23 @@ export function InboxDetail({
           onClick={onReference}
           className="rounded-full bg-primary px-3 py-1 font-medium text-primary-fg hover:opacity-90"
         >
-          Referenciar en chat
+          {t("inbox.detail.referenceInChat")}
         </button>
         <button
           onClick={() => onStartChat(row)}
           className="rounded-full bg-primary/20 px-3 py-1 font-medium text-fg hover:bg-primary/30"
         >
-          Iniciar chat sobre este correo
+          {t("inbox.email.startChat")}
         </button>
         <button
           onClick={() => onSilence(row)}
           className="rounded-full bg-rose-700/30 px-3 py-1 text-rose-200 hover:bg-rose-700/50"
         >
-          Silenciar remitente…
+          {t("inbox.detail.silence")}
         </button>
         <span className="ml-auto self-center text-[11px] text-fg-subtle">
           {row.internal_date
-            ? new Date(Number(row.internal_date)).toLocaleString("es-ES")
+            ? new Date(Number(row.internal_date)).toLocaleString(intlLocaleTag(locale))
             : ""}
         </span>
       </div>

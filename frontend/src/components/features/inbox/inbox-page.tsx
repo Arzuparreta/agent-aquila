@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import type {
   ChatThread,
   GmailMessageRow,
@@ -27,9 +28,9 @@ type SilenceTarget = {
 };
 
 type LoadError =
-  | { kind: "rate_limited"; retryAfter: number; message: string }
-  | { kind: "needs_reauth"; message: string }
-  | { kind: "no_connection"; message: string }
+  | { kind: "rate_limited"; retryAfter: number }
+  | { kind: "needs_reauth" }
+  | { kind: "no_connection" }
   | { kind: "generic"; message: string };
 
 /**
@@ -41,7 +42,10 @@ type LoadError =
  */
 const PAGE_SIZE = 10;
 
-function parseLoadError(err: unknown): LoadError {
+function parseLoadError(
+  err: unknown,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string
+): LoadError {
   if (err instanceof ApiError) {
     const detail = err.detail as Record<string, unknown> | undefined;
     const kind = detail && typeof detail === "object" ? detail.kind : undefined;
@@ -49,32 +53,23 @@ function parseLoadError(err: unknown): LoadError {
       const retry = Number(detail?.retry_after_seconds);
       return {
         kind: "rate_limited",
-        retryAfter: Number.isFinite(retry) && retry > 0 ? retry : 30,
-        message: err.message,
+        retryAfter: Number.isFinite(retry) && retry > 0 ? retry : 30
       };
     }
     if (kind === "needs_reauth" || err.status === 401) {
-      return {
-        kind: "needs_reauth",
-        message:
-          "Gmail necesita reconectarse. Ve a Ajustes → Conectores y vuelve a autorizar.",
-      };
+      return { kind: "needs_reauth" };
     }
     if (
       err.status === 400 &&
       err.message.toLowerCase().includes("no gmail connection")
     ) {
-      return {
-        kind: "no_connection",
-        message:
-          "Aún no has conectado Gmail. Ve a Ajustes → Conectores para vincularlo.",
-      };
+      return { kind: "no_connection" };
     }
     return { kind: "generic", message: err.message };
   }
   return {
     kind: "generic",
-    message: err instanceof Error ? err.message : "No se pudieron cargar los correos.",
+    message: err instanceof Error ? err.message : t("inbox.error.loadFailed")
   };
 }
 
@@ -93,6 +88,7 @@ function parseLoadError(err: unknown): LoadError {
  * right detail.
  */
 export function InboxPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const params = useSearchParams();
   const initialMessageId = useMemo(() => params.get("msg"), [params]);
@@ -134,14 +130,14 @@ export function InboxPage() {
         setLoadError(null);
       } catch (err) {
         if (seq !== loadSeq.current) return;
-        setLoadError(parseLoadError(err));
+        setLoadError(parseLoadError(err, t));
         setMessages([]);
         setNextPageToken(null);
       } finally {
         if (seq === loadSeq.current) setLoading(false);
       }
     },
-    [submittedQuery],
+    [submittedQuery, t],
   );
 
   // Initial load + reload on submitted-query change.
@@ -242,7 +238,7 @@ export function InboxPage() {
         });
         setStatus({
           kind: "ok",
-          text: next ? "Marcado como leído." : "Marcado como no leído.",
+          text: next ? t("inbox.markRead") : t("inbox.markUnread")
         });
       } catch (err) {
         // Revert on failure.
@@ -252,11 +248,11 @@ export function InboxPage() {
         });
         setStatus({
           kind: "error",
-          text: err instanceof ApiError ? err.message : "No se pudo actualizar.",
+          text: err instanceof ApiError ? err.message : t("inbox.error.update")
         });
       }
     },
-    [patchRow],
+    [patchRow, t],
   );
 
   const onArchive = useCallback(
@@ -269,16 +265,16 @@ export function InboxPage() {
           method: "POST",
           body: JSON.stringify({ remove_label_ids: ["INBOX"] }),
         });
-        setStatus({ kind: "ok", text: "Archivado." });
+        setStatus({ kind: "ok", text: t("inbox.archived") });
       } catch (err) {
         setMessages((prev) => [msg, ...prev]);
         setStatus({
           kind: "error",
-          text: err instanceof ApiError ? err.message : "No se pudo archivar.",
+          text: err instanceof ApiError ? err.message : t("inbox.error.archive")
         });
       }
     },
-    [activeId, messages, onCloseDetail],
+    [activeId, messages, onCloseDetail, t],
   );
 
   const onTrash = useCallback(
@@ -288,19 +284,16 @@ export function InboxPage() {
       if (activeId === msg.id) onCloseDetail();
       try {
         await apiFetch(`/gmail/messages/${msg.id}/trash`, { method: "POST" });
-        setStatus({ kind: "ok", text: "Movido a la papelera." });
+        setStatus({ kind: "ok", text: t("inbox.trashed") });
       } catch (err) {
         setMessages((prev) => [msg, ...prev]);
         setStatus({
           kind: "error",
-          text:
-            err instanceof ApiError
-              ? err.message
-              : "No se pudo mover a la papelera.",
+          text: err instanceof ApiError ? err.message : t("inbox.error.trash")
         });
       }
     },
-    [activeId, messages, onCloseDetail],
+    [activeId, messages, onCloseDetail, t],
   );
 
   const onAskSilence = useCallback((msg: GmailMessageRow) => {
@@ -355,22 +348,19 @@ export function InboxPage() {
           kind: "ok",
           text:
             mode === "spam"
-              ? `Marcado como spam: ${target.senderEmail}`
-              : `Silenciado: ${target.senderEmail}`,
+              ? t("inbox.silence.spamOk", { email: target.senderEmail })
+              : t("inbox.silence.muteOk", { email: target.senderEmail })
         });
       } catch (err) {
         setStatus({
           kind: "error",
-          text:
-            err instanceof ApiError
-              ? err.message
-              : "No se pudo crear el filtro de Gmail.",
+          text: err instanceof ApiError ? err.message : t("inbox.error.filter")
         });
       } finally {
         setSilenceTarget(null);
       }
     },
-    [activeId, onCloseDetail],
+    [activeId, onCloseDetail, t],
   );
 
   const onStartChat = useCallback(
@@ -389,14 +379,11 @@ export function InboxPage() {
       } catch (err) {
         setStatus({
           kind: "error",
-          text:
-            err instanceof ApiError
-              ? err.message
-              : "No se pudo iniciar el chat.",
+          text: err instanceof ApiError ? err.message : t("inbox.error.startChat")
         });
       }
     },
-    [router],
+    [router, t],
   );
 
   const goNextPage = useCallback(() => {
@@ -433,7 +420,7 @@ export function InboxPage() {
             type="button"
             onClick={() => setStatus(null)}
             className="rounded p-0.5 text-fg-muted hover:bg-interactive-hover-strong hover:text-fg"
-            aria-label="Cerrar mensaje"
+            aria-label={t("chat.dismissToast")}
           >
             <svg
               viewBox="0 0 24 24"
@@ -503,7 +490,7 @@ export function InboxPage() {
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-fg-subtle">
-              Selecciona un correo
+              {t("inbox.selectMessage")}
             </div>
           )}
         </section>
@@ -531,6 +518,7 @@ function SearchBar({
   onSubmit: (e: React.FormEvent) => void;
   disabled: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <form
       onSubmit={onSubmit}
@@ -551,7 +539,7 @@ function SearchBar({
           type="search"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Buscar en Gmail (ej. from:bob is:unread)"
+          placeholder={t("inbox.searchPlaceholder")}
           className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
         />
         <button
@@ -559,7 +547,7 @@ function SearchBar({
           disabled={disabled}
           className="shrink-0 rounded bg-primary px-2 py-0.5 text-xs font-medium text-primary-fg disabled:opacity-60"
         >
-          Buscar
+          {t("search.submit")}
         </button>
       </label>
     </form>
@@ -573,15 +561,16 @@ function LoadErrorBanner({
   error: LoadError;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   if (error.kind === "rate_limited") {
     const waiting = error.retryAfter > 0;
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
         <span>
-          Gmail está limitando tus peticiones.
+          {t("inbox.rateLimit.body")}
           {waiting
-            ? ` Reintenta en ${error.retryAfter}s.`
-            : " Ya puedes reintentar."}
+            ? t("inbox.rateLimit.retryIn", { seconds: error.retryAfter })
+            : t("inbox.rateLimit.ready")}
         </span>
         <button
           type="button"
@@ -589,24 +578,27 @@ function LoadErrorBanner({
           disabled={waiting}
           className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
         >
-          Reintentar
+          {t("common.retry")}
         </button>
       </div>
     );
   }
   if (error.kind === "needs_reauth" || error.kind === "no_connection") {
+    const msg =
+      error.kind === "needs_reauth" ? t("inbox.error.needsReauth") : t("inbox.error.noConnection");
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
-        <span>{error.message}</span>
+        <span>{msg}</span>
         <a
           href="/settings"
           className="rounded bg-sky-500/20 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/30"
         >
-          Ir a Ajustes
+          {t("inbox.goToSettings")}
         </a>
       </div>
     );
   }
+  if (error.kind !== "generic") return null;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
       <span className="min-w-0 flex-1 break-words">{error.message}</span>
@@ -615,7 +607,7 @@ function LoadErrorBanner({
         onClick={onRetry}
         className="rounded bg-rose-500/20 px-2 py-0.5 font-medium text-rose-100 hover:bg-rose-500/30"
       >
-        Reintentar
+        {t("common.retry")}
       </button>
     </div>
   );
@@ -634,6 +626,7 @@ function Pagination({
   onPrev: () => void;
   onNext: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between border-t border-border-subtle bg-surface-elevated/80 px-3 py-2 text-xs">
       <button
@@ -642,7 +635,7 @@ function Pagination({
         disabled={!hasPrev || disabled}
         className="rounded px-2 py-1 text-fg-muted hover:bg-interactive-hover disabled:opacity-40"
       >
-        ← Anterior
+        {t("inbox.pagination.prev")}
       </button>
       <button
         type="button"
@@ -650,7 +643,7 @@ function Pagination({
         disabled={!hasNext || disabled}
         className="rounded px-2 py-1 text-fg-muted hover:bg-interactive-hover disabled:opacity-40"
       >
-        Siguiente →
+        {t("inbox.pagination.next")}
       </button>
     </div>
   );

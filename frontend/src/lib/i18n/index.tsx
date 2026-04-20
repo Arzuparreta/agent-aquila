@@ -15,11 +15,12 @@ import {
   DEFAULT_LOCALE,
   STORAGE_KEY,
   SUPPORTED_LOCALES,
+  intlLocaleTag,
   type Locale
 } from "./types";
 
 export type { Locale, TranslationKey };
-export { SUPPORTED_LOCALES, DEFAULT_LOCALE };
+export { SUPPORTED_LOCALES, DEFAULT_LOCALE, intlLocaleTag };
 
 type TranslateParams = Record<string, string | number>;
 

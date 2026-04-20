@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { useTranslation } from "@/lib/i18n";
 
 type SkillSummary = {
   slug: string;
@@ -19,6 +20,7 @@ type SkillFull = SkillSummary & { body: string };
  * per-user — editing happens in the repo.
  */
 export function SkillsSection() {
+  const { t } = useTranslation();
   const [list, setList] = useState<SkillSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<SkillFull | null>(null);
@@ -30,11 +32,9 @@ export function SkillsSection() {
       setList(data);
       setError(null);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "No se pudieron cargar las habilidades.",
-      );
+      setError(err instanceof ApiError ? err.message : t("skills.loadError"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -46,19 +46,18 @@ export function SkillsSection() {
       const full = await apiFetch<SkillFull>(`/skills/${encodeURIComponent(slug)}`);
       setOpen(full);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo abrir.");
+      setError(err instanceof ApiError ? err.message : t("skills.openError"));
     } finally {
       setOpening(null);
     }
-  }, []);
+  }, [t]);
 
   return (
     <div className="grid gap-2">
-      <p className="text-xs text-fg-subtle">
-        Recetas en Markdown que el agente puede cargar bajo demanda. Vienen con
-        el despliegue (carpeta <code>backend/skills/</code>); para añadir o
-        editar habilidades, modifica los archivos del repositorio.
-      </p>
+      <p
+        className="text-xs text-fg-subtle"
+        dangerouslySetInnerHTML={{ __html: t("skills.intro") }}
+      />
       {error ? (
         <div
           role="alert"
@@ -68,9 +67,9 @@ export function SkillsSection() {
         </div>
       ) : null}
       {list === null ? (
-        <p className="text-xs text-fg-subtle">Cargando…</p>
+        <p className="text-xs text-fg-subtle">{t("common.loading")}</p>
       ) : list.length === 0 ? (
-        <p className="text-xs text-fg-subtle">No hay habilidades disponibles.</p>
+        <p className="text-xs text-fg-subtle">{t("skills.empty")}</p>
       ) : (
         <ul className="divide-y divide-border-subtle rounded-md border border-border-subtle bg-surface-elevated">
           {list.map((s) => (
@@ -88,7 +87,7 @@ export function SkillsSection() {
                 disabled={opening === s.slug}
                 className="shrink-0 rounded-md bg-surface-muted px-2 py-1 text-xs text-fg hover:bg-surface-inset disabled:opacity-60"
               >
-                {opening === s.slug ? "…" : "Ver"}
+                {opening === s.slug ? t("skills.opening") : t("skills.view")}
               </button>
             </li>
           ))}
@@ -113,7 +112,7 @@ export function SkillsSection() {
               <button
                 onClick={() => setOpen(null)}
                 className="rounded-md p-1 text-fg-muted hover:bg-interactive-hover"
-                aria-label="Cerrar"
+                aria-label={t("common.close")}
               >
                 ✕
               </button>

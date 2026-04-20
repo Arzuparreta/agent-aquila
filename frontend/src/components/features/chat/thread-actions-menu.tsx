@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import type { ChatThread } from "@/types/api";
 
 /**
@@ -44,6 +45,7 @@ export function ThreadActionsMenu({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [renameOpen, setRenameOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -53,7 +55,7 @@ export function ThreadActionsMenu({
   const trigger = (
     <button
       type="button"
-      aria-label="Acciones de la conversación"
+      aria-label={t("chat.threadActions.triggerAria")}
       className={`rounded-md ${triggerSize} text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg`}
       onClick={(e) => e.stopPropagation()}
     >
@@ -68,29 +70,30 @@ export function ThreadActionsMenu({
   return (
     <>
       <DropdownMenu trigger={trigger} align="end" open={open} onOpenChange={onOpenChange}>
-        <DropdownMenuItem onSelect={() => setRenameOpen(true)}>Renombrar</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setRenameOpen(true)}>{t("chat.threadActions.rename")}</DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
             void onTogglePin(thread.id, !thread.pinned);
           }}
         >
-          {thread.pinned ? "Quitar fijación" : "Fijar arriba"}
+          {thread.pinned ? t("chat.threadActions.unpin") : t("chat.threadActions.pin")}
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
             void onToggleArchive(thread.id, !thread.archived);
           }}
         >
-          {thread.archived ? "Desarchivar" : "Archivar"}
+          {thread.archived ? t("chat.threadActions.unarchive") : t("chat.threadActions.archive")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem destructive onSelect={() => setConfirmOpen(true)}>
-          Eliminar conversación
+          {t("chat.threadActions.deleteThread")}
         </DropdownMenuItem>
       </DropdownMenu>
 
       {renameOpen ? (
         <RenameDialog
+          t={t}
           currentTitle={thread.title}
           pending={pending}
           onCancel={() => setRenameOpen(false)}
@@ -108,10 +111,10 @@ export function ThreadActionsMenu({
 
       <ConfirmDialog
         open={confirmOpen}
-        title={`¿Eliminar "${thread.title}"?`}
-        description="Se eliminarán todos los mensajes de esta conversación. Esta acción no se puede deshacer."
-        confirmLabel="Eliminar"
-        cancelLabel="Cancelar"
+        title={t("chat.threadActions.deleteConfirmTitle", { title: thread.title })}
+        description={t("chat.threadActions.deleteConfirmDescription")}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
         pending={pending}
         onConfirm={async () => {
           setPending(true);
@@ -129,11 +132,13 @@ export function ThreadActionsMenu({
 }
 
 function RenameDialog({
+  t,
   currentTitle,
   pending,
   onCancel,
   onSubmit,
 }: {
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
   currentTitle: string;
   pending: boolean;
   onCancel: () => void;
@@ -160,7 +165,7 @@ function RenameDialog({
       <button
         type="button"
         className="absolute inset-0 bg-scrim"
-        aria-label="Cerrar"
+        aria-label={t("common.close")}
         onClick={onCancel}
         disabled={pending}
       />
@@ -171,10 +176,8 @@ function RenameDialog({
         }}
         className="relative z-10 w-full max-w-md rounded-lg border border-border bg-surface-elevated p-4 text-fg shadow-lg"
       >
-        <h2 className="text-lg font-semibold">Renombrar conversación</h2>
-        <p className="mt-1 text-sm text-fg-muted">
-          Elige un nombre que te ayude a reconocerla más tarde.
-        </p>
+        <h2 className="text-lg font-semibold">{t("chat.renameDialog.title")}</h2>
+        <p className="mt-1 text-sm text-fg-muted">{t("chat.renameDialog.description")}</p>
         <input
           ref={inputRef}
           value={value}
@@ -185,14 +188,14 @@ function RenameDialog({
         />
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" className="border-dashed" onClick={onCancel} disabled={pending}>
-            Cancelar
+            {t("common.cancel")}
           </Button>
           <Button
             type="submit"
             className="border-primary bg-primary text-primary-fg hover:opacity-90 disabled:opacity-50"
             disabled={!canSave}
           >
-            {pending ? "…" : "Guardar"}
+            {pending ? t("common.ellipsis") : t("common.save")}
           </Button>
         </div>
       </form>

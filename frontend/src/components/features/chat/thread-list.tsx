@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { intlLocaleTag, useTranslation } from "@/lib/i18n";
 import type { ChatThread } from "@/types/api";
 
 import { ThreadActionsMenu } from "./thread-actions-menu";
@@ -17,14 +18,14 @@ const KIND_BADGES: Record<string, string> = {
   teams_message: "💬",
 };
 
-function timeShort(iso: string | null): string {
+function timeShort(iso: string | null, localeTag: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   const now = new Date();
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
   }
-  return d.toLocaleDateString("es", { day: "2-digit", month: "2-digit" });
+  return d.toLocaleDateString(localeTag, { day: "2-digit", month: "2-digit" });
 }
 
 export function ChatThreadList({
@@ -50,12 +51,14 @@ export function ChatThreadList({
   onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
   onDeleteThread: (id: number) => Promise<void> | void;
 }) {
+  const { t, locale } = useTranslation();
+  const localeTag = intlLocaleTag(locale);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
 
   const startNewThread = async () => {
     const created = await apiFetch<ChatThread>("/threads", {
       method: "POST",
-      body: JSON.stringify({ title: "Nueva conversación" })
+      body: JSON.stringify({ title: t("chat.threadList.newThreadTitle") })
     });
     await onCreateGeneral();
     onPick(created.id);
@@ -65,12 +68,12 @@ export function ChatThreadList({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-3">
         <div className="flex-1 text-sm font-semibold uppercase tracking-wide text-fg-subtle">
-          Conversaciones
+          {t("chat.threadList.title")}
         </div>
         <button
           onClick={startNewThread}
           className="rounded-md p-1 text-fg-muted hover:bg-interactive-hover"
-          aria-label="Nueva conversación"
+          aria-label={t("chat.threadList.newAria")}
         >
           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M12 5v14M5 12h14" />
@@ -78,7 +81,7 @@ export function ChatThreadList({
         </button>
       </div>
       <div className="scroll-stealth min-h-0 flex-1 overflow-y-auto">
-        {loading ? <div className="px-4 py-3 text-sm text-fg-subtle">Cargando…</div> : null}
+        {loading ? <div className="px-4 py-3 text-sm text-fg-subtle">{t("common.loading")}</div> : null}
         {error ? <div className="px-4 py-3 text-sm text-rose-300">{error}</div> : null}
         <ul>
           {threads.map((t) => {
@@ -105,7 +108,7 @@ export function ChatThreadList({
                       </span>
                       <span className="block truncate text-xs text-fg-subtle">
                         {t.kind === "entity" ? `${t.entity_type} · ` : ""}
-                        {timeShort(t.last_message_at)}
+                        {timeShort(t.last_message_at, localeTag)}
                       </span>
                     </span>
                     {t.unread > 0 ? (

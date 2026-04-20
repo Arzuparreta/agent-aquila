@@ -2,11 +2,16 @@
 
 import { useState } from "react";
 
+import { intlLocaleTag, useTranslation, type TranslationKey } from "@/lib/i18n";
 import type { GmailMessageRow } from "@/types/api";
 
 import { EmailActionsMenu } from "./email-actions-menu";
 
-function relativeTime(internalDateMs: string | null): string {
+function relativeTime(
+  internalDateMs: string | null,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  localeTag: string
+): string {
   if (!internalDateMs) return "";
   const then = Number(internalDateMs);
   if (!Number.isFinite(then)) return "";
@@ -15,12 +20,12 @@ function relativeTime(internalDateMs: string | null): string {
   const min = 60_000;
   const hour = 60 * min;
   const day = 24 * hour;
-  if (diff < hour) return `${Math.max(1, Math.round(diff / min))} min`;
-  if (diff < day) return `${Math.round(diff / hour)} h`;
-  if (diff < 7 * day) return `${Math.round(diff / day)} d`;
-  return new Date(then).toLocaleDateString("es-ES", {
+  if (diff < hour) return t("inbox.time.minutes", { n: Math.max(1, Math.round(diff / min)) });
+  if (diff < day) return t("inbox.time.hours", { n: Math.round(diff / hour) });
+  if (diff < 7 * day) return t("inbox.time.days", { n: Math.round(diff / day) });
+  return new Date(then).toLocaleDateString(localeTag, {
     day: "2-digit",
-    month: "short",
+    month: "short"
   });
 }
 
@@ -52,10 +57,12 @@ export function InboxList({
   onSilence: (msg: GmailMessageRow) => void;
   onStartChat: (msg: GmailMessageRow) => void;
 }) {
+  const { t, locale } = useTranslation();
+  const localeTag = intlLocaleTag(locale);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
   if (loading && messages.length === 0) {
-    return <div className="p-4 text-sm text-fg-subtle">Cargando…</div>;
+    return <div className="p-4 text-sm text-fg-subtle">{t("common.loading")}</div>;
   }
   if (error) {
     return <div className="p-4 text-sm text-rose-300">{error}</div>;
@@ -63,7 +70,7 @@ export function InboxList({
   if (messages.length === 0) {
     return (
       <div className="p-6 text-center text-sm text-fg-subtle">
-        No hay correos.
+        {t("inbox.list.empty")}
       </div>
     );
   }
@@ -91,7 +98,7 @@ export function InboxList({
                     className={`h-2 w-2 shrink-0 rounded-full ${
                       unread ? "bg-primary" : "bg-transparent"
                     }`}
-                    aria-label={unread ? "No leído" : "Leído"}
+                    aria-label={unread ? t("inbox.unread") : t("inbox.read")}
                   />
                   <span
                     className={`min-w-0 flex-1 truncate text-sm ${
@@ -101,7 +108,7 @@ export function InboxList({
                     {sender}
                   </span>
                   <span className="shrink-0 text-[11px] text-fg-subtle">
-                    {relativeTime(msg.internal_date)}
+                    {relativeTime(msg.internal_date, t, localeTag)}
                   </span>
                 </div>
                 <div
@@ -109,7 +116,7 @@ export function InboxList({
                     unread ? "text-fg" : "text-fg-subtle"
                   }`}
                 >
-                  {msg.subject || "(sin asunto)"}
+                  {msg.subject || t("inbox.noSubject")}
                 </div>
                 <div className="truncate text-xs text-fg-subtle">
                   {msg.snippet || ""}

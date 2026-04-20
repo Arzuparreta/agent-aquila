@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { EntityRef } from "@/types/api";
+import { useTranslation } from "@/lib/i18n";
 
 import { useChatReferences } from "./reference-context";
 
@@ -35,6 +36,7 @@ export function ChatComposer({
   onSend: (content: string, references: EntityRef[]) => Promise<void> | void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const refs = useChatReferences();
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -71,7 +73,7 @@ export function ChatComposer({
                 key={`${r.type}-${r.id}-${idx}`}
                 onClick={() => refs.remove(idx)}
                 className="flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-sm text-fg hover:bg-primary/25"
-                title="Quitar referencia"
+                title={t("chat.composer.removeRef")}
               >
                 <span>{ENTITY_LABEL[r.type] ?? "•"}</span>
                 <span className="max-w-[10rem] truncate">{r.label || `${r.type} #${r.id}`}</span>
@@ -93,14 +95,14 @@ export function ChatComposer({
             }}
             rows={1}
             disabled={disabled}
-            placeholder="Escribe a tu mánager…"
+            placeholder={t("chat.composer.placeholder")}
             className="min-h-[48px] flex-1 resize-none rounded-2xl border border-border bg-surface-muted px-4 py-3 text-base leading-snug text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
           <button
             onClick={submit}
             disabled={disabled || !value.trim()}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg transition disabled:bg-surface-muted disabled:text-fg-subtle"
-            aria-label="Enviar"
+            aria-label={t("chat.composer.send")}
           >
             <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M5 12l14-7-7 14-2-5-5-2z" />
