@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.agent import (
     AgentRunCreate,
     AgentRunRead,
+    AgentTraceEventRead,
     PendingOperationPreviewRead,
     PendingOperationRead,
     PendingProposalRead,
@@ -44,6 +45,18 @@ async def get_agent_run(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
+
+
+@router.get("/runs/{run_id}/trace-events", response_model=list[AgentTraceEventRead])
+async def list_agent_run_trace_events(
+    run_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AgentTraceEventRead]:
+    events = await AgentService.list_trace_events(db, current_user, run_id)
+    if events is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return events
 
 
 @router.get("/capabilities")

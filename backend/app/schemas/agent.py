@@ -17,6 +17,20 @@ class AgentStepRead(BaseModel):
     payload: dict[str, Any] | None = None
 
 
+class AgentTraceEventRead(BaseModel):
+    """Versioned trace row (OTEL-friendly) for evals and dashboards."""
+
+    id: int
+    schema_version: int
+    event_type: str
+    trace_id: str
+    span_id: str | None = None
+    parent_span_id: str | None = None
+    step_index: int | None = None
+    payload: dict[str, Any] | None = None
+    created_at: datetime
+
+
 class PendingProposalRead(BaseModel):
     id: int
     kind: str
@@ -49,6 +63,8 @@ class AgentRunRead(BaseModel):
     user_message: str
     assistant_reply: str | None = None
     error: str | None = None
+    root_trace_id: str | None = None
+    chat_thread_id: int | None = None
     steps: list[AgentStepRead]
     pending_proposals: list[PendingProposalRead]
 

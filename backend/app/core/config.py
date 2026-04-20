@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     agent_heartbeat_minutes: int = Field(
         default=15, ge=1, le=1440, validation_alias="AGENT_HEARTBEAT_MINUTES"
     )
+    # full = all connector tools; compact = smaller palette (see agent_tools.tools_for_palette_mode).
+    agent_tool_palette: str = Field(default="full", validation_alias="AGENT_TOOL_PALETTE")
+    # When true, HTTP channel stub and binding helpers are enabled (gateway integration).
+    agent_channel_gateway_enabled: bool = Field(
+        default=False, validation_alias="AGENT_CHANNEL_GATEWAY_ENABLED"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

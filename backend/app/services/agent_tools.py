@@ -681,6 +681,37 @@ AGENT_TOOLS: list[dict[str, Any]] = [
 
 AGENT_TOOL_NAMES: frozenset[str] = frozenset(t["function"]["name"] for t in AGENT_TOOLS)
 
+# Smaller palette for ``AGENT_TOOL_PALETTE=compact`` — memory, skills, time, Gmail read,
+# calendar list, OAuth setup, plus terminator (see ``tools_for_palette_mode``).
+_COMPACT_NAMES: frozenset[str] = frozenset(
+    {
+        "final_answer",
+        "get_session_time",
+        "list_skills",
+        "load_skill",
+        "list_memory",
+        "recall_memory",
+        "upsert_memory",
+        "delete_memory",
+        "gmail_list_messages",
+        "gmail_get_message",
+        "gmail_get_thread",
+        "calendar_list_events",
+        "start_connector_setup",
+        "start_oauth_flow",
+        "submit_connector_credentials",
+        "list_connectors",
+    }
+)
+
+
+def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
+    """Return the tool list for ``full`` (default) or ``compact`` (fewer tools, lower token use)."""
+    m = (mode or "full").strip().lower()
+    if m == "compact":
+        return [t for t in AGENT_TOOLS if t["function"]["name"] in _COMPACT_NAMES]
+    return list(AGENT_TOOLS)
+
 
 # Tool names the agent loop should treat as "fetches more context" rather
 # than terminators. Used by the loop to know when to stop iterating.

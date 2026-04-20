@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,11 +33,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.envelope_crypto import KeyDecryptError
-from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.agent_run import AgentRun, AgentRunStep, AgentTraceEvent
 from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
-from app.schemas.agent import AgentRunRead, AgentStepRead, PendingProposalRead
+from app.schemas.agent import AgentRunRead, AgentStepRead, AgentTraceEventRead, PendingProposalRead
 from app.services.agent_harness.native import chat_turn_native
 from app.services.agent_harness.prompted import (
     format_tool_results_for_prompt,
@@ -44,10 +45,25 @@ from app.services.agent_harness.prompted import (
 )
 from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_memory_service import AgentMemoryService
+from app.services.agent_replay import AgentReplayContext
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
+    tools_for_palette_mode,
+)
+from app.services.agent_trace import (
+    EV_LLM_REQUEST,
+    EV_LLM_RESPONSE,
+    EV_RUN_COMPLETED,
+    EV_RUN_FAILED,
+    EV_RUN_STARTED,
+    EV_TOOL_FINISHED,
+    EV_TOOL_STARTED,
+    content_sha256_preview,
+    emit_trace_event,
+    new_span_id,
+    new_trace_id,
 )
 from app.services.agent_workspace import build_system_prompt
 from app.services.ai_providers import provider_kind_requires_api_key
@@ -78,24 +94,23 @@ _DRIVE_PROVIDERS = ("google_drive", "gdrive")
 _OUTLOOK_PROVIDERS = ("graph_mail",)
 _TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
 
+_replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
+
 
 def get_tool_palette(
     user: User,
     *,
     tenant_hint: str | None = None,
+    palette_mode: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Extension seam: which tool schemas to advertise to the agent this run.
+    """Which tool schemas to advertise this run (full vs compact via settings or override).
 
-    Today: returns the full ``AGENT_TOOLS`` palette for everyone. The agent
-    picks the right tool by reading each tool's ``description``.
-
-    Tomorrow: this is where per-tenant skill toggles plug in (e.g. "starter"
-    tier gets only read-only tools, B2B vertical gets a CRM-flavored
-    palette). The signature accepts ``user`` and ``tenant_hint`` so
-    per-user/per-vertical filtering is a one-function change.
+    Per-tenant toggles can plug in via ``tenant_hint`` and ``palette_mode`` later.
     """
-    del user, tenant_hint  # explicit: today the palette is universal
-    return AGENT_TOOLS
+    del tenant_hint
+    del user  # reserved for future per-user allowlists
+    mode = palette_mode if palette_mode is not None else settings.agent_tool_palette
+    return tools_for_palette_mode(mode)
 
 
 def _conversation_trace_snapshot(
@@ -122,6 +137,15 @@ def _conversation_trace_snapshot(
         return json.dumps(slim, ensure_ascii=False)[:12000]
     except (TypeError, ValueError):
         return "[]"
+
+
+def _approx_prompt_tokens(messages: list[dict[str, Any]]) -> int:
+    """Rough token estimate for trace metrics (not billing-accurate)."""
+    try:
+        raw = json.dumps(messages, ensure_ascii=False)
+    except (TypeError, ValueError):
+        raw = ""
+    return max(1, len(raw) // 4)
 
 
 def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
@@ -894,6 +918,15 @@ class AgentService:
         if tool_name not in AGENT_TOOL_NAMES:
             return ({"error": f"unknown tool {tool_name!r}"}, None)
 
+        replay = _replay_ctx.get()
+        if replay is not None:
+            result = replay.next_tool_result()
+            prop_id = result.get("proposal_id") if isinstance(result, dict) else None
+            if prop_id:
+                prop = await db.get(PendingProposal, int(prop_id))
+                return (result, prop)
+            return (result, None)
+
         entry = AgentService._DISPATCH.get(tool_name)
         if entry is None:
             return ({"error": f"unhandled tool: {tool_name}"}, None)
@@ -940,6 +973,7 @@ class AgentService:
         prior_messages: list[dict[str, str]] | None = None,
         thread_id: int | None = None,
         thread_context_hint: str | None = None,
+        replay: AgentReplayContext | None = None,
     ) -> AgentRunRead:
         """Run one agent turn.
 
@@ -949,6 +983,8 @@ class AgentService:
           their inline cards back into the right chat thread.
         ``thread_context_hint``: a short system-injected context blurb such as
           ``"Conversation about thread #42"``.
+        ``replay``: when set, non-``final_answer`` tools consume scripted results from
+          :class:`~app.services.agent_replay.AgentReplayContext` (regression tests).
         """
         settings_row = await UserAISettingsService.get_or_create(db, user)
         if settings_row.ai_disabled:
@@ -976,16 +1012,40 @@ class AgentService:
             await db.refresh(run)
             return AgentService._to_read(run, [], [])
 
-        run = AgentRun(user_id=user.id, status="running", user_message=message)
-        db.add(run)
-        await db.flush()
-
         turn_tools = get_tool_palette(user)
         harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
         effective = resolve_effective_mode(
             harness_pref, settings_row.provider_kind, settings_row.chat_model
         )
         allow_native_fallback = effective == "native"
+
+        root_trace = new_trace_id()
+        root_span = new_span_id()
+        run = AgentRun(
+            user_id=user.id,
+            status="running",
+            user_message=message,
+            root_trace_id=root_trace,
+            chat_thread_id=thread_id,
+        )
+        db.add(run)
+        await db.flush()
+
+        await emit_trace_event(
+            db,
+            run_id=run.id,
+            event_type=EV_RUN_STARTED,
+            trace_id=root_trace,
+            span_id=root_span,
+            payload={
+                "schema": "agent_trace.v1",
+                "user_message_sha256": content_sha256_preview(message),
+                "thread_id": thread_id,
+                "tool_palette_size": len(turn_tools),
+                "harness_mode_effective": effective,
+                "replay": replay is not None,
+            },
+        )
 
         system_prompt = await build_system_prompt(
             db,
@@ -1022,10 +1082,28 @@ class AgentService:
                 )
             )
 
+        _replay_token = None
+        if replay is not None:
+            _replay_token = _replay_ctx.set(replay)
+
         try:
             final_answer_text: str | None = None
             for _ in range(settings.agent_max_tool_steps):
                 parse_errors: list[str] = []
+                llm_span = new_span_id()
+                await emit_trace_event(
+                    db,
+                    run_id=run.id,
+                    event_type=EV_LLM_REQUEST,
+                    trace_id=root_trace,
+                    span_id=llm_span,
+                    parent_span_id=root_span,
+                    payload={
+                        "approx_prompt_tokens": _approx_prompt_tokens(conversation),
+                        "tool_defs_count": len(turn_tools),
+                        "harness_mode": effective,
+                    },
+                )
                 if effective == "native":
                     response = await chat_turn_native(
                         api_key or "",
@@ -1035,7 +1113,7 @@ class AgentService:
                         temperature=0.15,
                     )
                 else:
-                    raw_text, finish_reason, raw_msg = await LLMClient.chat_completion_full(
+                    raw_text, finish_reason, raw_msg, usage_cf = await LLMClient.chat_completion_full(
                         api_key or "",
                         settings_row,
                         messages=conversation,
@@ -1047,6 +1125,7 @@ class AgentService:
                         tool_calls=calls,
                         raw_message=raw_msg,
                         finish_reason=finish_reason,
+                        usage=usage_cf,
                     )
 
                 if (
@@ -1067,7 +1146,7 @@ class AgentService:
                         time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
                     )
                     conversation[0] = {"role": "system", "content": system_prompt}
-                    raw_text, finish_reason, raw_msg = await LLMClient.chat_completion_full(
+                    raw_text, finish_reason, raw_msg, usage_fb = await LLMClient.chat_completion_full(
                         api_key or "",
                         settings_row,
                         messages=conversation,
@@ -1079,12 +1158,28 @@ class AgentService:
                         tool_calls=calls,
                         raw_message=raw_msg,
                         finish_reason=finish_reason,
+                        usage=usage_fb,
                     )
 
                 if effective == "native" and response.has_tool_calls:
                     allow_native_fallback = False
 
                 step_idx += 1
+                await emit_trace_event(
+                    db,
+                    run_id=run.id,
+                    event_type=EV_LLM_RESPONSE,
+                    trace_id=root_trace,
+                    span_id=llm_span,
+                    parent_span_id=root_span,
+                    step_index=step_idx,
+                    payload={
+                        "finish_reason": response.finish_reason,
+                        "usage": response.usage,
+                        "tool_call_names": [tc.name for tc in response.tool_calls],
+                        "has_tool_calls": response.has_tool_calls,
+                    },
+                )
                 db.add(
                     AgentRunStep(
                         run_id=run.id,
@@ -1102,6 +1197,8 @@ class AgentService:
                             "raw_response_text": (response.content or "")[:20000],
                             "raw_request_messages": _conversation_trace_snapshot(conversation),
                             "tool_call_parse_errors": parse_errors,
+                            "usage": response.usage,
+                            "approx_prompt_tokens": _approx_prompt_tokens(conversation),
                         },
                     )
                 )
@@ -1120,6 +1217,17 @@ class AgentService:
                 for call in response.tool_calls:
                     tool_name = call.name or ""
                     args = call.arguments if isinstance(call.arguments, dict) else {}
+                    tool_span = new_span_id()
+                    await emit_trace_event(
+                        db,
+                        run_id=run.id,
+                        event_type=EV_TOOL_STARTED,
+                        trace_id=root_trace,
+                        span_id=tool_span,
+                        parent_span_id=llm_span,
+                        step_index=step_idx + 1,
+                        payload={"tool_name": tool_name},
+                    )
                     if tool_name == FINAL_ANSWER_TOOL_NAME:
                         text = str(args.get("text") or "").strip()
                         citations = args.get("citations") or []
@@ -1162,6 +1270,26 @@ class AgentService:
                                 "content": json.dumps(result, ensure_ascii=False)[:12000],
                             }
                         )
+                    try:
+                        result_fingerprint = content_sha256_preview(
+                            json.dumps(result, ensure_ascii=False, default=str)[:8000]
+                        )
+                    except (TypeError, ValueError):
+                        result_fingerprint = ""
+                    await emit_trace_event(
+                        db,
+                        run_id=run.id,
+                        event_type=EV_TOOL_FINISHED,
+                        trace_id=root_trace,
+                        span_id=tool_span,
+                        parent_span_id=llm_span,
+                        step_index=step_idx,
+                        payload={
+                            "tool_name": tool_name,
+                            "result_sha256": result_fingerprint,
+                            "proposal": bool(prop),
+                        },
+                    )
 
                 executed_non_final = any(
                     (c.name or "") != FINAL_ANSWER_TOOL_NAME for c in response.tool_calls
@@ -1231,6 +1359,32 @@ class AgentService:
             run.status = "failed"
             run.error = str(exc)[:2000]
 
+        finally:
+            if _replay_token is not None:
+                _replay_ctx.reset(_replay_token)
+
+        if run.root_trace_id:
+            if run.status == "completed":
+                await emit_trace_event(
+                    db,
+                    run_id=run.id,
+                    event_type=EV_RUN_COMPLETED,
+                    trace_id=run.root_trace_id,
+                    span_id=root_span,
+                    payload={
+                        "assistant_reply_sha256": content_sha256_preview(run.assistant_reply or ""),
+                    },
+                )
+            elif run.status == "failed":
+                await emit_trace_event(
+                    db,
+                    run_id=run.id,
+                    event_type=EV_RUN_FAILED,
+                    trace_id=run.root_trace_id,
+                    span_id=root_span,
+                    payload={"error": (run.error or "")[:500]},
+                )
+
         run.updated_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(run)
@@ -1264,9 +1418,37 @@ class AgentService:
             user_message=run.user_message,
             assistant_reply=run.assistant_reply,
             error=run.error,
+            root_trace_id=run.root_trace_id,
+            chat_thread_id=run.chat_thread_id,
             steps=steps,
             pending_proposals=proposals,
         )
+
+    @staticmethod
+    async def list_trace_events(
+        db: AsyncSession, user: User, run_id: int
+    ) -> list[AgentTraceEventRead] | None:
+        run = await db.get(AgentRun, run_id)
+        if not run or run.user_id != user.id:
+            return None
+        result = await db.execute(
+            select(AgentTraceEvent).where(AgentTraceEvent.run_id == run_id).order_by(AgentTraceEvent.id)
+        )
+        rows = result.scalars().all()
+        return [
+            AgentTraceEventRead(
+                id=r.id,
+                schema_version=r.schema_version,
+                event_type=r.event_type,
+                trace_id=r.trace_id,
+                span_id=r.span_id,
+                parent_span_id=r.parent_span_id,
+                step_index=r.step_index,
+                payload=r.payload,
+                created_at=r.created_at,
+            )
+            for r in rows
+        ]
 
     @staticmethod
     async def get_run(db: AsyncSession, user: User, run_id: int) -> AgentRunRead | None:

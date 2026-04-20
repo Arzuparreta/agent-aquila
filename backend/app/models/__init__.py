@@ -13,7 +13,8 @@ memory table. Email sends/replies are still gated through PendingProposal,
 but every other tool runs auto-applied against the live provider API.
 """
 from app.models.agent_memory import AgentMemory
-from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.agent_run import AgentRun, AgentRunStep, AgentTraceEvent
+from app.models.channel_thread_binding import ChannelThreadBinding
 from app.models.audit_log import AuditLog
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
@@ -28,6 +29,8 @@ __all__ = [
     "AgentMemory",
     "AgentRun",
     "AgentRunStep",
+    "AgentTraceEvent",
+    "ChannelThreadBinding",
     "AuditLog",
     "ChatMessage",
     "ChatThread",

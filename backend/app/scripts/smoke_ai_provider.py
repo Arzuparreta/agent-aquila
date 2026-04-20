@@ -198,7 +198,7 @@ async def _check_tool_calling_prompted(api_key: str, settings_row: Any) -> bool:
         "Call `echo` with text \"ping\" first, then `final_answer` with text \"ok\"."
     )
     try:
-        raw, finish, _msg = await LLMClient.chat_completion_full(
+        raw, finish, _msg, _usage = await LLMClient.chat_completion_full(
             api_key,
             settings_row,
             messages=[

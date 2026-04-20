@@ -45,12 +45,14 @@ class ChatResponse:
     object from the provider, useful for round-tripping back into the
     conversation history without losing provider-specific fields.
     ``finish_reason`` is taken from ``choices[0].finish_reason`` when present.
+    ``usage`` is the provider's token usage object when returned (prompt/completion/total).
     """
 
     content: str
     tool_calls: list[ChatToolCall] = field(default_factory=list)
     raw_message: dict[str, Any] = field(default_factory=dict)
     finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
 
     @property
     def has_tool_calls(self) -> bool:
@@ -92,8 +94,8 @@ class LLMClient:
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.2,
-    ) -> tuple[str, str | None, dict[str, Any]]:
-        """Chat completion without tools; returns content, finish_reason, raw message dict."""
+    ) -> tuple[str, str | None, dict[str, Any], dict[str, Any] | None]:
+        """Chat completion without tools; returns content, finish_reason, raw message dict, usage."""
         body: dict[str, Any] = {
             "model": model or settings_row.chat_model,
             "messages": messages,
@@ -103,7 +105,8 @@ class LLMClient:
         choice = data["choices"][0]
         message = choice.get("message") or {}
         content = str(message.get("content") or "")
-        return content, choice.get("finish_reason"), dict(message)
+        usage = data.get("usage")
+        return content, choice.get("finish_reason"), dict(message), usage if isinstance(usage, dict) else None
 
     @staticmethod
     async def chat_with_tools(
@@ -139,6 +142,9 @@ class LLMClient:
         message = choice["message"]
         parsed = _parse_message(message)
         parsed.finish_reason = choice.get("finish_reason")
+        usage = data.get("usage")
+        if isinstance(usage, dict):
+            parsed.usage = usage
         return parsed
 
     @staticmethod

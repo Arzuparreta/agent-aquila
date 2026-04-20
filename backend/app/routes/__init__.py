@@ -12,6 +12,7 @@ from app.routes import (
     ai,
     auth,
     calendar,
+    channels,
     connectors,
     drive,
     gmail,
@@ -31,6 +32,7 @@ api_router.include_router(agent.router)
 api_router.include_router(connectors.router)
 api_router.include_router(oauth.router)
 api_router.include_router(threads.router)
+api_router.include_router(channels.router)
 api_router.include_router(maintenance.router)
 # Live provider proxies — every external API call goes through these.
 api_router.include_router(gmail.router)

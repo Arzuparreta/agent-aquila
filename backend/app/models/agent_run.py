@@ -19,12 +19,21 @@ class AgentRun(Base):
     user_message: Mapped[str] = mapped_column(Text, nullable=False)
     assistant_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # W3C trace id (32 hex chars) for cross-service correlation; set at run start.
+    root_trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # Optional chat thread this run belongs to (web UI or channel-bound).
+    chat_thread_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_threads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
     steps = relationship("AgentRunStep", back_populates="run", order_by="AgentRunStep.step_index", cascade="all, delete-orphan")
+    trace_events = relationship(
+        "AgentTraceEvent", back_populates="run", order_by="AgentTraceEvent.id", cascade="all, delete-orphan"
+    )
 
 
 class AgentRunStep(Base):
@@ -39,3 +48,22 @@ class AgentRunStep(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     run = relationship("AgentRun", back_populates="steps")
+
+
+class AgentTraceEvent(Base):
+    """Versioned OTEL-style events for evals, replay metadata, and dashboards."""
+
+    __tablename__ = "agent_trace_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    trace_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    span_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    parent_span_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    run = relationship("AgentRun", back_populates="trace_events")

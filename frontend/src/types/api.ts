@@ -249,6 +249,9 @@ export type AgentRun = {
   user_message: string;
   assistant_reply: string | null;
   error: string | null;
+  /** W3C-style trace id for observability / eval correlation */
+  root_trace_id?: string | null;
+  chat_thread_id?: number | null;
   steps: AgentStep[];
   pending_proposals: PendingProposal[];
 };
