@@ -65,11 +65,24 @@ async def sqlalchemy_exception_handler(request, exc: SQLAlchemyError):
     if isinstance(exc, ProgrammingError):
         raw = str(getattr(exc, "orig", None) or exc)
         lowered = raw.lower()
-        if (
+        orig = getattr(exc, "orig", None)
+        sqlstate = getattr(orig, "sqlstate", None) if orig is not None else None
+        # PostgreSQL: 42703 undefined_column, 42P01 undefined_table
+        schema_sqlstates = frozenset({"42703", "42P01"})
+        looks_like_missing_schema = sqlstate in schema_sqlstates or (
             "undefinedcolumn" in lowered
             or "undefinedtable" in lowered
             or "does not exist" in lowered
-        ):
+            or (
+                "column" in lowered
+                and ("does not exist" in lowered or "no existe" in lowered)
+            )
+            or (
+                ("relation" in lowered or "table" in lowered)
+                and ("does not exist" in lowered or "no existe" in lowered)
+            )
+        )
+        if looks_like_missing_schema:
             logger.error(
                 "Database schema mismatch on %s (run Alembic migrations): %s",
                 request.url.path,

@@ -15,6 +15,11 @@ function messageFromFastApiDetail(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const detail = (body as { detail?: unknown }).detail;
   if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const rec = detail as Record<string, unknown>;
+    if (typeof rec.message === "string" && rec.message.trim()) return rec.message.trim();
+    if (typeof rec.detail === "string" && rec.detail.trim()) return rec.detail.trim();
+  }
   if (Array.isArray(detail)) {
     const parts = detail
       .map((item) => {
