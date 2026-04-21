@@ -1,7 +1,15 @@
 "use client";
 
+import {
+  recordTelemetryApiError,
+  recordTelemetryNetworkError,
+  recordTelemetrySlowRequest,
+} from "@/lib/telemetry/record";
+
 /** Same-origin `/api/v1` is proxied by Next (see next.config.ts). Override with full URL only if needed. */
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, "");
+
+const SLOW_REQUEST_MS = 4000;
 
 export class ApiError extends Error {
   readonly status: number;
@@ -96,18 +104,37 @@ async function readErrorPayload(
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const method = (init?.method || "GET").toUpperCase();
+  const t0 = typeof performance !== "undefined" ? performance.now() : 0;
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {})
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers || {})
+      }
+    });
+  } catch (err) {
+    recordTelemetryNetworkError({ path, method, error: err });
+    throw err;
+  }
+
+  const durationMs =
+    typeof performance !== "undefined" ? performance.now() - t0 : 0;
 
   if (!response.ok) {
     const { message, detail } = await readErrorPayload(response);
+    recordTelemetryApiError({
+      path,
+      method,
+      status: response.status,
+      durationMs,
+      message,
+      detail
+    });
     // 401s normally mean the *session* expired — log out and bounce to login.
     // But the backend also returns 401 with ``{kind:"needs_reauth"}`` when a
     // *connector* (e.g. Gmail) needs reauthorising; that should not log the
@@ -129,6 +156,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (response.status === 204) {
     return {} as T;
+  }
+
+  if (durationMs >= SLOW_REQUEST_MS) {
+    recordTelemetrySlowRequest({
+      path,
+      method,
+      durationMs,
+      status: response.status
+    });
   }
 
   return (await response.json()) as T;

@@ -176,11 +176,18 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         "calendar_list_events",
         "Use whenever the user asks about their calendar — what's scheduled "
         "this week, conflicts, free slots. Calls Google Calendar live. "
+        "Results are ordered by start time from ``time_min`` onward (default: now UTC). "
         "Inputs: optional ``connection_id``, ``calendar_id`` (defaults to "
-        "``primary``), ``page_token``, ``max_results`` (1-250).",
+        "``primary``), ``time_min`` / ``time_max`` (RFC3339, e.g. end of week), "
+        "``page_token``, ``max_results`` (1-250).",
         {
             **_CONNECTION_ID,
             "calendar_id": {"type": "string"},
+            "time_min": {
+                "type": "string",
+                "description": "RFC3339 lower bound; omit to use current time (upcoming events).",
+            },
+            "time_max": {"type": "string", "description": "RFC3339 upper bound (optional)."},
             "page_token": {"type": "string"},
             "max_results": {"type": "integer", "minimum": 1, "maximum": 250},
         },

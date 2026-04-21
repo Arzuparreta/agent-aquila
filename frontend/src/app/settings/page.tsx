@@ -12,6 +12,7 @@ import { MaintenanceSection } from "@/components/features/maintenance/maintenanc
 import { MemorySection } from "@/components/features/memory/memory-section";
 import { ProtectedPage } from "@/components/features/protected-page";
 import { SkillsSection } from "@/components/features/skills/skills-section";
+import { TelemetrySection } from "@/components/features/telemetry/telemetry-section";
 import { ThemeSection } from "@/components/features/theme/theme-section";
 import { Card } from "@/components/ui/card";
 import { useProviderRegistry } from "@/lib/ai-providers";
@@ -169,6 +170,8 @@ export default function SettingsPage() {
 
             <Toast message={api.toast} />
           </Card>
+
+          <TelemetrySection />
 
           <Card>
             <h2 className="mb-1 text-base font-semibold">{t("theme.sectionTitle")}</h2>

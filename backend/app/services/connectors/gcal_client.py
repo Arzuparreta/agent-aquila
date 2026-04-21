@@ -58,6 +58,9 @@ class GoogleCalendarClient:
         sync_token: str | None = None,
         max_results: int = 250,
         show_deleted: bool = True,
+        time_min: str | None = None,
+        time_max: str | None = None,
+        order_by: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"maxResults": max_results, "showDeleted": "true" if show_deleted else "false"}
         if page_token:
@@ -67,6 +70,13 @@ class GoogleCalendarClient:
         else:
             # First full sync: singleEvents=true expands recurrences, much easier to mirror.
             params["singleEvents"] = "true"
+        if time_min:
+            params["timeMin"] = time_min
+        if time_max:
+            params["timeMax"] = time_max
+        # Google requires orderBy=startTime when filtering by time window for single events.
+        if order_by:
+            params["orderBy"] = order_by
         return await self._request("GET", f"/calendars/{calendar_id}/events", params=params)
 
     async def get_event(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:

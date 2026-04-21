@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import {
+  recordTelemetryAgentRunFailed,
+  recordTelemetryAssistantPollTimeout
+} from "@/lib/telemetry/record";
 import { useTranslation } from "@/lib/i18n";
 import type {
   AgentRun,
@@ -101,9 +105,15 @@ export function ChatThreadView({
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
           setError(null);
           try {
-            await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
+            const run = await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
+            if (run.status === "failed") {
+              recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
+            }
             await reload();
           } catch (pollErr) {
+            if (pollErr instanceof ApiError && pollErr.status === 408) {
+              recordTelemetryAssistantPollTimeout();
+            }
             setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.retryFailed"));
           }
           return;
@@ -147,9 +157,15 @@ export function ChatThreadView({
           setError(null);
           refs.clear();
           try {
-            await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
+            const run = await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
+            if (run.status === "failed") {
+              recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
+            }
             await reload();
           } catch (pollErr) {
+            if (pollErr instanceof ApiError && pollErr.status === 408) {
+              recordTelemetryAssistantPollTimeout();
+            }
             setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.sendFailed"));
           }
           return;

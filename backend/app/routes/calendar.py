@@ -7,6 +7,7 @@ run through the same code path as the agent's calendar tools.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -73,15 +74,26 @@ async def list_events(
     calendar_id: str = Query(default="primary"),
     page_token: str | None = Query(default=None),
     max_results: int = Query(default=50, ge=1, le=250),
+    time_min: str | None = Query(
+        default=None,
+        description="RFC3339 lower bound; defaults to now (UTC) so results are upcoming-first.",
+    ),
+    time_max: str | None = Query(default=None, description="RFC3339 upper bound (optional)."),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     row = await _resolve(db, current_user, connection_id)
     token, _creds_dict, _provider = await _creds(db, row)
     client = GoogleCalendarClient(token)
+    tmin = time_min or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         return await client.list_events(
-            calendar_id, page_token=page_token, max_results=max_results
+            calendar_id,
+            page_token=page_token,
+            max_results=max_results,
+            time_min=tmin,
+            time_max=time_max,
+            order_by="startTime",
         )
     except CalendarAPIError as exc:
         raise HTTPException(status_code=exc.status_code or 502, detail=exc.detail[:500])

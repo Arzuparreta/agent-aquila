@@ -612,10 +612,19 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
         client = await _calendar_client(db, row)
+        # Without timeMin + orderBy=startTime, events.list returns an arbitrary first page
+        # (often old events); upcoming items can be missing entirely when maxResults is capped.
+        time_min = args.get("time_min")
+        if time_min is None:
+            time_min = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        time_max = args.get("time_max")
         return await client.list_events(
             str(args.get("calendar_id") or "primary"),
             page_token=args.get("page_token"),
             max_results=int(args.get("max_results") or 50),
+            time_min=str(time_min),
+            time_max=str(time_max) if time_max else None,
+            order_by="startTime",
         )
 
     @staticmethod
