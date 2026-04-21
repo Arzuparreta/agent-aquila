@@ -32,6 +32,8 @@ function formatTelemetryKind(
     assistant_poll_timeout: "telemetry.kind.assistant_poll_timeout",
     assistant_sse_timeout: "telemetry.kind.assistant_sse_timeout",
     assistant_sse_error: "telemetry.kind.assistant_sse_error",
+    assistant_ws_timeout: "telemetry.kind.assistant_ws_timeout",
+    assistant_ws_error: "telemetry.kind.assistant_ws_error",
   };
   const k = keys[kind];
   return k ? t(k) : kind;

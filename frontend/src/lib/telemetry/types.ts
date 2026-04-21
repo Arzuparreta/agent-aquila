@@ -10,7 +10,9 @@ export type TelemetryKind =
   | "agent_run_failed"
   | "assistant_poll_timeout"
   | "assistant_sse_timeout"
-  | "assistant_sse_error";
+  | "assistant_sse_error"
+  | "assistant_ws_timeout"
+  | "assistant_ws_error";
 
 export type TelemetrySeverity = "info" | "warning" | "error";
 

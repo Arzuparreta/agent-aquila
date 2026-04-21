@@ -265,3 +265,45 @@ export function recordTelemetryAssistantSseError(payload: {
   };
   void putTelemetryEvent(ev);
 }
+
+export function recordTelemetryAssistantWsTimeout(): void {
+  if (!isTelemetryEnabled()) return;
+  const msg = "Assistant run WebSocket wait timed out (worker or Redis?)";
+  const ev: TelemetryEvent = {
+    ...baseEvent(),
+    kind: "assistant_ws_timeout",
+    severity: "warning",
+    apiPath: "/api/v1/realtime/ws",
+    apiPathGroup: "/api/v1/realtime/ws",
+    method: "WS",
+    status: 408,
+    durationMs: null,
+    message: msg,
+    groupKey: buildGroupKey("assistant_ws_timeout", "/api/v1/realtime/ws", 408, msg),
+    detail: null,
+  };
+  void putTelemetryEvent(ev);
+}
+
+export function recordTelemetryAssistantWsError(payload: {
+  runId: number;
+  status: number;
+  message: string;
+}): void {
+  if (!isTelemetryEnabled()) return;
+  const msg = payload.message.slice(0, 500);
+  const ev: TelemetryEvent = {
+    ...baseEvent(),
+    kind: "assistant_ws_error",
+    severity: payload.status >= 500 ? "error" : "warning",
+    apiPath: "/api/v1/realtime/ws",
+    apiPathGroup: "/api/v1/realtime/ws",
+    method: "WS",
+    status: payload.status,
+    durationMs: null,
+    message: msg,
+    groupKey: buildGroupKey("assistant_ws_error", "/api/v1/realtime/ws", payload.status, msg),
+    detail: { run_id: payload.runId },
+  };
+  void putTelemetryEvent(ev);
+}

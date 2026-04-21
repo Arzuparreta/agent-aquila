@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
-import { streamAgentRunUntilTerminal } from "@/lib/sse";
+import { waitForRunTerminalWebSocket } from "@/lib/realtime";
 import {
   recordTelemetryAgentRunFailed,
-  recordTelemetryAssistantSseError,
-  recordTelemetryAssistantSseTimeout
+  recordTelemetryAssistantWsError,
+  recordTelemetryAssistantWsTimeout
 } from "@/lib/telemetry/record";
 import { useTranslation } from "@/lib/i18n";
 import type { ChatMessage, ChatSendResult, ChatThread, EntityRef } from "@/types/api";
@@ -92,7 +92,7 @@ export function ChatThreadView({
     async (runId: number) => {
       setError(null);
       try {
-        const run = await streamAgentRunUntilTerminal(runId);
+        const run = await waitForRunTerminalWebSocket(runId);
         if (run.status === "failed") {
           recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
         }
@@ -100,9 +100,9 @@ export function ChatThreadView({
       } catch (err) {
         if (err instanceof ApiError) {
           if (err.status === 408) {
-            recordTelemetryAssistantSseTimeout();
+            recordTelemetryAssistantWsTimeout();
           } else {
-            recordTelemetryAssistantSseError({ runId, status: err.status, message: err.message });
+            recordTelemetryAssistantWsError({ runId, status: err.status, message: err.message });
           }
         }
         setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));

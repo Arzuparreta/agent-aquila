@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -20,6 +22,7 @@ from app.core.schema_probe import fail_fast_if_schema_stale
 from app.routes import api_router
 from app.services.llm_client import aclose_llm_http_client
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
+from app.services.ws_broker import aclose_subscriber_redis, run_redis_subscriber_loop
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +30,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
     await fail_fast_if_schema_stale()
+    sub_task: asyncio.Task | None = None
+    if (settings.redis_url or "").strip():
+        sub_task = asyncio.create_task(run_redis_subscriber_loop())
     yield
+    if sub_task is not None:
+        sub_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await sub_task
+    await aclose_subscriber_redis()
     await aclose_llm_http_client()
 
 

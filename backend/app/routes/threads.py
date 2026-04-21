@@ -43,6 +43,7 @@ from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_m
 from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
+from app.services.agent_event_bus import publish_run_status_event
 from app.services.chat_service import (
     append_message,
     delete_all_archived_threads,
@@ -451,6 +452,15 @@ async def send_message(
                 db, run=run_row, placeholder_message=asst_msg
             )
             await db.refresh(thread)
+            await publish_run_status_event(
+                user_id=current_user.id,
+                run_id=run_id_snap,
+                status=read.status,
+                error=read.error,
+                step_count=0,
+                chat_thread_id=thread.id,
+                terminal=True,
+            )
             return _message_send_result(thread, user_msg, asst_msg, read, agent_run_pending=False)
         pending_read = AgentRunRead(
             id=run_id_snap,
@@ -474,6 +484,15 @@ async def send_message(
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
+    )
+    await publish_run_status_event(
+        user_id=current_user.id,
+        run_id=run.id,
+        status=run.status,
+        error=run.error,
+        step_count=len(run.steps),
+        chat_thread_id=thread.id,
+        terminal=True,
     )
     cards = attachments_from_agent_run_read(run)
     has_error_card = any(
@@ -644,6 +663,15 @@ async def retry_failed_message(
                 db, run=run_row, placeholder_message=asst_msg
             )
             await db.refresh(thread)
+            await publish_run_status_event(
+                user_id=current_user.id,
+                run_id=run_id_snap,
+                status=read.status,
+                error=read.error,
+                step_count=0,
+                chat_thread_id=thread.id,
+                terminal=True,
+            )
             return _message_send_result(thread, user_msg, asst_msg, read, agent_run_pending=False)
         pending_read = AgentRunRead(
             id=run_id_snap,
@@ -667,6 +695,15 @@ async def retry_failed_message(
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
+    )
+    await publish_run_status_event(
+        user_id=current_user.id,
+        run_id=run.id,
+        status=run.status,
+        error=run.error,
+        step_count=len(run.steps),
+        chat_thread_id=thread.id,
+        terminal=True,
     )
     cards = attachments_from_agent_run_read(run)
     has_error_card = any(

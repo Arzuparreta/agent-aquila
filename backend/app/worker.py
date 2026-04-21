@@ -27,6 +27,7 @@ from app.models.agent_run import AgentRun
 from app.models.chat_thread import ChatThread
 from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
+from app.services.agent_event_bus import publish_run_status_event
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_runtime_config_service import resolve_for_user
@@ -150,6 +151,15 @@ async def run_chat_agent_turn(
                 return {"ok": True, "reason": "already_started", "status": run_row.status}
             run_row.status = "running"
             await db.commit()
+            await publish_run_status_event(
+                user_id=user_id,
+                run_id=run_id,
+                status="running",
+                error=None,
+                step_count=0,
+                chat_thread_id=run_row.chat_thread_id,
+                terminal=False,
+            )
             read = await AgentService._execute_agent_loop(
                 db,
                 user,
@@ -160,10 +170,28 @@ async def run_chat_agent_turn(
             )
             tid = run_row.chat_thread_id
             if tid is None:
+                await publish_run_status_event(
+                    user_id=user_id,
+                    run_id=run_id,
+                    status=read.status,
+                    error=read.error,
+                    step_count=len(read.steps),
+                    chat_thread_id=None,
+                    terminal=True,
+                )
                 return {"ok": True, "run_id": run_id, "status": read.status}
             thread = await db.get(ChatThread, tid)
             if not thread or thread.user_id != user_id:
                 logger.warning("run_chat_agent_turn: thread %s missing for run %s", tid, run_id)
+                await publish_run_status_event(
+                    user_id=user_id,
+                    run_id=run_id,
+                    status=read.status,
+                    error=read.error,
+                    step_count=len(read.steps),
+                    chat_thread_id=tid,
+                    terminal=True,
+                )
                 return {"ok": True, "run_id": run_id, "status": read.status}
             await apply_agent_run_to_placeholder(
                 db, thread, agent_run_id=run_id, run_read=read
@@ -176,6 +204,15 @@ async def run_chat_agent_turn(
                 error=read.error,
             )
             await db.commit()
+            await publish_run_status_event(
+                user_id=user_id,
+                run_id=run_id,
+                status=read.status,
+                error=read.error,
+                step_count=len(read.steps),
+                chat_thread_id=tid,
+                terminal=True,
+            )
             if read.status == "completed":
                 await maybe_ingest_post_turn_memory(
                     db,
@@ -203,6 +240,15 @@ async def run_chat_agent_turn(
                             db, thread, agent_run_id=run_id, run_read=read
                         )
                         await db.commit()
+                        await publish_run_status_event(
+                            user_id=user_id,
+                            run_id=run_id,
+                            status=read.status,
+                            error=read.error,
+                            step_count=len(read.steps),
+                            chat_thread_id=run_row.chat_thread_id,
+                            terminal=True,
+                        )
         except Exception:
             logger.exception("run_chat_agent_turn cleanup failed run_id=%s", run_id)
         return {"ok": False, "run_id": run_id, "error": str(exc)[:200]}

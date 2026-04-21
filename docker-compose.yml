@@ -95,6 +95,8 @@ services:
     environment:
       # Browser calls /api/v1 on the Next server; Next proxies to the API (avoids CORS / localhost vs 127.0.0.1).
       NEXT_PUBLIC_API_URL: /api/v1
+      # WebSocket agent events (browser connects to host :8000, not the Next container).
+      NEXT_PUBLIC_WS_URL: ws://127.0.0.1:8000
       BACKEND_INTERNAL_URL: http://backend:8000
     depends_on:
       - backend
