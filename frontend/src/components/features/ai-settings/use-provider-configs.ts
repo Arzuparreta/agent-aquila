@@ -102,6 +102,7 @@ export type UseProviderConfigsApi = {
   saving: boolean;
   saveError: string | null;
   toast: string | null;
+  dismissToast: () => void;
 
   selectKind: (kind: string) => void;
   startNew: (kind: string) => void;
@@ -535,6 +536,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     saving,
     saveError,
     toast,
+    dismissToast: () => setToast(null),
     selectKind,
     startNew,
     updateDraft,

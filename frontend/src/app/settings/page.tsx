@@ -15,6 +15,7 @@ import { SkillsSection } from "@/components/features/skills/skills-section";
 import { TelemetrySection } from "@/components/features/telemetry/telemetry-section";
 import { ThemeSection } from "@/components/features/theme/theme-section";
 import { Card } from "@/components/ui/card";
+import { StatusToast } from "@/components/ui/status-toast";
 import { useProviderRegistry } from "@/lib/ai-providers";
 import { useTranslation } from "@/lib/i18n";
 import { listIanaTimeZones } from "@/lib/timezones";
@@ -168,7 +169,14 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <Toast message={api.toast} />
+            {api.toast ? (
+              <StatusToast
+                kind="ok"
+                text={api.toast}
+                onDismiss={api.dismissToast}
+                dismissAriaLabel={t("chat.dismissToast")}
+              />
+            ) : null}
           </Card>
 
           <TelemetrySection />
@@ -206,21 +214,5 @@ export default function SettingsPage() {
         </main>
       </div>
     </ProtectedPage>
-  );
-}
-
-function Toast({ message }: { message: string | null }) {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    if (!message) return;
-    setVisible(true);
-    const id = window.setTimeout(() => setVisible(false), 2400);
-    return () => window.clearTimeout(id);
-  }, [message]);
-  if (!message || !visible) return null;
-  return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-lg">
-      {message}
-    </div>
   );
 }

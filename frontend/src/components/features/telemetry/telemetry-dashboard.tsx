@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { StatusToast } from "@/components/ui/status-toast";
 import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import {
   aggregateByVersion,
@@ -302,9 +303,12 @@ export function TelemetryDashboard() {
       />
 
       {toast ? (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-lg">
-          {toast}
-        </div>
+        <StatusToast
+          kind="ok"
+          text={toast}
+          onDismiss={() => setToast(null)}
+          dismissAriaLabel={t("chat.dismissToast")}
+        />
       ) : null}
     </div>
   );
