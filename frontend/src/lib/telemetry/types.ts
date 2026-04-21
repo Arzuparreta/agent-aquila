@@ -8,7 +8,9 @@ export type TelemetryKind =
   | "network_error"
   | "client_error"
   | "agent_run_failed"
-  | "assistant_poll_timeout";
+  | "assistant_poll_timeout"
+  | "assistant_sse_timeout"
+  | "assistant_sse_error";
 
 export type TelemetrySeverity = "info" | "warning" | "error";
 

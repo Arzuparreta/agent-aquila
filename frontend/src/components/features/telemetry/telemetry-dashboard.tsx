@@ -30,6 +30,8 @@ function formatTelemetryKind(
     client_error: "telemetry.kind.client_error",
     agent_run_failed: "telemetry.kind.agent_run_failed",
     assistant_poll_timeout: "telemetry.kind.assistant_poll_timeout",
+    assistant_sse_timeout: "telemetry.kind.assistant_sse_timeout",
+    assistant_sse_error: "telemetry.kind.assistant_sse_error",
   };
   const k = keys[kind];
   return k ? t(k) : kind;

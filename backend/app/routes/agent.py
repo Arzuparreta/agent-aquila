@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -55,6 +60,61 @@ async def get_agent_run(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_agent_run(
+    run_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Server-Sent Events for agent run status until ``completed`` or ``failed`` (or stream cap).
+
+    Polls the database on a short interval; the ARQ worker updates ``agent_runs`` in
+    the background. Same auth as ``GET /agent/runs/{id}`` — 404 if the run is missing
+    or not owned by the current user.
+    """
+    probe = await AgentService.get_run(db, current_user, run_id)
+    if not probe:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+    _terminal = frozenset({"completed", "failed"})
+    _max_stream_seconds = 3600.0
+    _sleep_s = 1.0
+
+    async def sse_gen():
+        seq = 0
+        t0 = time.monotonic()
+        while True:
+            run = await AgentService.get_run(db, current_user, run_id)
+            if not run:
+                yield f"data: {json.dumps({'seq': seq, 'error': 'not_found'})}\n\n"
+                return
+            seq += 1
+            payload: dict = {
+                "seq": seq,
+                "id": run.id,
+                "status": run.status,
+                "error": run.error,
+                "step_count": len(run.steps),
+            }
+            yield f"data: {json.dumps(payload, default=str)}\n\n"
+            if run.status in _terminal:
+                return
+            if time.monotonic() - t0 > _max_stream_seconds:
+                yield f"data: {json.dumps({'seq': seq, 'error': 'sse_timeout'})}\n\n"
+                return
+            await asyncio.sleep(_sleep_s)
+
+    return StreamingResponse(
+        sse_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/runs/{run_id}/trace-events", response_model=list[AgentTraceEventRead])

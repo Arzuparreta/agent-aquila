@@ -24,6 +24,9 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // `GET /api/v1/agent/runs/:id/stream` is implemented by
+  // `src/app/api/v1/agent/runs/[runId]/stream/route.ts` so long-lived SSE is not
+  // buffered; other `/api/v1` paths use the rewrites above.
 };
 
 export default nextConfig;

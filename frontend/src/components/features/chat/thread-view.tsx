@@ -3,18 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { streamAgentRunUntilTerminal } from "@/lib/sse";
 import {
   recordTelemetryAgentRunFailed,
-  recordTelemetryAssistantPollTimeout
+  recordTelemetryAssistantSseError,
+  recordTelemetryAssistantSseTimeout
 } from "@/lib/telemetry/record";
 import { useTranslation } from "@/lib/i18n";
-import type {
-  AgentRun,
-  ChatMessage,
-  ChatSendResult,
-  ChatThread,
-  EntityRef
-} from "@/types/api";
+import type { ChatMessage, ChatSendResult, ChatThread, EntityRef } from "@/types/api";
 
 import { ChatComposer } from "./composer";
 import { MessageBubble } from "./message-bubble";
@@ -92,43 +88,28 @@ export function ChatThreadView({
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, sending]);
 
-  const pollAgentRunUntilDone = useCallback(
-    async (runId: number) => {
-      const terminal = new Set(["completed", "failed"]);
-      const maxTicks = 3000;
-      for (let i = 0; i < maxTicks; i++) {
-        const run = await apiFetch<AgentRun>(`/agent/runs/${runId}`);
-        if (terminal.has(run.status)) {
-          return run;
-        }
-        await new Promise((r) => window.setTimeout(r, 1200));
-      }
-      throw new ApiError(
-        "The assistant is still running after a long wait. Check that the worker container is up and Redis is reachable.",
-        408
-      );
-    },
-    []
-  );
-
   const runAgentRunFollowUp = useCallback(
     async (runId: number) => {
       setError(null);
       try {
-        const run = await pollAgentRunUntilDone(runId);
+        const run = await streamAgentRunUntilTerminal(runId);
         if (run.status === "failed") {
           recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
         }
         await reload();
-      } catch (pollErr) {
-        if (pollErr instanceof ApiError && pollErr.status === 408) {
-          recordTelemetryAssistantPollTimeout();
+      } catch (err) {
+        if (err instanceof ApiError) {
+          if (err.status === 408) {
+            recordTelemetryAssistantSseTimeout();
+          } else {
+            recordTelemetryAssistantSseError({ runId, status: err.status, message: err.message });
+          }
         }
-        setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.sendFailed"));
+        setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));
         await reload();
       }
     },
-    [pollAgentRunUntilDone, reload, t]
+    [reload, t]
   );
 
   const reconcileUncertainSend = useCallback(

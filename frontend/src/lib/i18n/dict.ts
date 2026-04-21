@@ -728,6 +728,8 @@ const en = {
   "telemetry.kind.client_error": "Client error",
   "telemetry.kind.agent_run_failed": "Assistant run failed",
   "telemetry.kind.assistant_poll_timeout": "Assistant poll timeout",
+  "telemetry.kind.assistant_sse_timeout": "Assistant run stream (max wait)",
+  "telemetry.kind.assistant_sse_error": "Assistant run stream error",
 
   // ── Chat inline cards ────────────────────────────────────────────────────
   "cards.keyDecrypt.title": "Encrypted key could not be decrypted",
@@ -1539,6 +1541,8 @@ const es: Record<keyof typeof en, string> = {
   "telemetry.kind.client_error": "Error del cliente",
   "telemetry.kind.agent_run_failed": "Fallo del asistente",
   "telemetry.kind.assistant_poll_timeout": "Tiempo de espera del asistente",
+  "telemetry.kind.assistant_sse_timeout": "Flujo SSE del asistente (espera máxima)",
+  "telemetry.kind.assistant_sse_error": "Error en flujo SSE del asistente",
 
   "cards.keyDecrypt.title": "Clave cifrada no se pudo descifrar",
   "cards.keyDecrypt.defaultMessage": "No pudimos leer tu clave guardada.",

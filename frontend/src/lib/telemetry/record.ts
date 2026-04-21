@@ -223,3 +223,45 @@ export function recordTelemetryAssistantPollTimeout(): void {
   };
   void putTelemetryEvent(ev);
 }
+
+export function recordTelemetryAssistantSseTimeout(): void {
+  if (!isTelemetryEnabled()) return;
+  const msg = "Assistant run SSE hit max wait (worker or Redis?)";
+  const ev: TelemetryEvent = {
+    ...baseEvent(),
+    kind: "assistant_sse_timeout",
+    severity: "warning",
+    apiPath: null,
+    apiPathGroup: "/agent/runs/:id/stream",
+    method: "GET",
+    status: 408,
+    durationMs: null,
+    message: msg,
+    groupKey: buildGroupKey("assistant_sse_timeout", "/agent/runs/:id/stream", 408, msg),
+    detail: null,
+  };
+  void putTelemetryEvent(ev);
+}
+
+export function recordTelemetryAssistantSseError(payload: {
+  runId: number;
+  status: number;
+  message: string;
+}): void {
+  if (!isTelemetryEnabled()) return;
+  const msg = payload.message.slice(0, 500);
+  const ev: TelemetryEvent = {
+    ...baseEvent(),
+    kind: "assistant_sse_error",
+    severity: payload.status >= 500 ? "error" : "warning",
+    apiPath: `/agent/runs/${payload.runId}/stream`,
+    apiPathGroup: "/agent/runs/:id/stream",
+    method: "GET",
+    status: payload.status,
+    durationMs: null,
+    message: msg,
+    groupKey: buildGroupKey("assistant_sse_error", "/agent/runs/:id/stream", payload.status, msg),
+    detail: { run_id: payload.runId },
+  };
+  void putTelemetryEvent(ev);
+}
