@@ -44,6 +44,8 @@ class UserAISettings(Base, TimestampMixin):
     user_timezone: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Clock display in prompts / get_session_time: auto | 12 | 24
     time_format: Mapped[str] = mapped_column(String(8), default="auto", nullable=False)
+    # When true, new agent turns fail fast with a friendly message (dashboard "pause").
+    agent_processing_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror

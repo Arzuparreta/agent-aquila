@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.agent import (
     AgentRunCreate,
     AgentRunRead,
+    AgentRunSummaryRead,
     AgentTraceEventRead,
     PendingOperationPreviewRead,
     PendingOperationRead,
@@ -23,6 +24,15 @@ from app.services.pending_execution_service import preview_for_proposal_kind
 from app.services.proposal_service import ProposalService, proposal_to_read
 
 router = APIRouter(prefix="/agent", tags=["agent"], dependencies=[Depends(get_current_user)])
+
+
+@router.get("/runs", response_model=list[AgentRunSummaryRead])
+async def list_agent_runs(
+    limit: int = 30,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AgentRunSummaryRead]:
+    return await AgentService.list_recent_runs(db, current_user, limit=limit)
 
 
 @router.post("/runs", response_model=AgentRunRead)

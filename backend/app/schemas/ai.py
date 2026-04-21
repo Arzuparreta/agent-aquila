@@ -31,6 +31,7 @@ class UserAISettingsRead(BaseModel):
     harness_mode: Literal["auto", "native", "prompted"] = "auto"
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] = "auto"
+    agent_processing_paused: bool = False
 
 
 class UserAISettingsUpdate(BaseModel):
@@ -43,6 +44,7 @@ class UserAISettingsUpdate(BaseModel):
     harness_mode: Literal["auto", "native", "prompted"] | None = None
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] | None = None
+    agent_processing_paused: bool | None = None
     api_key: str | None = Field(
         default=None,
         description="When set, replaces the stored key. Send empty string to clear.",

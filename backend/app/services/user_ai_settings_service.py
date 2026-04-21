@@ -68,6 +68,7 @@ class UserAISettingsService:
             harness_mode=coerce_harness_mode(row),
             user_timezone=getattr(row, "user_timezone", None),
             time_format=normalize_time_format(getattr(row, "time_format", None)),  # type: ignore[arg-type]
+            agent_processing_paused=bool(getattr(row, "agent_processing_paused", False)),
         )
 
     @staticmethod
@@ -86,6 +87,7 @@ class UserAISettingsService:
             harness_mode=coerce_harness_mode(row),
             user_timezone=getattr(row, "user_timezone", None),
             time_format=normalize_time_format(getattr(row, "time_format", None)),  # type: ignore[arg-type]
+            agent_processing_paused=bool(getattr(row, "agent_processing_paused", False)),
         )
 
     @staticmethod
@@ -126,6 +128,9 @@ class UserAISettingsService:
 
         if "time_format" in data and data["time_format"] is not None:
             prefs.time_format = normalize_time_format(str(data["time_format"]))
+
+        if "agent_processing_paused" in data and data["agent_processing_paused"] is not None:
+            prefs.agent_processing_paused = bool(data["agent_processing_paused"])
 
         # Pick the target provider for this update. When the client doesn't
         # name one, we keep operating on the currently-active one (or fall

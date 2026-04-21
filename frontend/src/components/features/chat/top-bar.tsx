@@ -148,6 +148,13 @@ export function ChatTopBar({
             onMouseLeave={() => setMenuOpen(false)}
           >
             <Link
+              href="/dashboard"
+              className="block px-3 py-2 hover:bg-interactive-hover"
+              onClick={() => setMenuOpen(false)}
+            >
+              Dashboard
+            </Link>
+            <Link
               href="/settings"
               className="block px-3 py-2 hover:bg-interactive-hover"
               onClick={() => setMenuOpen(false)}

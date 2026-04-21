@@ -29,6 +29,9 @@ from app.models.user import User
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
+from app.services.llm_client import aclose_llm_http_client
+from app.services.telegram_notify import notify_telegram_for_completed_run
+from app.services.user_ai_settings_service import UserAISettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,10 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
             if not AgentRateLimitService.try_consume_heartbeat(user.id):
                 summaries.append({"user_id": user.id, "status": "rate_limited"})
                 continue
+            prefs = await UserAISettingsService.get_or_create(db, user)
+            if getattr(prefs, "agent_processing_paused", False):
+                summaries.append({"user_id": user.id, "status": "paused"})
+                continue
             try:
                 run = await AgentService.run_agent(db, user, _heartbeat_prompt())
                 summaries.append(
@@ -108,6 +115,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     del ctx
+    await aclose_llm_http_client()
     logger.info("worker shutdown")
 
 
@@ -148,6 +156,13 @@ async def run_chat_agent_turn(
                 return {"ok": True, "run_id": run_id, "status": read.status}
             await apply_agent_run_to_placeholder(
                 db, thread, agent_run_id=run_id, run_read=read
+            )
+            await notify_telegram_for_completed_run(
+                db,
+                user_id=user_id,
+                thread_id=tid,
+                assistant_reply=read.assistant_reply,
+                error=read.error,
             )
             await db.commit()
             return {"ok": True, "run_id": run_id, "status": read.status}

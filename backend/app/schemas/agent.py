@@ -69,5 +69,16 @@ class AgentRunRead(BaseModel):
     pending_proposals: list[PendingProposalRead]
 
 
+class AgentRunSummaryRead(BaseModel):
+    """Lightweight row for dashboards (no steps / proposals)."""
+
+    id: int
+    status: str
+    user_message_preview: str
+    created_at: datetime
+    root_trace_id: str | None = None
+    chat_thread_id: int | None = None
+
+
 class ProposalResolve(BaseModel):
     note: str | None = Field(default=None, max_length=500)

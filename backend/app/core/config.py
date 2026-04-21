@@ -92,6 +92,23 @@ class Settings(BaseSettings):
     )
     # full = all connector tools; compact = smaller palette (see agent_tools.tools_for_palette_mode).
     agent_tool_palette: str = Field(default="full", validation_alias="AGENT_TOOL_PALETTE")
+    # System prompt size: full (default) | minimal (shorter tool docs) | none (identity + rules + tools only).
+    agent_prompt_tier: str = Field(default="full", validation_alias="AGENT_PROMPT_TIER")
+    # When true, inject a short "harness facts" markdown block (limits, connector list).
+    agent_include_harness_facts: bool = Field(default=True, validation_alias="AGENT_INCLUDE_HARNESS_FACTS")
+    # Omit tool schemas for providers the user has not connected (reduces confusion + tokens).
+    agent_connector_gated_tools: bool = Field(default=False, validation_alias="AGENT_CONNECTOR_GATED_TOOLS")
+    # In prompted harness mode, use shorter JSON (tighter descriptions, no indent) for tool embed.
+    agent_prompted_compact_json: bool = Field(default=True, validation_alias="AGENT_PROMPTED_COMPACT_JSON")
+    # Prior chat turns sent to the agent (default 8). Lower = fewer tokens.
+    agent_history_turns: int = Field(default=8, ge=1, le=64, validation_alias="AGENT_HISTORY_TURNS")
+    # When > 0 and thread history exceeds this many user+assistant pairs, older turns are dropped from context.
+    agent_thread_compact_after_pairs: int = Field(
+        default=0, ge=0, le=500, validation_alias="AGENT_THREAD_COMPACT_AFTER_PAIRS"
+    )
+    # Telegram bot (optional). Webhook path uses secret; leave empty to disable routes.
+    telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
+    telegram_webhook_secret: str = Field(default="", validation_alias="TELEGRAM_WEBHOOK_SECRET")
     # When true, HTTP channel stub and binding helpers are enabled (gateway integration).
     agent_channel_gateway_enabled: bool = Field(
         default=False, validation_alias="AGENT_CHANNEL_GATEWAY_ENABLED"

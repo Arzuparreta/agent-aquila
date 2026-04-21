@@ -11,9 +11,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.connector_connection import ConnectorConnection
 from app.models.user import User
 from app.services.agent_harness.selector import HarnessMode
 from app.services.agent_memory_service import AgentMemoryService
@@ -38,6 +40,8 @@ _DEFAULT_AGENTS = """# Rules of engagement
 Almost every action runs immediately (label, mute, spam, archive, calendar, Drive). The ONLY exception is outbound email: `propose_email_send` and `propose_email_reply` create approval cards the user must tap before anything is sent. Never describe a sent reply as if it had already gone out.
 
 When you discover a stable preference or a useful fact about the user, save it via `upsert_memory` so future turns benefit. When facing a multi-step workflow you've handled before, check `list_skills` and `load_skill` for a matching recipe.
+
+To learn what this deployment offers or read workspace docs, use `describe_harness`, `list_workspace_files`, and `read_workspace_file` when the user asks how you work or how to change your behaviour (persona files live in the workspace).
 
 For **important mail** or **inbox status** questions, use `gmail_list_messages` with an appropriate `q` query (e.g. `is:unread in:inbox`) — do not ask the user for a Gmail `thread_id` unless they are talking about a specific thread they already named.
 """
@@ -99,6 +103,11 @@ def _workspace_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "agent_workspace"
 
 
+def workspace_dir() -> Path:
+    """Public root for SOUL.md / AGENTS.md (same as internal resolver)."""
+    return _workspace_dir()
+
+
 def _read_file(name: str, default: str) -> str:
     path = _workspace_dir() / name
     try:
@@ -124,32 +133,139 @@ def build_quick_tool_index(palette: list[dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "(no tools)"
 
 
-def build_tools_section_native(palette: list[dict[str, Any]]) -> str:
-    return "\n\n".join(
-        [
-            _NATIVE_TOOLS_NOTE + build_quick_tool_index(palette),
-            _GMAIL_PLAYBOOK,
-        ]
-    )
+def palette_to_prompt_json(palette: list[dict[str, Any]], *, compact: bool) -> str:
+    """Serialize tool definitions for prompted-mode system embed (optionally trimmed)."""
+    if not compact:
+        return json.dumps(palette, ensure_ascii=False, indent=2)
+    slim: list[dict[str, Any]] = []
+    for t in palette:
+        fn = (t.get("function") or {}) if isinstance(t, dict) else {}
+        name = str(fn.get("name") or "").strip()
+        desc = str(fn.get("description") or "").replace("\n", " ").strip()
+        if len(desc) > 280:
+            desc = desc[:277] + "…"
+        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
+        slim.append(
+            {
+                "type": "function",
+                "function": {"name": name, "description": desc, "parameters": params},
+            }
+        )
+    return json.dumps(slim, ensure_ascii=False, separators=(",", ":"))
 
 
-def build_tools_section_prompted(palette: list[dict[str, Any]]) -> str:
-    tool_json = json.dumps(palette, ensure_ascii=False, indent=2)
-    return "\n\n".join(
-        [
-            _PROMPTED_TOOL_INSTRUCTIONS.format(tool_json=tool_json),
-            _GMAIL_PLAYBOOK,
-        ]
-    )
+def build_tools_section_native(
+    palette: list[dict[str, Any]], *, include_gmail_playbook: bool
+) -> str:
+    parts = [_NATIVE_TOOLS_NOTE + build_quick_tool_index(palette)]
+    if include_gmail_playbook:
+        parts.append(_GMAIL_PLAYBOOK)
+    return "\n\n".join(parts)
+
+
+def build_tools_section_prompted(
+    palette: list[dict[str, Any]], *, include_gmail_playbook: bool, compact_json: bool
+) -> str:
+    tool_json = palette_to_prompt_json(palette, compact=compact_json)
+    parts = [_PROMPTED_TOOL_INSTRUCTIONS.format(tool_json=tool_json)]
+    if include_gmail_playbook:
+        parts.append(_GMAIL_PLAYBOOK)
+    return "\n\n".join(parts)
 
 
 def build_tools_section(
     palette: list[dict[str, Any]],
     harness_mode: HarnessMode,
+    *,
+    prompt_tier: str,
+    prompted_compact_json: bool,
 ) -> str:
+    tier = (prompt_tier or "full").strip().lower()
+    include_playbook = tier == "full"
     if harness_mode == "prompted":
-        return build_tools_section_prompted(palette)
-    return build_tools_section_native(palette)
+        return build_tools_section_prompted(
+            palette, include_gmail_playbook=include_playbook, compact_json=prompted_compact_json
+        )
+    return build_tools_section_native(palette, include_gmail_playbook=include_playbook)
+
+
+def build_harness_facts_markdown(
+    *,
+    tool_count: int,
+    harness_mode: str,
+    prompt_tier: str,
+    tool_palette_mode: str,
+    connector_gated: bool,
+    linked_providers: list[str],
+    agent_paused: bool,
+) -> str:
+    prov = ", ".join(sorted(linked_providers)) if linked_providers else "(none linked)"
+    return "\n".join(
+        [
+            "# Harness (runtime facts)",
+            f"- Tools offered this turn: **{tool_count}**",
+            f"- Max tool steps per turn: **{settings.agent_max_tool_steps}**",
+            f"- Harness mode (effective): **{harness_mode}**",
+            f"- Prompt tier: **{prompt_tier}**",
+            f"- Tool palette setting: **{tool_palette_mode}**",
+            f"- Connector-gated tool list: **{connector_gated}**",
+            f"- Linked connector providers: {prov}",
+            f"- Agent processing paused (dashboard): **{agent_paused}**",
+            "",
+        ]
+    )
+
+
+async def linked_connector_providers(db: AsyncSession, user_id: int) -> list[str]:
+    r = await db.execute(
+        select(ConnectorConnection.provider).where(ConnectorConnection.user_id == user_id)
+    )
+    return sorted({row[0] for row in r.all() if row[0]})
+
+
+def _safe_rel_path(raw: str) -> Path | None:
+    p = Path((raw or "").strip())
+    if p.is_absolute() or ".." in p.parts:
+        return None
+    return p
+
+
+def list_allowed_workspace_files(*, skills_root: Path) -> list[dict[str, str]]:
+    """Non-recursive listing of `.md` files under workspace + skills roots."""
+    ws = _workspace_dir().resolve()
+    sk = skills_root.resolve()
+    out: list[dict[str, str]] = []
+    for label, root in (("workspace", ws), ("skills", sk)):
+        if not root.is_dir():
+            continue
+        try:
+            for child in sorted(root.iterdir()):
+                if child.is_file() and child.suffix.lower() == ".md":
+                    rel = child.name
+                    out.append({"area": label, "path": rel, "name": child.name})
+        except OSError:
+            continue
+    return out
+
+
+def read_allowed_workspace_file(rel: str, *, skills_root: Path) -> str | None:
+    """Read a single `.md` file if it lives directly under workspace or skills root."""
+    path = _safe_rel_path(rel)
+    if path is None or len(path.parts) != 1:
+        return None
+    name = path.name
+    if Path(name).suffix.lower() != ".md":
+        return None
+    ws = _workspace_dir().resolve()
+    sk = skills_root.resolve()
+    for root in (ws, sk):
+        candidate = (root / name).resolve()
+        try:
+            if candidate.is_file() and candidate.parent == root:
+                return candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return None
 
 
 async def build_system_prompt(
@@ -162,16 +278,48 @@ async def build_system_prompt(
     tenant_hint: str | None = None,
     user_timezone: str | None = None,
     time_format: str = "auto",
+    prompt_tier: str | None = None,
+    agent_processing_paused: bool = False,
 ) -> str:
-    """Assemble system prompt: SOUL + AGENTS + tools + memory + clock + thread hint."""
+    """Assemble system prompt: SOUL + AGENTS + optional facts + tools + memory + clock + thread hint."""
     del tenant_hint
-    soul = _read_file("SOUL.md", _DEFAULT_SOUL)
+    tier = (prompt_tier or settings.agent_prompt_tier or "full").strip().lower()
+    if tier not in ("full", "minimal", "none"):
+        tier = "full"
+
+    soul = _read_file("SOUL.md", _DEFAULT_SOUL) if tier != "none" else ""
     agents = _read_file("AGENTS.md", _DEFAULT_AGENTS)
-    tools = build_tools_section(tool_palette, harness_mode)
-    parts = [soul, agents, tools]
-    memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
-    if memory_blob:
-        parts.append(memory_blob)
+    tools = build_tools_section(
+        tool_palette,
+        harness_mode,
+        prompt_tier=tier,
+        prompted_compact_json=settings.agent_prompted_compact_json,
+    )
+
+    parts: list[str] = []
+    if soul:
+        parts.append(soul)
+    parts.append(agents)
+    if settings.agent_include_harness_facts:
+        provs = await linked_connector_providers(db, user.id)
+        parts.append(
+            build_harness_facts_markdown(
+                tool_count=len(tool_palette),
+                harness_mode=str(harness_mode),
+                prompt_tier=tier,
+                tool_palette_mode=settings.agent_tool_palette,
+                connector_gated=settings.agent_connector_gated_tools,
+                linked_providers=provs,
+                agent_paused=agent_processing_paused,
+            )
+        )
+    parts.append(tools)
+
+    if tier != "none":
+        memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
+        if memory_blob:
+            parts.append(memory_blob)
+
     parts.append(
         build_datetime_context_section(
             user_timezone=user_timezone,

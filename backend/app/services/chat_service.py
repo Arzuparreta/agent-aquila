@@ -18,17 +18,13 @@ from typing import Any, Iterable
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.models.user import User
 from app.schemas.agent import AgentRunRead
 from app.schemas.chat import EntityRef, MessageRead, ThreadRead
 from app.services.agent_attachments import attachments_from_agent_run_read
-
-# Maximum prior chat turns we hand to the LLM as conversation context. Older messages
-# are still persisted and visible to the artist, just not re-sent each turn.
-HISTORY_TURNS_FOR_AGENT = 8
-
 
 def _entity_label_default(entity_type: str | None, entity_id: int | None) -> str:
     if entity_type and entity_id:
@@ -169,16 +165,21 @@ async def append_message(
 
 
 async def history_for_agent(
-    db: AsyncSession, thread: ChatThread, *, limit: int = HISTORY_TURNS_FOR_AGENT
+    db: AsyncSession, thread: ChatThread, *, limit: int | None = None
 ) -> list[dict[str, str]]:
     """Returns prior turns as the OpenAI-compatible ``[{role, content}, ...]`` list.
 
-    Keeps the most recent ``limit`` user/assistant pairs and also surfaces ``event``
-    rows as ``system`` messages so the seeded entity announcement (written by the
-    various ``/start-chat`` endpoints via ``start_entity_chat``) actually reaches the
-    model. ``system`` rows stored on the thread are still stripped — those are author-
-    authored UI annotations, not model-facing context.
+    Keeps the most recent ``AGENT_HISTORY_TURNS`` pairs (or ``limit`` override) and
+    also surfaces ``event`` rows as ``system`` messages so the seeded entity
+    announcement reaches the model.
+
+    When ``AGENT_THREAD_COMPACT_AFTER_PAIRS`` is set higher than the turn cap, we fetch
+    a deeper window and trim with a short system notice so long threads stay bounded.
     """
+    cap_pairs = settings.agent_history_turns if limit is None else limit
+    fetch_cap = cap_pairs * 2
+    if settings.agent_thread_compact_after_pairs > cap_pairs:
+        fetch_cap = max(fetch_cap, settings.agent_thread_compact_after_pairs * 2)
     stmt = (
         select(ChatMessage)
         .where(
@@ -186,14 +187,25 @@ async def history_for_agent(
             ChatMessage.role.in_(("user", "assistant", "event")),
         )
         .order_by(ChatMessage.id.desc())
-        .limit(limit * 2)
+        .limit(fetch_cap)
     )
     rows = list((await db.execute(stmt)).scalars().all())
     rows.reverse()
-    return [
+    msgs: list[dict[str, str]] = [
         {"role": "system" if r.role == "event" else r.role, "content": r.content}
         for r in rows
     ]
+    if len(msgs) > cap_pairs * 2:
+        msgs = msgs[-(cap_pairs * 2) :]
+        if settings.agent_thread_compact_after_pairs > 0:
+            msgs = [
+                {
+                    "role": "system",
+                    "content": "[Earlier messages omitted to stay within the context window.]",
+                },
+                *msgs,
+            ]
+    return msgs
 
 
 def thread_to_read(thread: ChatThread, *, unread: int = 0) -> ThreadRead:

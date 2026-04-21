@@ -59,6 +59,33 @@ class ChatResponse:
         return bool(self.tool_calls)
 
 
+# Reused across requests for connection pooling (TLS session reuse, lower latency).
+_shared_http: httpx.AsyncClient | None = None
+
+
+def _shared_client() -> httpx.AsyncClient:
+    global _shared_http
+    if _shared_http is None:
+        _shared_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=30.0),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        )
+    return _shared_http
+
+
+async def aclose_llm_http_client() -> None:
+    """Close the pooled HTTP client (call from app/worker shutdown)."""
+    global _shared_http
+    if _shared_http is not None:
+        await _shared_http.aclose()
+        _shared_http = None
+
+
+def shared_http_client() -> httpx.AsyncClient:
+    """Process-wide pooled AsyncClient (LLM + lightweight outbound calls)."""
+    return _shared_client()
+
+
 class LLMClient:
     @staticmethod
     async def chat_completion(
@@ -160,10 +187,9 @@ class LLMClient:
         provider = normalize_provider_id(settings_row.provider_kind)
         model = body.get("model") if isinstance(body, dict) else None
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, headers=headers, json=body)
-                response.raise_for_status()
-                return response.json()
+            response = await _shared_client().post(url, headers=headers, json=body)
+            response.raise_for_status()
+            return response.json()
         except httpx.HTTPStatusError as exc:
             raise from_http_status_error(exc, provider=provider, model=model) from exc
         except (httpx.TimeoutException, httpx.TransportError) as exc:

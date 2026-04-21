@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -37,19 +38,27 @@ from app.models.agent_run import AgentRun, AgentRunStep, AgentTraceEvent
 from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
-from app.schemas.agent import AgentRunRead, AgentStepRead, AgentTraceEventRead, PendingProposalRead
+from app.schemas.agent import (
+    AgentRunRead,
+    AgentRunSummaryRead,
+    AgentStepRead,
+    AgentTraceEventRead,
+    PendingProposalRead,
+)
 from app.services.agent_harness.native import chat_turn_native
 from app.services.agent_harness.prompted import (
     format_tool_results_for_prompt,
     parse_tool_calls_from_content,
 )
 from app.services.agent_harness.selector import resolve_effective_mode
+from app.services.agent_dispatch_table import AGENT_TOOL_DISPATCH
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_replay import AgentReplayContext
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
+    filter_tools_for_user_connectors,
     tools_for_palette_mode,
 )
 from app.services.agent_trace import (
@@ -65,7 +74,12 @@ from app.services.agent_trace import (
     new_span_id,
     new_trace_id,
 )
-from app.services.agent_workspace import build_system_prompt
+from app.services.agent_workspace import (
+    build_system_prompt,
+    linked_connector_providers,
+    list_allowed_workspace_files,
+    read_allowed_workspace_file,
+)
 from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.connectors.calendar_adapters import (
     create_calendar_event,
@@ -90,9 +104,10 @@ from app.services.llm_errors import LLMProviderError, NoActiveProviderError
 from app.services.oauth import TokenManager
 from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
 from app.services.proposal_service import proposal_to_read
+from app.services.skills_service import _skills_dir
 from app.services.skills_service import list_skills as _list_skills
 from app.services.skills_service import load_skill as _load_skill
-from app.services.user_ai_settings_service import UserAISettingsService
+from app.services.user_ai_settings_service import UserAISettingsService, coerce_harness_mode
 from app.services.user_time_context import normalize_time_format, session_time_result
 
 # Provider id sets used by ``_resolve_connection``.
@@ -111,14 +126,25 @@ def get_tool_palette(
     tenant_hint: str | None = None,
     palette_mode: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Which tool schemas to advertise this run (full vs compact via settings or override).
-
-    Per-tenant toggles can plug in via ``tenant_hint`` and ``palette_mode`` later.
-    """
+    """Synchronous palette (no connector gating). Prefer :func:`resolve_turn_tool_palette` in the loop."""
     del tenant_hint
-    del user  # reserved for future per-user allowlists
+    del user
     mode = palette_mode if palette_mode is not None else settings.agent_tool_palette
     return tools_for_palette_mode(mode)
+
+
+async def resolve_turn_tool_palette(db: AsyncSession, user: User) -> list[dict[str, Any]]:
+    """Tool schemas for this run, optionally omitting tools for disconnected providers."""
+    base = tools_for_palette_mode(settings.agent_tool_palette)
+    if not settings.agent_connector_gated_tools:
+        return base
+    filtered = await filter_tools_for_user_connectors(db, user.id, base)
+    names = {t["function"]["name"] for t in filtered}
+    if FINAL_ANSWER_TOOL_NAME not in names:
+        return base
+    if len(filtered) < 6:
+        return base
+    return filtered
 
 
 def _conversation_trace_snapshot(
@@ -800,6 +826,49 @@ class AgentService:
             "metadata": s.metadata,
         }
 
+    @staticmethod
+    async def _tool_list_workspace_files(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del db, user, args
+        files = list_allowed_workspace_files(skills_root=_skills_dir())
+        return {"files": files}
+
+    @staticmethod
+    async def _tool_read_workspace_file(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del db, user
+        path = str(args.get("path") or "")
+        raw = read_allowed_workspace_file(path, skills_root=_skills_dir())
+        if raw is None:
+            return {"error": "file_not_found_or_not_allowed", "path": path}
+        return {"path": path, "content": raw}
+
+    @staticmethod
+    async def _tool_describe_harness(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del args
+        from app.services.capability_registry import describe_capabilities
+
+        prefs = await UserAISettingsService.get_or_create(db, user)
+        provs = await linked_connector_providers(db, user.id)
+        palette = await resolve_turn_tool_palette(db, user)
+        return {
+            "harness": "agent-aquila",
+            "harness_mode_configured": coerce_harness_mode(prefs),
+            "tool_palette_mode": settings.agent_tool_palette,
+            "tool_count_this_turn": len(palette),
+            "tool_names_sample": [t["function"]["name"] for t in palette[:40]],
+            "linked_connector_providers": provs,
+            "agent_max_tool_steps": settings.agent_max_tool_steps,
+            "prompt_tier": settings.agent_prompt_tier,
+            "connector_gated_tools": settings.agent_connector_gated_tools,
+            "agent_processing_paused": bool(getattr(prefs, "agent_processing_paused", False)),
+            "capabilities": describe_capabilities(),
+        }
+
     # ------------------------------------------------------------------
     # Connector helpers
     # ------------------------------------------------------------------
@@ -998,59 +1067,7 @@ class AgentService:
     # tool calls to the matching internal handler.
     # ------------------------------------------------------------------
 
-    # name → (handler attr, takes_run_id)
-    _DISPATCH: dict[str, tuple[str, bool]] = {
-        # Reads
-        "gmail_list_messages": ("_tool_gmail_list_messages", False),
-        "gmail_get_message": ("_tool_gmail_get_message", False),
-        "gmail_get_thread": ("_tool_gmail_get_thread", False),
-        "gmail_list_labels": ("_tool_gmail_list_labels", False),
-        "gmail_list_filters": ("_tool_gmail_list_filters", False),
-        "calendar_list_events": ("_tool_calendar_list_events", False),
-        "drive_list_files": ("_tool_drive_list_files", False),
-        "outlook_list_messages": ("_tool_outlook_list_messages", False),
-        "outlook_get_message": ("_tool_outlook_get_message", False),
-        "teams_list_teams": ("_tool_teams_list_teams", False),
-        "teams_list_channels": ("_tool_teams_list_channels", False),
-        "list_connectors": ("_tool_list_connectors", False),
-        "get_session_time": ("_tool_get_session_time", False),
-        # Auto-apply Gmail
-        "gmail_modify_message": ("_tool_gmail_modify_message", False),
-        "gmail_modify_thread": ("_tool_gmail_modify_thread", False),
-        "gmail_trash_message": ("_tool_gmail_trash_message", False),
-        "gmail_untrash_message": ("_tool_gmail_untrash_message", False),
-        "gmail_trash_thread": ("_tool_gmail_trash_thread", False),
-        "gmail_trash_bulk_query": ("_tool_gmail_trash_bulk_query", False),
-        "gmail_untrash_thread": ("_tool_gmail_untrash_thread", False),
-        "gmail_mark_read": ("_tool_gmail_mark_read", False),
-        "gmail_mark_unread": ("_tool_gmail_mark_unread", False),
-        "gmail_silence_sender": ("_tool_gmail_silence_sender", False),
-        "gmail_create_filter": ("_tool_gmail_create_filter", False),
-        "gmail_delete_filter": ("_tool_gmail_delete_filter", False),
-        # Auto-apply calendar
-        "calendar_create_event": ("_tool_calendar_create_event", False),
-        "calendar_update_event": ("_tool_calendar_update_event", False),
-        "calendar_delete_event": ("_tool_calendar_delete_event", False),
-        # Auto-apply drive
-        "drive_upload_file": ("_tool_drive_upload_file", False),
-        "drive_share_file": ("_tool_drive_share_file", False),
-        # Auto-apply teams
-        "teams_post_message": ("_tool_teams_post_message", False),
-        # Memory + skills
-        "upsert_memory": ("_tool_upsert_memory", False),
-        "delete_memory": ("_tool_delete_memory", False),
-        "list_memory": ("_tool_list_memory", False),
-        "recall_memory": ("_tool_recall_memory", False),
-        "list_skills": ("_tool_list_skills", False),
-        "load_skill": ("_tool_load_skill", False),
-        # Connector setup
-        "start_connector_setup": ("_tool_start_connector_setup", False),
-        "submit_connector_credentials": ("_tool_submit_connector_credentials", False),
-        "start_oauth_flow": ("_tool_start_oauth_flow", False),
-        # Proposals (gated)
-        "propose_email_send": ("_tool_propose_email_send", True),
-        "propose_email_reply": ("_tool_propose_email_reply", True),
-    }
+    _DISPATCH = AGENT_TOOL_DISPATCH
 
     @staticmethod
     async def _dispatch_tool(
@@ -1127,6 +1144,18 @@ class AgentService:
         thread_id: int | None = None,
     ) -> AgentRunRead | None:
         settings_row = await UserAISettingsService.get_or_create(db, user)
+        if getattr(settings_row, "agent_processing_paused", False):
+            run = AgentRun(
+                user_id=user.id,
+                status="failed",
+                user_message=message,
+                error="The agent is paused. Resume it from the dashboard (Settings).",
+                chat_thread_id=thread_id,
+            )
+            db.add(run)
+            await db.commit()
+            await db.refresh(run)
+            return AgentService._to_read(run, [], [])
         if settings_row.ai_disabled:
             run = AgentRun(
                 user_id=user.id,
@@ -1234,7 +1263,7 @@ class AgentService:
         thread_id = run.chat_thread_id
         settings_row = await UserAISettingsService.get_or_create(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user)
-        turn_tools = get_tool_palette(user)
+        turn_tools = await resolve_turn_tool_palette(db, user)
         harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
         effective = resolve_effective_mode(
             harness_pref, settings_row.provider_kind, settings_row.chat_model
@@ -1270,6 +1299,8 @@ class AgentService:
             thread_context_hint=thread_context_hint,
             user_timezone=getattr(settings_row, "user_timezone", None),
             time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
+            prompt_tier=settings.agent_prompt_tier,
+            agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
         )
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
@@ -1319,6 +1350,7 @@ class AgentService:
                         "harness_mode": effective,
                     },
                 )
+                _llm_t0 = time.monotonic()
                 if effective == "native":
                     response = await chat_turn_native(
                         api_key or "",
@@ -1342,6 +1374,7 @@ class AgentService:
                         finish_reason=finish_reason,
                         usage=usage_cf,
                     )
+                _llm_duration_ms = int((time.monotonic() - _llm_t0) * 1000)
 
                 if (
                     effective == "native"
@@ -1359,14 +1392,18 @@ class AgentService:
                         thread_context_hint=thread_context_hint,
                         user_timezone=getattr(settings_row, "user_timezone", None),
                         time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
+                        prompt_tier=settings.agent_prompt_tier,
+                        agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
                     )
                     conversation[0] = {"role": "system", "content": system_prompt}
+                    _llm_t0_fb = time.monotonic()
                     raw_text, finish_reason, raw_msg, usage_fb = await LLMClient.chat_completion_full(
                         api_key or "",
                         settings_row,
                         messages=conversation,
                         temperature=0.15,
                     )
+                    _llm_duration_ms = int((time.monotonic() - _llm_t0_fb) * 1000)
                     calls, parse_errors = parse_tool_calls_from_content(raw_text)
                     response = ChatResponse(
                         content=raw_text,
@@ -1393,6 +1430,7 @@ class AgentService:
                         "usage": response.usage,
                         "tool_call_names": [tc.name for tc in response.tool_calls],
                         "has_tool_calls": response.has_tool_calls,
+                        "duration_ms": _llm_duration_ms,
                     },
                 )
                 db.add(
@@ -1638,6 +1676,32 @@ class AgentService:
             steps=steps,
             pending_proposals=proposals,
         )
+
+    @staticmethod
+    async def list_recent_runs(db: AsyncSession, user: User, *, limit: int = 30) -> list[AgentRunSummaryRead]:
+        lim = max(1, min(100, int(limit)))
+        result = await db.execute(
+            select(AgentRun)
+            .where(AgentRun.user_id == user.id)
+            .order_by(AgentRun.id.desc())
+            .limit(lim)
+        )
+        rows = result.scalars().all()
+        out: list[AgentRunSummaryRead] = []
+        for r in rows:
+            um = r.user_message or ""
+            preview = um[:240] + ("…" if len(um) > 240 else "")
+            out.append(
+                AgentRunSummaryRead(
+                    id=r.id,
+                    status=r.status,
+                    user_message_preview=preview,
+                    created_at=r.created_at,
+                    root_trace_id=r.root_trace_id,
+                    chat_thread_id=r.chat_thread_id,
+                )
+            )
+        return out
 
     @staticmethod
     async def list_trace_events(

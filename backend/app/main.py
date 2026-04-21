@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,11 +11,19 @@ from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, SQLAlch
 from app.core.config import settings
 from app.core.envelope_crypto import KeyDecryptError
 from app.routes import api_router
+from app.services.llm_client import aclose_llm_http_client
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CRM + AI Cockpit API", version="0.1.0")
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    yield
+    await aclose_llm_http_client()
+
+
+app = FastAPI(title="CRM + AI Cockpit API", version="0.1.0", lifespan=_app_lifespan)
 
 
 def _is_connectivity_error(exc: SQLAlchemyError) -> bool:

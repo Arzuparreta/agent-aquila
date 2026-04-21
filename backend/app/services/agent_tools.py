@@ -38,6 +38,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -643,6 +645,40 @@ _PROPOSAL_TOOLS: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
+# Harness introspection (read-only workspace + deployment facts)
+# ---------------------------------------------------------------------------
+
+_INTROSPECTION_TOOLS: list[dict[str, Any]] = [
+    _fn(
+        "list_workspace_files",
+        "List markdown files available in the agent workspace (persona/rules) and "
+        "the skills folder. Use when the user asks what files they can edit or "
+        "how behaviour is configured.",
+        {},
+    ),
+    _fn(
+        "read_workspace_file",
+        "Read one markdown file from the workspace or skills root. "
+        "Pass only the basename (e.g. `SOUL.md`, `AGENTS.md`).",
+        {
+            "path": {
+                "type": "string",
+                "description": "Filename ending in .md (no directories or ..).",
+            }
+        },
+        required=["path"],
+    ),
+    _fn(
+        "describe_harness",
+        "Return structured information about this deployment: tool palette size, "
+        "harness settings, linked connectors, and capability policy summary. "
+        "Use when the user asks what you can do or how you are configured.",
+        {},
+    ),
+]
+
+
+# ---------------------------------------------------------------------------
 # Terminator tool — every turn MUST end in a tool call. When the model is
 # done gathering data (or never needed to in the first place), it calls
 # ``final_answer`` with the user-facing reply. We pair this with
@@ -695,6 +731,7 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     *_READ_ONLY_TOOLS,
     *_AUTO_APPLY_TOOLS,
     *_PROPOSAL_TOOLS,
+    *_INTROSPECTION_TOOLS,
     *_TERMINATOR_TOOLS,
 ]
 
@@ -721,6 +758,9 @@ _COMPACT_NAMES: frozenset[str] = frozenset(
         "start_oauth_flow",
         "submit_connector_credentials",
         "list_connectors",
+        "describe_harness",
+        "list_workspace_files",
+        "read_workspace_file",
     }
 )
 
@@ -731,6 +771,48 @@ def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
     if m == "compact":
         return [t for t in AGENT_TOOLS if t["function"]["name"] in _COMPACT_NAMES]
     return list(AGENT_TOOLS)
+
+
+def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:
+    """If a tool talks to a specific provider, return acceptable ``ConnectorConnection.provider`` ids."""
+    n = (tool_name or "").lower()
+    if n.startswith("gmail_") or n.startswith("propose_email"):
+        return frozenset({"google_gmail", "gmail"})
+    if n.startswith("calendar_"):
+        return frozenset({"google_calendar", "gcal"})
+    if n.startswith("drive_"):
+        return frozenset({"google_drive", "gdrive"})
+    if n.startswith("outlook_"):
+        return frozenset({"graph_mail"})
+    if n.startswith("teams_"):
+        return frozenset({"graph_teams", "ms_teams"})
+    return None
+
+
+async def filter_tools_for_user_connectors(
+    db: AsyncSession,
+    user_id: int,
+    tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop tools whose upstream provider is not linked for this user."""
+    from sqlalchemy import select
+
+    from app.models.connector_connection import ConnectorConnection
+
+    r = await db.execute(
+        select(ConnectorConnection.provider).where(ConnectorConnection.user_id == user_id)
+    )
+    active = frozenset(row[0] for row in r.all() if row[0])
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        fn = t.get("function") or {}
+        nm = str(fn.get("name") or "")
+        req = tool_required_connector_providers(nm)
+        if req is None:
+            out.append(t)
+        elif active & req:
+            out.append(t)
+    return out
 
 
 # Tool names the agent loop should treat as "fetches more context" rather

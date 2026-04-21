@@ -24,6 +24,7 @@ from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_ai_settings import UserAISettings
+from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
 
 __all__ = [
     "AgentMemory",
@@ -40,4 +41,6 @@ __all__ = [
     "User",
     "UserAIProviderConfig",
     "UserAISettings",
+    "TelegramAccountLink",
+    "TelegramPairingCode",
 ]

@@ -14,14 +14,17 @@ from app.routes import (
     calendar,
     channels,
     connectors,
+    dashboard,
     drive,
     gmail,
     maintenance,
     memory,
     oauth,
+    onboarding,
     outlook,
     skills,
     teams,
+    telegram,
     threads,
 )
 
@@ -29,6 +32,9 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
 api_router.include_router(ai.router)
 api_router.include_router(agent.router)
+api_router.include_router(dashboard.router)
+api_router.include_router(onboarding.router)
+api_router.include_router(telegram.router)
 api_router.include_router(connectors.router)
 api_router.include_router(oauth.router)
 api_router.include_router(threads.router)
