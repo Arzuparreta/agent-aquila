@@ -6,6 +6,7 @@ Endpoints:
 - ``GET    /threads/{id}`` — read a single thread.
 - ``PATCH  /threads/{id}`` — pin/archive/title.
 - ``DELETE /threads/{id}`` — hard-delete the thread (cascades to chat_messages).
+- ``DELETE /threads/archived`` — hard-delete every archived thread for the user.
 - ``GET    /threads/{id}/messages`` — paginated message history.
 - ``POST   /threads/{id}/messages`` — append a user message and run the agent in this
   thread context. Persists both messages, returns the assistant reply with any inline
@@ -29,6 +30,7 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.agent import AgentRunRead
 from app.schemas.chat import (
+    ArchivedThreadsDeleteResult,
     MessageCreate,
     MessageRead,
     MessageSendResult,
@@ -41,6 +43,7 @@ from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
 from app.services.chat_service import (
     append_message,
+    delete_all_archived_threads,
     apply_agent_run_to_placeholder,
     attachments_as_entity_refs,
     first_assistant_message_after_id,
@@ -229,6 +232,17 @@ async def create_thread(
     await db.commit()
     await db.refresh(row)
     return thread_to_read(row)
+
+
+@router.delete("/archived", response_model=ArchivedThreadsDeleteResult)
+async def delete_archived_threads(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ArchivedThreadsDeleteResult:
+    """Hard-delete all archived threads for the current user (cascades to messages)."""
+    n = await delete_all_archived_threads(db, current_user)
+    await db.commit()
+    return ArchivedThreadsDeleteResult(deleted=n)
 
 
 @router.get("/{thread_id}", response_model=ThreadRead)

@@ -6,6 +6,9 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
 import type { ChatThread } from "@/types/api";
 
+import { StatusToast } from "@/components/ui/status-toast";
+
+import { DeleteAllArchivedDialog } from "./delete-all-archived-dialog";
 import { ChatThreadList } from "./thread-list";
 import { ChatThreadView } from "./thread-view";
 import { ChatTopBar } from "./top-bar";
@@ -43,6 +46,8 @@ export function ChatHome() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [deleteAllArchivedOpen, setDeleteAllArchivedOpen] = useState(false);
+  const [deleteAllArchivedPending, setDeleteAllArchivedPending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ kind: "ok" | "error"; text: string; action?: { label: string; onClick: () => void } } | null>(null);
 
   const refreshThreads = useCallback(
@@ -78,7 +83,7 @@ export function ChatHome() {
     void refreshThreads();
   }, [refreshThreads]);
 
-  // Auto-dismiss the inline status message after a few seconds.
+  // Auto-dismiss the status toast after a few seconds.
   useEffect(() => {
     if (!statusMessage) return;
     const id = window.setTimeout(() => setStatusMessage(null), 6000);
@@ -268,6 +273,29 @@ export function ChatHome() {
     await refreshThreads();
   }, [refreshThreads]);
 
+  const onDeleteAllArchived = useCallback(async () => {
+    setDeleteAllArchivedPending(true);
+    try {
+      const { deleted } = await apiFetch<{ deleted: number }>("/threads/archived", {
+        method: "DELETE"
+      });
+      setShowArchived(false);
+      await refreshThreads(false);
+      setStatusMessage({
+        kind: "ok",
+        text: t("chat.status.allArchivedDeleted", { count: deleted })
+      });
+      setDeleteAllArchivedOpen(false);
+    } catch (err) {
+      setStatusMessage({
+        kind: "error",
+        text: err instanceof ApiError ? err.message : t("chat.errors.deleteAllArchivedFailed")
+      });
+    } finally {
+      setDeleteAllArchivedPending(false);
+    }
+  }, [refreshThreads, t]);
+
   return (
     <div className="app-shell bg-surface-base text-fg">
       <ChatTopBar
@@ -280,37 +308,13 @@ export function ChatHome() {
         onDeleteThread={onDeleteThread}
       />
       {statusMessage ? (
-        <div
-          className={`flex items-center justify-center gap-3 px-4 py-2 text-center text-xs ${
-            statusMessage.kind === "ok"
-              ? "bg-emerald-900/60 text-emerald-100"
-              : "bg-rose-900/60 text-rose-100"
-          }`}
-        >
-          <span>{statusMessage.text}</span>
-          {statusMessage.action ? (
-            <button
-              type="button"
-              onClick={() => {
-                statusMessage.action?.onClick();
-                setStatusMessage(null);
-              }}
-              className="rounded border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-interactive-hover-strong"
-            >
-              {statusMessage.action.label}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setStatusMessage(null)}
-            className="rounded p-0.5 text-fg-muted hover:bg-interactive-hover-strong hover:text-fg"
-            aria-label={t("chat.dismissToast")}
-          >
-            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path d="M6 6l12 12M6 18 18 6" />
-            </svg>
-          </button>
-        </div>
+        <StatusToast
+          kind={statusMessage.kind}
+          text={statusMessage.text}
+          action={statusMessage.action}
+          onDismiss={() => setStatusMessage(null)}
+          dismissAriaLabel={t("chat.dismissToast")}
+        />
       ) : null}
       <div className="flex min-h-0 flex-1">
         {/* Permanent rail on desktop */}
@@ -322,6 +326,11 @@ export function ChatHome() {
               setActiveId(null);
               void refreshThreads(next);
             }}
+          />
+          <ArchivedBulkToolbar
+            showArchived={showArchived}
+            disabled={loading || visibleThreads.length === 0}
+            onRequestDeleteAll={() => setDeleteAllArchivedOpen(true)}
           />
           <ChatThreadList
             threads={visibleThreads}
@@ -347,6 +356,11 @@ export function ChatHome() {
                   setActiveId(null);
                   void refreshThreads(next);
                 }}
+              />
+              <ArchivedBulkToolbar
+                showArchived={showArchived}
+                disabled={loading || visibleThreads.length === 0}
+                onRequestDeleteAll={() => setDeleteAllArchivedOpen(true)}
               />
               <ChatThreadList
                 threads={visibleThreads}
@@ -382,6 +396,12 @@ export function ChatHome() {
           )}
         </main>
       </div>
+      <DeleteAllArchivedDialog
+        open={deleteAllArchivedOpen}
+        onOpenChange={setDeleteAllArchivedOpen}
+        pending={deleteAllArchivedPending}
+        onConfirm={onDeleteAllArchived}
+      />
     </div>
   );
 }
@@ -391,6 +411,32 @@ function threadSortFn(a: ChatThread, b: ChatThread): number {
   const ta = a.last_message_at ?? a.created_at;
   const tb = b.last_message_at ?? b.created_at;
   return tb.localeCompare(ta);
+}
+
+function ArchivedBulkToolbar({
+  showArchived,
+  disabled,
+  onRequestDeleteAll
+}: {
+  showArchived: boolean;
+  disabled: boolean;
+  onRequestDeleteAll: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!showArchived) return null;
+  return (
+    <div className="flex border-b border-border-subtle px-3 py-2">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onRequestDeleteAll}
+        aria-label={t("chat.archive.deleteAllAria")}
+        className="text-xs font-medium text-rose-400 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {t("chat.archive.deleteAll")}
+      </button>
+    </div>
+  );
 }
 
 function ArchiveTabs({

@@ -9,6 +9,8 @@ type ConfirmDialogProps = {
   description?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** ``danger`` = red destructive; ``primary`` = main action (e.g. first step of a two-step confirm). */
+  confirmTone?: "danger" | "primary";
   onConfirm: () => void;
   onCancel: () => void;
   pending?: boolean;
@@ -20,6 +22,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   cancelLabel,
+  confirmTone = "danger",
   onConfirm,
   onCancel,
   pending = false
@@ -29,6 +32,10 @@ export function ConfirmDialog({
 
   const resolvedConfirm = confirmLabel ?? t("confirm.defaultConfirm");
   const resolvedCancel = cancelLabel ?? t("confirm.defaultCancel");
+  const confirmClass =
+    confirmTone === "primary"
+      ? "border-primary bg-primary text-primary-fg hover:opacity-90"
+      : "bg-red-600 text-white hover:bg-red-700";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -46,7 +53,7 @@ export function ConfirmDialog({
           <Button type="button" className="border-dashed" onClick={onCancel} disabled={pending}>
             {resolvedCancel}
           </Button>
-          <Button type="button" className="bg-red-600 text-white hover:bg-red-700" onClick={onConfirm} disabled={pending}>
+          <Button type="button" className={confirmClass} onClick={onConfirm} disabled={pending}>
             {pending ? t("common.ellipsis") : resolvedConfirm}
           </Button>
         </div>

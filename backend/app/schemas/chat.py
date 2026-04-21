@@ -49,6 +49,12 @@ class ThreadPatch(BaseModel):
     archived: bool | None = None
 
 
+class ArchivedThreadsDeleteResult(BaseModel):
+    """Returned by ``DELETE /threads/archived`` — number of rows removed."""
+
+    deleted: int
+
+
 class MessageRead(BaseModel):
     id: int
     thread_id: int

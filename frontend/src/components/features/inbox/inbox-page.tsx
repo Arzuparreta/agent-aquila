@@ -11,6 +11,8 @@ import type {
   GmailMessagesPage,
 } from "@/types/api";
 
+import { StatusToast } from "@/components/ui/status-toast";
+
 import { InboxDetail } from "./inbox-detail";
 import { InboxList } from "./inbox-list";
 import { InboxTopBar } from "./inbox-top-bar";
@@ -405,31 +407,12 @@ export function InboxPage() {
     <div className="app-shell bg-surface-base text-fg">
       <InboxTopBar />
       {status ? (
-        <div
-          className={`flex items-center justify-center gap-3 px-4 py-2 text-center text-xs ${
-            status.kind === "ok"
-              ? "bg-emerald-900/60 text-emerald-100"
-              : "bg-rose-900/60 text-rose-100"
-          }`}
-        >
-          <span>{status.text}</span>
-          <button
-            type="button"
-            onClick={() => setStatus(null)}
-            className="rounded p-0.5 text-fg-muted hover:bg-interactive-hover-strong hover:text-fg"
-            aria-label={t("chat.dismissToast")}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-3 w-3"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.5}
-            >
-              <path d="M6 6l12 12M6 18 18 6" />
-            </svg>
-          </button>
-        </div>
+        <StatusToast
+          kind={status.kind}
+          text={status.text}
+          onDismiss={() => setStatus(null)}
+          dismissAriaLabel={t("chat.dismissToast")}
+        />
       ) : null}
       <div className="flex min-h-0 flex-1">
         <section

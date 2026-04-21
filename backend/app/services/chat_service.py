@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -120,6 +120,16 @@ async def list_threads(
         desc(ChatThread.created_at),
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def delete_all_archived_threads(db: AsyncSession, user: User) -> int:
+    """Hard-delete every archived :class:`ChatThread` for this user (messages cascade)."""
+    stmt = delete(ChatThread).where(
+        ChatThread.user_id == user.id,
+        ChatThread.archived.is_(True),
+    )
+    result = await db.execute(stmt)
+    return int(result.rowcount or 0)
 
 
 async def get_thread(db: AsyncSession, user: User, thread_id: int) -> ChatThread | None:
