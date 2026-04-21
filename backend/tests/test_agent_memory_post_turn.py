@@ -37,6 +37,16 @@ def test_heuristic_remembers_and_names() -> None:
         "¿Qué hora es?",
         "Son las tres.",
     )
+    # "Eres...." without a space after Eres must still signal identity (native tool path nudge).
+    assert heuristic_wants_post_turn_extraction(
+        'Eres.... "Agente Águila"! Te',
+        "¡Me encanta! A partir de ahora soy el **Agente Águila**.",
+    )
+    # Assistant promises future recall (Spanish) — should run post-turn extraction if main turn missed tools.
+    assert heuristic_wants_post_turn_extraction(
+        "ok",
+        "Lo recordaré para nuestras próximas conversaciones.",
+    )
 
 
 def test_parse_json_object_fenced() -> None:
@@ -48,7 +58,7 @@ def test_parse_json_object_fenced() -> None:
 @pytest.mark.asyncio
 async def test_maybe_ingest_skips_when_heuristic_no_match(
     db_session,
-    aquila_user: User,
+    crm_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.services.agent_memory_post_turn_service as mod
@@ -62,7 +72,7 @@ async def test_maybe_ingest_skips_when_heuristic_no_match(
     monkeypatch.setattr(mod.LLMClient, "chat_completion", spy)
     result = await maybe_ingest_post_turn_memory(
         db_session,
-        aquila_user,
+        crm_user,
         user_message="Hola",
         assistant_message="Hola, ¿en qué puedo ayudarte?",
     )
@@ -75,7 +85,7 @@ async def test_maybe_ingest_skips_when_heuristic_no_match(
 @pytest.mark.asyncio
 async def test_maybe_ingest_upserts_from_llm_json(
     db_session,
-    aquila_user: User,
+    crm_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.services.agent_memory_post_turn_service as mod
@@ -106,7 +116,7 @@ async def test_maybe_ingest_upserts_from_llm_json(
 
     result = await maybe_ingest_post_turn_memory(
         db_session,
-        aquila_user,
+        crm_user,
         user_message="Your name is Agent Aquila.",
         assistant_message="Understood.",
     )

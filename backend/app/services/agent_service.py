@@ -53,6 +53,7 @@ from app.services.agent_harness.prompted import (
 from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_dispatch_table import AGENT_TOOL_DISPATCH
 from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
+from app.services.agent_memory_post_turn_service import heuristic_wants_post_turn_extraction
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_runtime_config_service import merge_stored_with_env, resolve_for_user
 from app.services.agent_replay import AgentReplayContext
@@ -126,6 +127,13 @@ _OUTLOOK_PROVIDERS = ("graph_mail",)
 _TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
 
 _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
+
+# When the user turn looks like naming / “remember this” / durable prefs, bias the model toward
+# `upsert_memory` before `final_answer` (native `tool_choice="required"` allows final_answer alone).
+_IDENTITY_AND_MEMORY_TOOL_NUDGE = """
+## Host reminder (this user message)
+This turn likely assigns or confirms your display name, or asks you to remember something durable. Before calling `final_answer`, call `upsert_memory` with appropriate keys (for names: `agent.identity.display_name_es` / `agent.identity.display_name_en`). If you tell the user you will remember or save it, you need a successful `upsert_memory` in this same turn — natural language alone does not persist.
+"""
 
 
 def get_tool_palette(
@@ -1441,6 +1449,13 @@ class AgentService:
                 ]
             )
         conversation.append({"role": "user", "content": message})
+
+        if heuristic_wants_post_turn_extraction(message, ""):
+            conversation[0] = {
+                "role": "system",
+                "content": (conversation[0].get("content") or "")
+                + _IDENTITY_AND_MEMORY_TOOL_NUDGE,
+            }
 
         step_idx = 0
         proposals_created: list[PendingProposal] = []

@@ -42,7 +42,7 @@ _USER_MEMORY_HINT = re.compile(
     r"prefer|prefiero|prefieres|preference|preferencia|"
     r"my\s+name\s+is|me\s+llamo|ll[aá]mame|ll[aá]mate|your\s+name\s+is|tu\s+nombre|"
     r"te\s+llamas|how\s+should\s+i\s+call|c[oó]mo\s+te\s+llamo|"
-    r"\byou\s+are\s+|\beres\s+|you'?re\s+the\s+|"
+    r"\byou\s+are\s+|\beres\b|you'?re\s+the\s+|"
     r"call\s+me|call\s+yourself|"
     r"guarda\s+en\s+memoria|guardar\s+en\s+memoria|"
     r"i\s+want\s+you\s+to\s+remember|quiero\s+que\s+recuerdes)(?:\b|$)",
@@ -64,7 +64,9 @@ _NAME_ASSIGNMENT_CONFIRM = re.compile(
 _ASSISTANT_MEMORY_PROMISE = re.compile(
     r"(?:^|\b)(?:guardo\s+en\s+memoria|lo\s+guardo|guardar[eé]\s+en\s+memoria|"
     r"i['’]?ll\s+save|i\s+will\s+save|saved\s+to\s+memory|"
-    r"lo\s+memorizo|memorizar[eé])(?:\b|$)",
+    r"lo\s+memorizo|memorizar[eé]|"
+    r"lo\s+recordar[eé]|recordar[eé]\s+para|"
+    r"i['’]?ll\s+remember|remember\s+for)(?:\b|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 
