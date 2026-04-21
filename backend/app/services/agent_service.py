@@ -59,6 +59,7 @@ from app.services.agent_tools import (
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
     filter_tools_for_user_connectors,
+    memory_flush_tools,
     tools_for_palette_mode,
 )
 from app.services.agent_trace import (
@@ -75,6 +76,7 @@ from app.services.agent_trace import (
     new_trace_id,
 )
 from app.services.agent_workspace import (
+    build_memory_flush_system_prompt,
     build_system_prompt,
     linked_connector_providers,
     list_allowed_workspace_files,
@@ -813,6 +815,25 @@ class AgentService:
         return {"hits": hits}
 
     @staticmethod
+    async def _tool_memory_get(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        key = str(args.get("key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "key is required"}
+        row = await AgentMemoryService.get(db, user, key=key)
+        if not row:
+            return {"ok": False, "error": "not_found", "key": key}
+        return {
+            "ok": True,
+            "key": row.key,
+            "content": row.content,
+            "importance": row.importance or 0,
+            "tags": row.tags,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+    @staticmethod
     async def _tool_list_skills(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1148,6 +1169,76 @@ class AgentService:
         return (result, None)
 
     # ------------------------------------------------------------------
+    # Memory flush (OpenClaw-style, before thread compaction)
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def run_memory_flush_turn(
+        db: AsyncSession,
+        user: User,
+        *,
+        thread_id: int,
+        dropped_messages: list[dict[str, str]],
+    ) -> None:
+        """Persist facts from chat turns that are about to be dropped from context."""
+        if not dropped_messages or not settings.agent_memory_flush_enabled:
+            return
+        settings_row = await UserAISettingsService.get_or_create(db, user)
+        if getattr(settings_row, "agent_processing_paused", False) or settings_row.ai_disabled:
+            return
+        api_key = await UserAISettingsService.get_api_key(db, user)
+        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
+            return
+        lines: list[str] = []
+        for m in dropped_messages:
+            role = str(m.get("role") or "user")
+            content = str(m.get("content") or "")
+            if len(content) > 8000:
+                content = content[:7997] + "…"
+            lines.append(f"{role.upper()}: {content}")
+        transcript = "\n\n".join(lines)
+        max_c = settings.agent_memory_flush_max_transcript_chars
+        if len(transcript) > max_c:
+            transcript = transcript[: max_c - 20] + "\n…[truncated]"
+        root_trace = new_trace_id()
+        run = AgentRun(
+            user_id=user.id,
+            status="running",
+            user_message=(
+                "[memory_flush] The following turns will be omitted from chat context — "
+                "persist important facts with upsert_memory.\n\n" + transcript
+            ),
+            root_trace_id=root_trace,
+            chat_thread_id=thread_id,
+        )
+        db.add(run)
+        await db.flush()
+        harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
+        effective = resolve_effective_mode(
+            harness_pref, settings_row.provider_kind, settings_row.chat_model
+        )
+        palette = memory_flush_tools()
+        system_prompt = await build_memory_flush_system_prompt(
+            db,
+            user,
+            tool_palette=palette,
+            harness_mode=effective,
+            user_timezone=getattr(settings_row, "user_timezone", None),
+            time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
+            prompt_tier="minimal",
+        )
+        await AgentService._execute_agent_loop(
+            db,
+            user,
+            run,
+            prior_messages=None,
+            thread_context_hint=None,
+            replay=None,
+            tool_palette_override=palette,
+            system_prompt_override=system_prompt,
+            max_tool_steps_override=settings.agent_memory_flush_max_steps,
+        )
+
+    # ------------------------------------------------------------------
     # ReAct loop
     # ------------------------------------------------------------------
     @staticmethod
@@ -1273,12 +1364,19 @@ class AgentService:
         prior_messages: list[dict[str, str]] | None = None,
         thread_context_hint: str | None = None,
         replay: AgentReplayContext | None = None,
+        tool_palette_override: list[dict[str, Any]] | None = None,
+        system_prompt_override: str | None = None,
+        max_tool_steps_override: int | None = None,
     ) -> AgentRunRead:
         message = run.user_message
         thread_id = run.chat_thread_id
         settings_row = await UserAISettingsService.get_or_create(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user)
-        turn_tools = await resolve_turn_tool_palette(db, user)
+        turn_tools = (
+            tool_palette_override
+            if tool_palette_override is not None
+            else await resolve_turn_tool_palette(db, user)
+        )
         harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
         effective = resolve_effective_mode(
             harness_pref, settings_row.provider_kind, settings_row.chat_model
@@ -1303,20 +1401,24 @@ class AgentService:
                 "tool_palette_size": len(turn_tools),
                 "harness_mode_effective": effective,
                 "replay": replay is not None,
+                "memory_flush": tool_palette_override is not None,
             },
         )
 
-        system_prompt = await build_system_prompt(
-            db,
-            user,
-            tool_palette=turn_tools,
-            harness_mode=effective,
-            thread_context_hint=thread_context_hint,
-            user_timezone=getattr(settings_row, "user_timezone", None),
-            time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
-            prompt_tier=settings.agent_prompt_tier,
-            agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
-        )
+        if system_prompt_override is not None:
+            system_prompt = system_prompt_override
+        else:
+            system_prompt = await build_system_prompt(
+                db,
+                user,
+                tool_palette=turn_tools,
+                harness_mode=effective,
+                thread_context_hint=thread_context_hint,
+                user_timezone=getattr(settings_row, "user_timezone", None),
+                time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
+                prompt_tier=settings.agent_prompt_tier,
+                agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
+            )
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
         ]
@@ -1349,7 +1451,12 @@ class AgentService:
 
         try:
             final_answer_text: str | None = None
-            for _ in range(settings.agent_max_tool_steps):
+            max_steps = (
+                max_tool_steps_override
+                if max_tool_steps_override is not None
+                else settings.agent_max_tool_steps
+            )
+            for _ in range(max_steps):
                 parse_errors: list[str] = []
                 llm_span = new_span_id()
                 await emit_trace_event(

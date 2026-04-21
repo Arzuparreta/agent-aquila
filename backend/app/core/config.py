@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     agent_thread_compact_after_pairs: int = Field(
         default=0, ge=0, le=500, validation_alias="AGENT_THREAD_COMPACT_AFTER_PAIRS"
     )
+    # OpenClaw-style: run a memory-only agent turn with the dropped transcript before trimming history.
+    agent_memory_flush_enabled: bool = Field(default=True, validation_alias="AGENT_MEMORY_FLUSH_ENABLED")
+    agent_memory_flush_max_steps: int = Field(
+        default=8, ge=1, le=50, validation_alias="AGENT_MEMORY_FLUSH_MAX_STEPS"
+    )
+    agent_memory_flush_max_transcript_chars: int = Field(
+        default=16000, ge=1000, le=500_000, validation_alias="AGENT_MEMORY_FLUSH_MAX_TRANSCRIPT_CHARS"
+    )
     # Telegram bot (optional). Webhook path uses secret; leave empty to disable routes.
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str = Field(default="", validation_alias="TELEGRAM_WEBHOOK_SECRET")

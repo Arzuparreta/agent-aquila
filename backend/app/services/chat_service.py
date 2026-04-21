@@ -166,18 +166,10 @@ async def append_message(
     return msg
 
 
-async def history_for_agent(
+async def thread_messages_window_raw(
     db: AsyncSession, thread: ChatThread, *, limit: int | None = None
 ) -> list[dict[str, str]]:
-    """Returns prior turns as the OpenAI-compatible ``[{role, content}, ...]`` list.
-
-    Keeps the most recent ``AGENT_HISTORY_TURNS`` pairs (or ``limit`` override) and
-    also surfaces ``event`` rows as ``system`` messages so the seeded entity
-    announcement reaches the model.
-
-    When ``AGENT_THREAD_COMPACT_AFTER_PAIRS`` is set higher than the turn cap, we fetch
-    a deeper window and trim with a short system notice so long threads stay bounded.
-    """
+    """Chronological window of user/assistant/event messages (same fetch as ``history_for_agent``)."""
     cap_pairs = settings.agent_history_turns if limit is None else limit
     fetch_cap = cap_pairs * 2
     if settings.agent_thread_compact_after_pairs > cap_pairs:
@@ -193,10 +185,37 @@ async def history_for_agent(
     )
     rows = list((await db.execute(stmt)).scalars().all())
     rows.reverse()
-    msgs: list[dict[str, str]] = [
+    return [
         {"role": "system" if r.role == "event" else r.role, "content": r.content}
         for r in rows
     ]
+
+
+async def preview_memory_flush_dropped(
+    db: AsyncSession, thread: ChatThread, *, limit: int | None = None
+) -> list[dict[str, str]]:
+    """Oldest segment of the window that ``history_for_agent`` would drop (for flush-before-compact)."""
+    msgs = await thread_messages_window_raw(db, thread, limit=limit)
+    cap_pairs = settings.agent_history_turns if limit is None else limit
+    if len(msgs) <= cap_pairs * 2:
+        return []
+    return msgs[: len(msgs) - cap_pairs * 2]
+
+
+async def history_for_agent(
+    db: AsyncSession, thread: ChatThread, *, limit: int | None = None
+) -> list[dict[str, str]]:
+    """Returns prior turns as the OpenAI-compatible ``[{role, content}, ...]`` list.
+
+    Keeps the most recent ``AGENT_HISTORY_TURNS`` pairs (or ``limit`` override) and
+    also surfaces ``event`` rows as ``system`` messages so the seeded entity
+    announcement reaches the model.
+
+    When ``AGENT_THREAD_COMPACT_AFTER_PAIRS`` is set higher than the turn cap, we fetch
+    a deeper window and trim with a short system notice so long threads stay bounded.
+    """
+    cap_pairs = settings.agent_history_turns if limit is None else limit
+    msgs = await thread_messages_window_raw(db, thread, limit=limit)
     if len(msgs) > cap_pairs * 2:
         msgs = msgs[-(cap_pairs * 2) :]
         if settings.agent_thread_compact_after_pairs > 0:

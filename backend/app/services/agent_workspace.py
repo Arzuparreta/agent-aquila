@@ -39,7 +39,7 @@ _DEFAULT_AGENTS = """# Rules of engagement
 
 Almost every action runs immediately (label, mute, spam, archive, calendar, Drive). The ONLY exception is outbound email: `propose_email_send` and `propose_email_reply` create approval cards the user must tap before anything is sent. Never describe a sent reply as if it had already gone out.
 
-When you discover a stable preference or a useful fact about the user, save it via `upsert_memory` so future turns benefit. When facing a multi-step workflow you've handled before, check `list_skills` and `load_skill` for a matching recipe.
+When you discover a stable preference or a useful fact about the user, save it via `upsert_memory` (use keys like `memory.durable.*`, `memory.daily.YYYY-MM-DD`, `user.profile.*` — OpenClaw-style). Use `memory_search` or `recall_memory` before writing to avoid duplicates; use `memory_get` to read a full entry by key. When facing a multi-step workflow you've handled before, check `list_skills` and `load_skill` for a matching recipe.
 
 To learn what this deployment offers or read workspace docs, use `describe_harness`, `list_workspace_files`, and `read_workspace_file` when the user asks how you work or how to change your behaviour (persona files live in the workspace).
 
@@ -328,4 +328,51 @@ async def build_system_prompt(
     )
     if thread_context_hint:
         parts.append(f"Thread context: {thread_context_hint.strip()}")
+    return "\n\n".join(parts)
+
+_MEMORY_FLUSH_RULES = """# Memory flush (internal)
+
+This turn runs **before** older chat turns are dropped from context (OpenClaw-style compaction). Persist **durable** facts and preferences so they are not lost.
+
+- Use ``memory_search`` / ``recall_memory`` or ``list_memory`` to avoid duplicating existing notes.
+- Use ``upsert_memory`` with keys such as:
+  - ``memory.durable.*`` — long-term facts (OpenClaw ``MEMORY.md``).
+  - ``memory.daily.YYYY-MM-DD`` — day-scoped notes (OpenClaw ``memory/YYYY-MM-DD.md``).
+  - ``user.profile.*`` — identity and preferences (OpenClaw ``USER.md``).
+- Keep entries short; update existing keys when possible.
+- Finish with ``final_answer`` and a one-line summary (e.g. "Saved 2 notes" or "nothing to save") in the user's language.
+"""
+
+
+async def build_memory_flush_system_prompt(
+    db: AsyncSession,
+    user: User,
+    *,
+    tool_palette: list[dict[str, Any]],
+    harness_mode: HarnessMode,
+    user_timezone: str | None = None,
+    time_format: str = "auto",
+    prompt_tier: str = "minimal",
+) -> str:
+    """Short system prompt for memory-only compaction flush runs."""
+    tier = (prompt_tier or "minimal").strip().lower()
+    if tier not in ("full", "minimal", "none"):
+        tier = "minimal"
+    tools = build_tools_section(
+        tool_palette,
+        harness_mode,
+        prompt_tier=tier,
+        prompted_compact_json=settings.agent_prompted_compact_json,
+    )
+    parts: list[str] = [_MEMORY_FLUSH_RULES, tools]
+    if tier != "none":
+        memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
+        if memory_blob:
+            parts.append(memory_blob)
+    parts.append(
+        build_datetime_context_section(
+            user_timezone=user_timezone,
+            time_format=normalize_time_format(time_format),
+        )
+    )
     return "\n\n".join(parts)

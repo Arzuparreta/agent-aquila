@@ -16,7 +16,7 @@ database of your emails — it's a private notebook the agent owns.
 | Model       | `backend/app/models/agent_memory.py`                                |
 | Service     | `backend/app/services/agent_memory_service.py`                      |
 | HTTP API    | `backend/app/routes/memory.py` — `GET/POST/DELETE /memory`          |
-| Agent tools | `upsert_memory`, `recall_memory`, `list_memory`, `delete_memory` in `agent_tools.py` |
+| Agent tools | `upsert_memory`, `recall_memory`, `memory_search`, `memory_get`, `list_memory`, `delete_memory` in `agent_tools.py` |
 | Settings UI | **Settings → Memoria del agente** (`frontend/src/components/features/memory/memory-section.tsx`) |
 
 Each row is `(user_id, key, content, importance, tags, embedding,
@@ -31,8 +31,9 @@ highest-importance memories for that user. The agent can then call:
 - `upsert_memory(key, content, importance?, tags?)` — write or upsert. The
   service computes an embedding (when an embedding provider is configured) so
   later `recall_memory` queries can be semantic.
-- `recall_memory(query, limit?)` — semantic + keyword search across the
-  user's memories.
+- `recall_memory(query, limit?)` / `memory_search` — semantic + recency search across the
+  user's memories (`memory_search` is an alias).
+- `memory_get(key)` — fetch full content for one key.
 - `list_memory(tag?, limit?)` — most-recent-first listing, optionally
   filtered by a tag.
 - `delete_memory(key)` — hard-delete by key.
@@ -72,3 +73,18 @@ the warmup does). If you want to wipe everything, truncate the table:
 ```bash
 docker compose exec db psql -U app -d app -c "TRUNCATE agent_memories;"
 ```
+
+## OpenClaw-style conventions (keys)
+
+The agent is encouraged to use predictable key prefixes (same spirit as OpenClaw `MEMORY.md`, `USER.md`, `memory/YYYY-MM-DD.md`):
+
+- `memory.durable.*` — stable long-term facts.
+- `memory.daily.YYYY-MM-DD` — day-scoped observations.
+- `user.profile.*` — identity, tone, and preferences.
+
+Use optional `tags` for the same concepts when filtering with `recall_memory`.
+
+## Memory flush before compaction
+
+When chat history is trimmed (see `AGENT_HISTORY_TURNS` / `AGENT_THREAD_COMPACT_AFTER_PAIRS`), the backend may run a **memory flush** turn first: a short internal agent run that only has memory tools, fed the transcript of messages about to be dropped. Configure with `AGENT_MEMORY_FLUSH_*` env vars.
+

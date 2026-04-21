@@ -13,8 +13,8 @@ After the refactor the agent has a small, opinionated palette:
   a human nod: ``propose_email_send`` and ``propose_email_reply``.
   These create a ``PendingProposal`` row that the user approves from
   the chat UI before it actually goes out.
-- **Memory tools** (``upsert_memory`` / ``recall_memory`` /
-  ``delete_memory`` / ``list_memory``) — backed by ``agent_memory``.
+- **Memory tools** (``upsert_memory`` / ``recall_memory`` / ``memory_search`` /
+  ``memory_get`` / ``delete_memory`` / ``list_memory``) — backed by ``agent_memory``.
 - **Skills tools** (``list_skills`` / ``load_skill``) — read markdown
   recipe files from ``backend/skills/``.
 - **Connector setup tools** (``start_connector_setup`` /
@@ -541,6 +541,25 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
             "limit": {"type": "integer", "minimum": 1, "maximum": 50},
         },
     ),
+    _fn(
+        "memory_search",
+        "OpenClaw-style alias for semantic memory search — same behaviour as "
+        "``recall_memory`` (hybrid vector + recency when embeddings exist). "
+        "Inputs: optional ``query``, optional ``tags``, optional ``limit``.",
+        {
+            "query": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+    ),
+    _fn(
+        "memory_get",
+        "Fetch one memory row by exact ``key`` (full ``content``, no truncation). "
+        "Use before editing or to inspect ``memory.durable.*``, "
+        "``memory.daily.*``, or ``user.profile.*`` keys. Input: ``key`` (required).",
+        {"key": {"type": "string", "maxLength": 200}},
+        required=["key"],
+    ),
     # ---- Skills ---------------------------------------------------------
     _fn(
         "list_skills",
@@ -758,6 +777,8 @@ _COMPACT_NAMES: frozenset[str] = frozenset(
         "load_skill",
         "list_memory",
         "recall_memory",
+        "memory_search",
+        "memory_get",
         "upsert_memory",
         "delete_memory",
         "gmail_list_messages",
@@ -781,6 +802,24 @@ def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
     if m == "compact":
         return [t for t in AGENT_TOOLS if t["function"]["name"] in _COMPACT_NAMES]
     return list(AGENT_TOOLS)
+
+
+_MEMORY_FLUSH_NAMES: frozenset[str] = frozenset(
+    {
+        "final_answer",
+        "upsert_memory",
+        "delete_memory",
+        "list_memory",
+        "recall_memory",
+        "memory_search",
+        "memory_get",
+    }
+)
+
+
+def memory_flush_tools() -> list[dict[str, Any]]:
+    """Tools for OpenClaw-style memory flush turns (before thread compaction)."""
+    return [t for t in AGENT_TOOLS if t["function"]["name"] in _MEMORY_FLUSH_NAMES]
 
 
 def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:

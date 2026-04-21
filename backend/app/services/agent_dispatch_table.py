@@ -39,6 +39,8 @@ AGENT_TOOL_DISPATCH: dict[str, tuple[str, bool]] = {
     "delete_memory": ("_tool_delete_memory", False),
     "list_memory": ("_tool_list_memory", False),
     "recall_memory": ("_tool_recall_memory", False),
+    "memory_search": ("_tool_recall_memory", False),
+    "memory_get": ("_tool_memory_get", False),
     "list_skills": ("_tool_list_skills", False),
     "load_skill": ("_tool_load_skill", False),
     "list_workspace_files": ("_tool_list_workspace_files", False),
