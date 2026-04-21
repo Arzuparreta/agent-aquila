@@ -5,14 +5,14 @@ import type { Metadata, Viewport } from "next";
 import { Providers } from "@/components/features/providers";
 
 export const metadata: Metadata = {
-  title: "Mánager",
-  description: "Tu mánager personal en una sola conversación.",
+  title: "Agent Aquila",
+  description: "Your self-hosted operations assistant in one conversation.",
   manifest: "/manifest.webmanifest",
-  applicationName: "Mánager",
+  applicationName: "Agent Aquila",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Mánager"
+    title: "Agent Aquila"
   },
   icons: {
     icon: "/icons/icon.svg",
@@ -31,7 +31,7 @@ export const viewport: Viewport = {
   themeColor: "#09090b"
 };
 
-const themeInitScript = `(function(){try{var k='manager-theme';var v=localStorage.getItem(k);var t=v==='light'||v==='dark'?v:'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
+const themeInitScript = `(function(){try{var kn='agent-aquila-theme';var ko='manager-theme';var v=localStorage.getItem(kn)||localStorage.getItem(ko);if((v==='light'||v==='dark')&&!localStorage.getItem(kn)){localStorage.setItem(kn,v);}var t=v==='light'||v==='dark'?v:'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -1,4 +1,7 @@
 .env
+.env.*.local
+.cursor/
+frontend/next-env.d.ts
 .venv
 __pycache__/
 *.pyc

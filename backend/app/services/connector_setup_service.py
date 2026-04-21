@@ -1,22 +1,22 @@
 """Conversational connector setup, driven by the agent in chat.
 
-Flow (per the artist-first plan):
+Flow (user-driven connector setup):
 
 1. Agent calls ``start_connector_setup({"provider": "google"|"microsoft"})``.
-   Returns a structured "setup card" with the steps the artist must follow:
+   Returns a structured "setup card" with the steps the user must follow:
    - which page to open in their browser to register an OAuth app,
    - which fields to copy/paste back,
    - a short-lived ``setup_token`` they don't need to see (we just embed it in the card).
    The chat view renders this as a step-by-step ``ConnectorSetupCard``.
 
-2. Artist pastes the client ID/secret back. The agent calls
+2. User pastes the client ID/secret back. The agent calls
    ``submit_connector_credentials(setup_token, client_id, client_secret, ...)``.
    We persist them via ``instance_oauth_service.save_*_app_credentials``.
 
 3. Agent calls ``start_oauth_flow({"provider": ..., "service": ...})`` to get a URL the
-   artist taps to grant access. After Google/Microsoft redirects back to the callback,
+   user opens to grant access. After Google/Microsoft redirects back to the callback,
    ``ConnectorConnection`` rows land in the DB; the proactive worker can then post a
-   chat message ("Conectado a Gmail (maria@gmail.com).").
+   chat message (e.g. "Connected to Gmail (user@example.com).").
 
 The ``setup_token`` is stored briefly in Redis (or in-process if Redis is unavailable),
 mostly to keep the chat card stateful across turns; security still comes from the

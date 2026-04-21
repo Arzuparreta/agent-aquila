@@ -26,9 +26,9 @@ from app.services.llm_client import ChatResponse, ChatToolCall
 
 
 @pytest_asyncio.fixture
-async def chat_thread(db_session: AsyncSession, crm_user: User) -> ChatThread:
+async def chat_thread(db_session: AsyncSession, aquila_user: User) -> ChatThread:
     t = ChatThread(
-        user_id=crm_user.id,
+        user_id=aquila_user.id,
         kind="general",
         entity_type=None,
         entity_id=None,
@@ -43,7 +43,7 @@ async def chat_thread(db_session: AsyncSession, crm_user: User) -> ChatThread:
 @pytest.mark.asyncio
 async def test_dashboard_endpoints_and_chat_message(
     db_session: AsyncSession,
-    crm_user: User,
+    aquila_user: User,
     chat_thread: ChatThread,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -51,7 +51,7 @@ async def test_dashboard_endpoints_and_chat_message(
         yield db_session
 
     async def override_user() -> User:
-        return crm_user
+        return aquila_user
 
     monkeypatch.setattr(settings, "agent_async_runs", False)
 
@@ -110,7 +110,7 @@ async def test_dashboard_endpoints_and_chat_message(
 @pytest.mark.asyncio
 async def test_chat_send_idempotency_key_deduplicates_retries(
     db_session: AsyncSession,
-    crm_user: User,
+    aquila_user: User,
     chat_thread: ChatThread,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,7 +118,7 @@ async def test_chat_send_idempotency_key_deduplicates_retries(
         yield db_session
 
     async def override_user() -> User:
-        return crm_user
+        return aquila_user
 
     monkeypatch.setattr(settings, "agent_async_runs", False)
 
@@ -183,7 +183,7 @@ async def test_chat_send_idempotency_key_deduplicates_retries(
 @pytest.mark.asyncio
 async def test_retry_endpoint_idempotency_header_deduplicates(
     db_session: AsyncSession,
-    crm_user: User,
+    aquila_user: User,
     chat_thread: ChatThread,
     agent_run,
     monkeypatch: pytest.MonkeyPatch,
@@ -192,7 +192,7 @@ async def test_retry_endpoint_idempotency_header_deduplicates(
         yield db_session
 
     async def override_user() -> User:
-        return crm_user
+        return aquila_user
 
     monkeypatch.setattr(settings, "agent_async_runs", False)
     async def fake_preflight(*args: object, **kwargs: object):

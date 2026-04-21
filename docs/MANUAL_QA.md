@@ -85,8 +85,7 @@ mirrored locally.
 
 ## Settings — memory and skills
 
-Covers: **Settings → Memoria del agente** and **Settings → Habilidades del
-agente**.
+Covers: **Settings → Agent memory** and **Settings → Agent skills** (in the Spanish locale, section titles may read “Memoria del agente” / “Habilidades del agente”).
 
 1. **Memory list** — Open `/settings`. The Memory section lists every entry
    the agent has stored for you, newest first, with importance and tags.

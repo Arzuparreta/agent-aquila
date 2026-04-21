@@ -48,7 +48,7 @@ def test_parse_json_object_fenced() -> None:
 @pytest.mark.asyncio
 async def test_maybe_ingest_skips_when_heuristic_no_match(
     db_session,
-    crm_user: User,
+    aquila_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.services.agent_memory_post_turn_service as mod
@@ -62,7 +62,7 @@ async def test_maybe_ingest_skips_when_heuristic_no_match(
     monkeypatch.setattr(mod.LLMClient, "chat_completion", spy)
     result = await maybe_ingest_post_turn_memory(
         db_session,
-        crm_user,
+        aquila_user,
         user_message="Hola",
         assistant_message="Hola, ¿en qué puedo ayudarte?",
     )
@@ -75,7 +75,7 @@ async def test_maybe_ingest_skips_when_heuristic_no_match(
 @pytest.mark.asyncio
 async def test_maybe_ingest_upserts_from_llm_json(
     db_session,
-    crm_user: User,
+    aquila_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.services.agent_memory_post_turn_service as mod
@@ -106,7 +106,7 @@ async def test_maybe_ingest_upserts_from_llm_json(
 
     result = await maybe_ingest_post_turn_memory(
         db_session,
-        crm_user,
+        aquila_user,
         user_message="Your name is Agent Aquila.",
         assistant_message="Understood.",
     )

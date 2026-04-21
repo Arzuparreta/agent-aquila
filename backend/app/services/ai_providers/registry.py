@@ -178,7 +178,7 @@ PROVIDERS: tuple[ProviderDefinition, ...] = (
                 key="openrouter_title",
                 label="App title (optional)",
                 type="text",
-                placeholder="Artist CRM",
+                placeholder="Agent Aquila",
                 help="Shown on OpenRouter's rankings page.",
             ),
         ),

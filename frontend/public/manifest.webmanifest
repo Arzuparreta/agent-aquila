@@ -1,14 +1,14 @@
 {
-  "name": "Mánager",
-  "short_name": "Mánager",
-  "description": "Tu mánager personal en una sola conversación.",
+  "name": "Agent Aquila",
+  "short_name": "Aquila",
+  "description": "Your self-hosted operations assistant in one conversation.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
-  "lang": "es",
+  "lang": "en",
   "icons": [
     { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]

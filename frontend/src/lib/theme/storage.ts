@@ -1,7 +1,10 @@
 import { DEFAULT_THEME, type ThemeId } from "./types";
 
 /** Keep in sync with the inline script in app/layout.tsx */
-export const THEME_STORAGE_KEY = "manager-theme";
+export const THEME_STORAGE_KEY = "agent-aquila-theme";
+
+/** Legacy key from pre–Agent Aquila branding; read once to migrate saved preference. */
+export const LEGACY_THEME_STORAGE_KEY = "manager-theme";
 
 const KNOWN: readonly ThemeId[] = ["dark", "light"];
 

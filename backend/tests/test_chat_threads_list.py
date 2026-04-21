@@ -10,21 +10,21 @@ from app.services.chat_service import delete_all_archived_threads, list_threads
 
 
 @pytest.mark.asyncio
-async def test_list_threads_empty_for_new_user(db_session, crm_user: User) -> None:
-    rows = await list_threads(db_session, crm_user, include_archived=False)
+async def test_list_threads_empty_for_new_user(db_session, aquila_user: User) -> None:
+    rows = await list_threads(db_session, aquila_user, include_archived=False)
     assert rows == []
 
 
 @pytest.mark.asyncio
-async def test_delete_all_archived_threads_keeps_active(db_session, crm_user: User) -> None:
+async def test_delete_all_archived_threads_keeps_active(db_session, aquila_user: User) -> None:
     active = ChatThread(
-        user_id=crm_user.id,
+        user_id=aquila_user.id,
         kind="general",
         title="Keep",
         archived=False,
     )
     archived = ChatThread(
-        user_id=crm_user.id,
+        user_id=aquila_user.id,
         kind="general",
         title="Gone",
         archived=True,
@@ -33,10 +33,10 @@ async def test_delete_all_archived_threads_keeps_active(db_session, crm_user: Us
     db_session.add(archived)
     await db_session.commit()
 
-    removed = await delete_all_archived_threads(db_session, crm_user)
+    removed = await delete_all_archived_threads(db_session, aquila_user)
     await db_session.commit()
     assert removed == 1
 
-    rows = await list_threads(db_session, crm_user, include_archived=True)
+    rows = await list_threads(db_session, aquila_user, include_archived=True)
     assert len(rows) == 1
     assert rows[0].id == active.id

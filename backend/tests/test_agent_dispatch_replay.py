@@ -10,13 +10,13 @@ from app.services.llm_client import ChatToolCall
 
 
 @pytest.mark.asyncio
-async def test_dispatch_tool_uses_replay_results(db_session, crm_user, agent_run) -> None:
+async def test_dispatch_tool_uses_replay_results(db_session, aquila_user, agent_run) -> None:
     replay = AgentReplayContext(tool_results=[{"from_replay": True}])
     token = _replay_ctx.set(replay)
     try:
         res, prop = await AgentService._dispatch_tool(
             db_session,
-            crm_user,
+            aquila_user,
             agent_run.id,
             None,
             ChatToolCall(id="c1", name="gmail_list_messages", arguments={}),

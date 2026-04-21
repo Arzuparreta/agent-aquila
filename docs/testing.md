@@ -26,7 +26,7 @@ Background **Redis** and the **ARQ worker** are only used for the optional
   Default test DB URL (overridable):
 
   ```bash
-  export TEST_DATABASE_URL="postgresql+asyncpg://crm_user:crm_password@127.0.0.1:5433/crm_db"
+  export TEST_DATABASE_URL="postgresql+asyncpg://aquila_user:aquila_password@127.0.0.1:5433/aquila_db"
   ```
 
   Typical local setup (matches the main README):
@@ -66,8 +66,8 @@ Useful variants:
 |--------|------|
 | `anyio_backend` | Asyncio backend for anyio-using code |
 | `db_session` | Async SQLAlchemy session in a **transaction rolled back** after each test; requires live Postgres at `TEST_DATABASE_URL` |
-| `crm_user` | User with Ollama provider and AI enabled (agent tool tests) |
-| `agent_run` | Minimal `AgentRun` row tied to `crm_user` |
+| `aquila_user` | User with Ollama provider and AI enabled (agent tool tests) |
+| `agent_run` | Minimal `AgentRun` row tied to `aquila_user` |
 
 ---
 

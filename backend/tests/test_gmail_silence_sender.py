@@ -48,11 +48,11 @@ class _FakeGmail:
 @pytest.mark.asyncio
 async def test_silence_spam_filter_never_adds_spam_label(
     db_session,
-    crm_user: User,
+    aquila_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     row = ConnectorConnection(
-        user_id=crm_user.id,
+        user_id=aquila_user.id,
         provider="google_gmail",
         label="Gmail",
         credentials_encrypted="{}",
@@ -69,7 +69,7 @@ async def test_silence_spam_filter_never_adds_spam_label(
 
     out = await AgentService._tool_gmail_silence_sender(
         db_session,
-        crm_user,
+        aquila_user,
         {"email": "annoy@spam.test", "mode": "spam", "connection_id": row.id},
     )
     assert out["ok"] is True
@@ -85,11 +85,11 @@ async def test_silence_spam_filter_never_adds_spam_label(
 @pytest.mark.asyncio
 async def test_silence_spam_with_thread_modifies_before_filter(
     db_session,
-    crm_user: User,
+    aquila_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     row = ConnectorConnection(
-        user_id=crm_user.id,
+        user_id=aquila_user.id,
         provider="google_gmail",
         label="Gmail",
         credentials_encrypted="{}",
@@ -106,7 +106,7 @@ async def test_silence_spam_with_thread_modifies_before_filter(
 
     out = await AgentService._tool_gmail_silence_sender(
         db_session,
-        crm_user,
+        aquila_user,
         {
             "email": "annoy@spam.test",
             "mode": "spam",

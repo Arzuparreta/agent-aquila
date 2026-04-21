@@ -4,7 +4,7 @@
 
 import type { TelemetryEvent } from "./types";
 
-const DB_NAME = "aquilat-telemetry-v1";
+const DB_NAME = "aquila-telemetry-v1";
 const STORE = "events";
 const DB_VERSION = 1;
 const MAX_EVENTS = 5000;

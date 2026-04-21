@@ -183,13 +183,13 @@ async def test_openrouter_sends_extra_headers(monkeypatch: pytest.MonkeyPatch) -
     cfg = ProviderConfig(
         provider_id="openrouter",
         api_key="or-test",
-        extras={"openrouter_referer": "https://example.com", "openrouter_title": "Artist CRM"},
+        extras={"openrouter_referer": "https://example.com", "openrouter_title": "Agent Aquila"},
     )
     result = await run_test_connection(cfg)
     assert result.ok is True
     req = captured[0]
     assert req.headers["Referer"] == "https://example.com"
-    assert req.headers["X-Title"] == "Artist CRM"
+    assert req.headers["X-Title"] == "Agent Aquila"
 
 
 # --- Azure --------------------------------------------------------------------

@@ -28,12 +28,12 @@ def test_replay_context_consumes_in_order() -> None:
 
 
 @pytest.mark.asyncio
-async def test_channel_binding_idempotent(db_session, crm_user) -> None:
+async def test_channel_binding_idempotent(db_session, aquila_user) -> None:
     t1 = await get_or_create_thread_for_channel(
-        db_session, crm_user, channel="gateway_stub", external_key="same-key"
+        db_session, aquila_user, channel="gateway_stub", external_key="same-key"
     )
     t2 = await get_or_create_thread_for_channel(
-        db_session, crm_user, channel="gateway_stub", external_key="same-key"
+        db_session, aquila_user, channel="gateway_stub", external_key="same-key"
     )
     assert t1.id == t2.id
 

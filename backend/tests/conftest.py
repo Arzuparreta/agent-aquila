@@ -19,7 +19,7 @@ from app.services.user_ai_settings_service import UserAISettingsService
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://crm_user:crm_password@127.0.0.1:5433/crm_db",
+    "postgresql+asyncpg://aquila_user:aquila_password@127.0.0.1:5433/aquila_db",
 )
 
 
@@ -52,7 +52,7 @@ async def db_session() -> AsyncSession:
 
 
 @pytest_asyncio.fixture
-async def crm_user(db_session: AsyncSession) -> User:
+async def aquila_user(db_session: AsyncSession) -> User:
     """User with Ollama provider so semantic search does not require an API key."""
     user = User(
         email=f"agent-tools-{uuid.uuid4().hex}@example.com",
@@ -69,8 +69,8 @@ async def crm_user(db_session: AsyncSession) -> User:
 
 
 @pytest_asyncio.fixture
-async def agent_run(db_session: AsyncSession, crm_user: User) -> AgentRun:
-    run = AgentRun(user_id=crm_user.id, status="running", user_message="tool test")
+async def agent_run(db_session: AsyncSession, aquila_user: User) -> AgentRun:
+    run = AgentRun(user_id=aquila_user.id, status="running", user_message="tool test")
     db_session.add(run)
     await db_session.flush()
     return run

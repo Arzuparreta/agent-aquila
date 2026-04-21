@@ -17,7 +17,7 @@ database of your emails — it's a private notebook the agent owns.
 | Service     | `backend/app/services/agent_memory_service.py`                      |
 | HTTP API    | `backend/app/routes/memory.py` — `GET/POST/DELETE /memory`          |
 | Agent tools | `upsert_memory`, `recall_memory`, `memory_search`, `memory_get`, `list_memory`, `delete_memory` in `agent_tools.py` |
-| Settings UI | **Settings → Memoria del agente** (`frontend/src/components/features/memory/memory-section.tsx`) |
+| Settings UI | **Settings → Agent memory** (`frontend/src/components/features/memory/memory-section.tsx`) |
 | Diagnostics | [MEMORY_POST_TURN_DIAGNOSTICS.md](./MEMORY_POST_TURN_DIAGNOSTICS.md) — SQL + trace event queries |
 
 
@@ -47,10 +47,10 @@ likely to make it into the system-prompt warmup.
 
 Good keys (the agent will use these naturally):
 
-- `prefs.timezone` → `"Europe/Madrid"`
-- `prefs.signature` → `"Saludos, — Arsu"`
+- `prefs.timezone` → `"America/New_York"`
+- `prefs.signature` → `"Best regards, — Taylor"`
 - `routing.support` → `"Forward stripe.com bills to accounting@example.com"`
-- `project.acme.context` → `"Acme is the Q3 launch — budget owner is Sara."`
+- `project.acme.context` → `"Acme is the Q3 launch — budget owner is the PM."`
 
 Bad keys (these belong somewhere else):
 
@@ -61,7 +61,7 @@ Bad keys (these belong somewhere else):
 
 ## Inspecting and pruning from the UI
 
-**Settings → Memoria del agente** lists every memory the agent has stored for
+**Settings → Agent memory** lists every memory the agent has stored for
 you, newest first, with importance and tags. You can delete any row from
 there; the agent will simply re-create it next time if it still considers it
 worth remembering.

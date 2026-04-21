@@ -1,4 +1,4 @@
-/* Mánager service worker — minimal PWA shell.
+/* Agent Aquila service worker — minimal PWA shell.
  *
  * After the OpenClaw refactor we no longer ship Web Push notifications, so the
  * worker is intentionally tiny. We keep it registered so the browser still

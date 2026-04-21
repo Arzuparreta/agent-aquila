@@ -24,7 +24,7 @@ UPDATE even when the migration DDL itself is valid.
 
 :func:`_widen_alembic_version_num` runs before :func:`context.run_migrations`
 and widens the column to :data:`ALEMBIC_VERSION_NUM_MAX_LENGTH` on PostgreSQL.
-See also ``README.md`` (Troubleshooting) and ``.cursor/rules/alembic-version-column.mdc``.
+See also ``README.md`` (Troubleshooting) and ``docs/TROUBLESHOOTING.md``.
 
 **Grep anchors**
 

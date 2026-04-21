@@ -36,6 +36,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
+If you run the **frontend on the host** (for example `cd frontend && npm install && npm run dev`), Next.js will generate `frontend/next-env.d.ts` for TypeScript. That file is generated and is **not** kept in git, so run `npm install` in `frontend/` after a fresh clone if your editor complains about missing types.
+
 | | URL |
 |--|--|
 | App | <http://localhost:3002> |

@@ -496,10 +496,14 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     # ---- Persistent memory ---------------------------------------------
     _fn(
         "upsert_memory",
-        "Save (or update) a small note in the agent's persistent memory. "
-        "Use to record stable preferences ('prefers concise replies'), "
-        "recurring tasks, or facts the user explicitly asked you to "
-        "remember. Auto-applies. "
+        "Save (or update) a small note in the agent's persistent memory — "
+        "the primary way to persist facts across sessions (OpenClaw-style). "
+        "Use for stable preferences, recurring tasks, or anything the user "
+        "asked you to remember. **When the user assigns or changes your "
+        "display name** (including bilingual names), call this in the same "
+        "turn before ``final_answer`` with keys such as "
+        "``agent.identity.display_name_es`` / ``agent.identity.display_name_en``. "
+        "Auto-applies. "
         "Inputs: ``key`` (required, short snake_case slug), ``content`` "
         "(required, free-form text — keep it under a few sentences), "
         "optional ``importance`` (0 default; 1+ pins it to the top of "

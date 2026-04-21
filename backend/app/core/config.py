@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     """
 
     database_url: str = Field(default="", validation_alias="DATABASE_URL")
-    postgres_user: str = Field(default="crm_user", validation_alias="POSTGRES_USER")
-    postgres_password: str = Field(default="crm_password", validation_alias="POSTGRES_PASSWORD")
-    postgres_db: str = Field(default="crm_db", validation_alias="POSTGRES_DB")
+    postgres_user: str = Field(default="aquila_user", validation_alias="POSTGRES_USER")
+    postgres_password: str = Field(default="aquila_password", validation_alias="POSTGRES_PASSWORD")
+    postgres_db: str = Field(default="aquila_db", validation_alias="POSTGRES_DB")
     postgres_host: str = Field(default="localhost", validation_alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, validation_alias="POSTGRES_PORT")
     jwt_secret: str = "change_me"

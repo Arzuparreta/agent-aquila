@@ -2,11 +2,10 @@
 
 These assumptions drive schema, seed data, and AI/RAG scope until you change them explicitly.
 
-A — Domain (artist career)
-    Contacts: venues, promoters, press, agents, band members, fans; `role` captures the type.
-    Deals: booking / opportunity pipeline (fee optional); `status` is the stage.
-    Events: shows and related appearances; optional `deal_id` links gig economics.
-    Tenancy: single shared dataset per deployment (multi-artist/workspace can be layered later).
+A — Domain (Agent Aquila)
+    Connectors: Gmail, Calendar, Drive, Outlook, Teams (OAuth per user) plus chat and durable agent memory.
+    Legacy CRM-shaped tables (contacts, deals, events) may remain for compatibility; `role` / pipeline fields are optional.
+    Tenancy: single shared deployment dataset; multi-tenant isolation is per-user accounts and row ownership.
 
 B — Volume & performance
     Target seed: ~20 contacts, ~10 deals, ~30 emails, ~5 upcoming events (order-of-magnitude for UX).

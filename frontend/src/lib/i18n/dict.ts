@@ -36,7 +36,7 @@ const en = {
   "common.ellipsis": "…",
 
   // ── Navigation / shell ────────────────────────────────────────────────────
-  "nav.cockpit": "Cockpit",
+  "nav.cockpit": "Chat",
   "nav.dashboard": "Dashboard",
   "nav.contacts": "Contacts",
   "nav.deals": "Deals",
@@ -44,10 +44,10 @@ const en = {
   "nav.events": "Events",
   "nav.settings": "AI settings",
   "nav.logout": "Log out",
-  "nav.brand": "Artist CRM",
+  "nav.brand": "Agent Aquila",
 
   // ── Top-bar search ────────────────────────────────────────────────────────
-  "search.placeholder": "Hybrid RAG search — vector + keyword over chunked CRM text",
+  "search.placeholder": "Hybrid search — vector + keyword over memories and context",
   "search.submit": "Search",
   "search.results": "Results",
   "search.close": "Close",
@@ -159,14 +159,14 @@ const en = {
   "emails.errors.loadFailed": "Could not load emails",
 
   // ── Cockpit ──────────────────────────────────────────────────────────────
-  "cockpit.title": "Operations cockpit",
+  "cockpit.title": "Agent console",
   "cockpit.intro":
-    "Ask about festivals, bookings, and contacts. Answers use hybrid RAG (dense + keyword) over chunked CRM text. The copilot can propose CRM changes and outbound actions (email, calendar, files, Teams); nothing runs until you approve it in the panel on the right. Add connector credentials in Settings.",
+    "Ask about mail, calendar, files, and Teams in plain language. Agent Aquila uses your connected accounts and saved skills; sensitive outbound actions may need your approval first. Add or inspect connector credentials in Settings.",
   "cockpit.example":
-    'Example: "What open deals mention festivals this summer?" or "Summarize the last email from the Blue Note promoter."',
+    'Example: "What unread emails need a reply today?" or "When is my next meeting?"',
   "cockpit.you": "You",
-  "cockpit.copilot": "Copilot",
-  "cockpit.askPlaceholder": "Ask about your CRM…",
+  "cockpit.copilot": "Agent Aquila",
+  "cockpit.askPlaceholder": "Message Agent Aquila…",
   "cockpit.requestFailed": "Request failed.",
   "cockpit.noReply": "No reply.",
   "cockpit.errorPrefix": "Error: {message}",
@@ -174,7 +174,7 @@ const en = {
   "cockpit.trace": "Trace (agent steps)",
   "cockpit.approvals": "Human approvals",
   "cockpit.approvalsIntro":
-    "Proposed CRM changes and outbound connector actions from the copilot appear here until approved. Nothing runs without confirmation.",
+    "Proposed outbound actions and connector changes from Agent Aquila appear here until you approve them. Nothing runs without confirmation.",
   "cockpit.reindex": "Reindex RAG (sample)",
   "cockpit.reindexing": "Reindexing…",
   "cockpit.reindexed": "Reindexed rows: {summary}",
@@ -522,7 +522,7 @@ const en = {
   "settings.ranking.pressTestChat": "Run connection test on that provider if the list is empty.",
   "settings.connectorsCardTitle": "Connectors",
   "settings.connectorsCardIntro":
-    "Usually your manager walks you through linking Gmail, Outlook, or Google Drive from chat. This area is for inspecting or removing connections manually.",
+    "Usually Agent Aquila walks you through linking Gmail, Outlook, or Google Drive from chat. This area is for inspecting or removing connections manually.",
   "settings.memorySectionTitle": "Agent memory",
   "settings.skillsSectionTitle": "Agent skills",
   "settings.maintenanceSectionTitle": "Maintenance",
@@ -558,7 +558,7 @@ const en = {
     "If empty we also use the chat model for classification.",
 
   // ── Chat shell ───────────────────────────────────────────────────────────
-  "chat.defaultTitle": "Manager",
+  "chat.defaultTitle": "Agent Aquila",
   "chat.topBar.openConversations": "Open chats",
   "chat.topBar.inbox": "Inbox",
   "chat.topBar.menu": "Menu",
@@ -604,7 +604,7 @@ const en = {
     "Hi. Tell me what you need and I will take care of it. I can also notify you when something important arrives (email, events, proposals).",
   "chat.threadView.thinking": "Thinking…",
   "chat.composer.removeRef": "Remove reference",
-  "chat.composer.placeholder": "Message your manager…",
+  "chat.composer.placeholder": "Message Agent Aquila…",
   "chat.composer.send": "Send",
   "chat.threadActions.triggerAria": "Chat actions",
   "chat.threadActions.rename": "Rename",
@@ -841,7 +841,7 @@ const es: Record<keyof typeof en, string> = {
   "common.ellipsis": "…",
 
   // ── Navigation / shell ────────────────────────────────────────────────────
-  "nav.cockpit": "Cabina",
+  "nav.cockpit": "Chat",
   "nav.dashboard": "Panel",
   "nav.contacts": "Contactos",
   "nav.deals": "Negocios",
@@ -849,10 +849,10 @@ const es: Record<keyof typeof en, string> = {
   "nav.events": "Eventos",
   "nav.settings": "Ajustes de IA",
   "nav.logout": "Cerrar sesión",
-  "nav.brand": "CRM de artistas",
+  "nav.brand": "Agent Aquila",
 
   // ── Top-bar search ────────────────────────────────────────────────────────
-  "search.placeholder": "Búsqueda híbrida RAG — vectorial y por palabras clave sobre fragmentos del CRM",
+  "search.placeholder": "Búsqueda híbrida — vectorial y por palabras clave sobre memoria y contexto",
   "search.submit": "Buscar",
   "search.results": "Resultados",
   "search.close": "Cerrar",
@@ -965,14 +965,14 @@ const es: Record<keyof typeof en, string> = {
   "emails.errors.loadFailed": "No se pudieron cargar los correos",
 
   // ── Cockpit ──────────────────────────────────────────────────────────────
-  "cockpit.title": "Cabina de operaciones",
+  "cockpit.title": "Consola del agente",
   "cockpit.intro":
-    "Pregunta sobre festivales, contrataciones y contactos. Las respuestas usan RAG híbrido (denso + palabras clave) sobre fragmentos del CRM. El copiloto puede proponer cambios en el CRM y acciones salientes (correo, calendario, archivos, Teams); nada se ejecuta hasta que lo apruebes en el panel de la derecha. Agrega las credenciales de los conectores en Ajustes.",
+    "Pregunta sobre correo, calendario, archivos y Teams en lenguaje natural. Agent Aquila usa tus cuentas conectadas y habilidades guardadas; las acciones salientes sensibles pueden requerir tu aprobación primero. Añade o revisa credenciales de conectores en Ajustes.",
   "cockpit.example":
-    'Ejemplo: «¿Qué negocios abiertos mencionan festivales este verano?» o «Resume el último correo del promotor del Blue Note».',
+    'Ejemplo: «¿Qué correos sin leer necesitan respuesta hoy?» o «¿Cuándo es mi próxima reunión?»',
   "cockpit.you": "Tú",
-  "cockpit.copilot": "Copiloto",
-  "cockpit.askPlaceholder": "Pregunta sobre tu CRM…",
+  "cockpit.copilot": "Agent Aquila",
+  "cockpit.askPlaceholder": "Mensaje para Agent Aquila…",
   "cockpit.requestFailed": "La solicitud falló.",
   "cockpit.noReply": "Sin respuesta.",
   "cockpit.errorPrefix": "Error: {message}",
@@ -980,7 +980,7 @@ const es: Record<keyof typeof en, string> = {
   "cockpit.trace": "Traza (pasos del agente)",
   "cockpit.approvals": "Aprobaciones humanas",
   "cockpit.approvalsIntro":
-    "Los cambios propuestos en el CRM y las acciones salientes del copiloto aparecen aquí hasta que se aprueban. Nada se ejecuta sin confirmación.",
+    "Las acciones salientes y cambios de conectores que propone Agent Aquila aparecen aquí hasta que los apruebas. Nada se ejecuta sin confirmación.",
   "cockpit.reindex": "Reindexar RAG (muestra)",
   "cockpit.reindexing": "Reindexando…",
   "cockpit.reindexed": "Filas reindexadas: {summary}",
@@ -1336,7 +1336,7 @@ const es: Record<keyof typeof en, string> = {
   "settings.ranking.pressTestChat": "Prueba la conexión de ese proveedor si la lista está vacía.",
   "settings.connectorsCardTitle": "Conectores",
   "settings.connectorsCardIntro":
-    "Casi siempre tu mánager te guiará para conectar Gmail, Outlook o Google Drive desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.",
+    "Casi siempre Agent Aquila te guiará para conectar Gmail, Outlook o Google Drive desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.",
   "settings.memorySectionTitle": "Memoria del agente",
   "settings.skillsSectionTitle": "Habilidades del agente",
   "settings.maintenanceSectionTitle": "Mantenimiento",
@@ -1372,7 +1372,7 @@ const es: Record<keyof typeof en, string> = {
     "Si lo dejas vacío usamos el modelo de chat también para clasificar.",
 
   // ── Chat shell ───────────────────────────────────────────────────────────
-  "chat.defaultTitle": "Mánager",
+  "chat.defaultTitle": "Agent Aquila",
   "chat.topBar.openConversations": "Abrir chats",
   "chat.topBar.inbox": "Bandeja",
   "chat.topBar.menu": "Menú",
@@ -1418,7 +1418,7 @@ const es: Record<keyof typeof en, string> = {
     "Hola. Cuéntame qué necesitas y me encargo. También puedo avisarte cuando llegue algo importante (correos, eventos, propuestas).",
   "chat.threadView.thinking": "Pensando…",
   "chat.composer.removeRef": "Quitar referencia",
-  "chat.composer.placeholder": "Escribe a tu mánager…",
+  "chat.composer.placeholder": "Mensaje para Agent Aquila…",
   "chat.composer.send": "Enviar",
   "chat.threadActions.triggerAria": "Acciones del chat",
   "chat.threadActions.rename": "Renombrar",

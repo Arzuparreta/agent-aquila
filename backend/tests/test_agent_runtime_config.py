@@ -50,13 +50,13 @@ def test_merge_patch_into_stored_updates() -> None:
 @pytest.mark.asyncio
 async def test_patch_agent_runtime_roundtrip(
     db_session: AsyncSession,
-    crm_user: User,
+    aquila_user: User,
 ) -> None:
     async def override_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
     async def override_user() -> User:
-        return crm_user
+        return aquila_user
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_current_user] = override_user
