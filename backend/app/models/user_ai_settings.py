@@ -15,6 +15,9 @@ The new fields are:
   means "no provider selected" and the chat composer is disabled.
 - ``embedding_provider_kind`` — optional pointer for embedding calls (agent
   memory). ``NULL`` means use the same row as ``active_provider_kind``.
+- ``ranking_provider_kind`` — optional pointer for auxiliary LLM calls that
+  use the row's ``classify_model`` (ranking / structured JSON). ``NULL`` means
+  the same row as the active provider.
 - ``ai_disabled`` — kill-switch unchanged.
 
 The mirror columns are kept in sync by
@@ -51,6 +54,7 @@ class UserAISettings(Base, TimestampMixin):
     # When set, agent memory embeddings use this user_ai_provider_configs row
     # instead of the active one. NULL = same as active_provider_kind.
     embedding_provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ranking_provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror

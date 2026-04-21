@@ -73,6 +73,28 @@ def _shared_client() -> httpx.AsyncClient:
     return _shared_http
 
 
+@dataclass(frozen=True)
+class LlmProviderContext:
+    """HTTP fields + default chat model for auxiliary completions (ranking / JSON).
+
+    Built from a saved :class:`~app.models.user_ai_provider_config.UserAIProviderConfig`
+    row via :func:`~app.services.ai_provider_config_service.AIProviderConfigService.resolve_ranking_runtime`.
+    ``default_model`` is ``classify_model`` when set, otherwise ``chat_model``.
+    """
+
+    provider_kind: str
+    base_url: str | None
+    extras: dict[str, Any] | None
+    default_model: str
+    api_key: str | None
+
+
+def _default_chat_model(settings_row: UserAISettings | LlmProviderContext) -> str:
+    if isinstance(settings_row, LlmProviderContext):
+        return settings_row.default_model
+    return settings_row.chat_model
+
+
 async def aclose_llm_http_client() -> None:
     """Close the pooled HTTP client (call from app/worker shutdown)."""
     global _shared_http
@@ -90,7 +112,7 @@ class LLMClient:
     @staticmethod
     async def chat_completion(
         api_key: str,
-        settings_row: UserAISettings,
+        settings_row: UserAISettings | LlmProviderContext,
         *,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -101,11 +123,14 @@ class LLMClient:
 
         Used by classifiers / draft generators that don't need tool calling.
         """
+        effective_key = api_key
+        if isinstance(settings_row, LlmProviderContext):
+            effective_key = api_key or (settings_row.api_key or "")
         response = await LLMClient._post(
-            api_key,
+            effective_key,
             settings_row,
             body={
-                "model": model or settings_row.chat_model,
+                "model": model or _default_chat_model(settings_row),
                 "messages": messages,
                 "temperature": temperature,
                 **({"response_format": {"type": "json_object"}} if response_format_json else {}),
@@ -116,19 +141,22 @@ class LLMClient:
     @staticmethod
     async def chat_completion_full(
         api_key: str,
-        settings_row: UserAISettings,
+        settings_row: UserAISettings | LlmProviderContext,
         *,
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.2,
     ) -> tuple[str, str | None, dict[str, Any], dict[str, Any] | None]:
         """Chat completion without tools; returns content, finish_reason, raw message dict, usage."""
+        effective_key = api_key
+        if isinstance(settings_row, LlmProviderContext):
+            effective_key = api_key or (settings_row.api_key or "")
         body: dict[str, Any] = {
-            "model": model or settings_row.chat_model,
+            "model": model or _default_chat_model(settings_row),
             "messages": messages,
             "temperature": temperature,
         }
-        data = await LLMClient._post(api_key, settings_row, body=body)
+        data = await LLMClient._post(effective_key, settings_row, body=body)
         choice = data["choices"][0]
         message = choice.get("message") or {}
         content = str(message.get("content") or "")
@@ -138,7 +166,7 @@ class LLMClient:
     @staticmethod
     async def chat_with_tools(
         api_key: str,
-        settings_row: UserAISettings,
+        settings_row: UserAISettings | LlmProviderContext,
         *,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
@@ -157,14 +185,17 @@ class LLMClient:
         the need for hand-rolled JSON envelopes that small local models
         (Ollama / Gemma / Qwen / Llama) struggle to follow reliably.
         """
+        effective_key = api_key
+        if isinstance(settings_row, LlmProviderContext):
+            effective_key = api_key or (settings_row.api_key or "")
         body: dict[str, Any] = {
-            "model": model or settings_row.chat_model,
+            "model": model or _default_chat_model(settings_row),
             "messages": messages,
             "temperature": temperature,
             "tools": tools,
             "tool_choice": tool_choice,
         }
-        data = await LLMClient._post(api_key, settings_row, body=body)
+        data = await LLMClient._post(effective_key, settings_row, body=body)
         choice = data["choices"][0]
         message = choice["message"]
         parsed = _parse_message(message)
@@ -176,7 +207,10 @@ class LLMClient:
 
     @staticmethod
     async def _post(
-        api_key: str, settings_row: UserAISettings, *, body: dict[str, Any]
+        api_key: str,
+        settings_row: UserAISettings | LlmProviderContext,
+        *,
+        body: dict[str, Any],
     ) -> dict[str, Any]:
         root = _api_root(settings_row)
         url = f"{root}/chat/completions"

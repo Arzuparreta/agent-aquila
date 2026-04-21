@@ -56,6 +56,10 @@ export type UserAISettings = {
   embedding_model: string;
   chat_model: string;
   classify_model: string | null;
+  /** When set, agent-memory embeddings use this saved provider row instead of the active chat provider. */
+  embedding_provider_kind?: string | null;
+  /** When set, auxiliary LLM (classify / ranking) uses this saved row instead of the active provider. */
+  ranking_provider_kind?: string | null;
   ai_disabled: boolean;
   has_api_key: boolean;
   extras: Record<string, unknown> | null;
@@ -154,6 +158,8 @@ export type ProviderConfigsResponse = {
   active_provider_kind: string | null;
   /** When set, agent-memory embeddings use this saved provider row instead of the active chat provider. */
   embedding_provider_kind: string | null;
+  /** When set, auxiliary LLM (classify / ranking) uses this saved row instead of the active provider. */
+  ranking_provider_kind: string | null;
   ai_disabled: boolean;
   harness_mode: HarnessMode;
   user_timezone: string | null;

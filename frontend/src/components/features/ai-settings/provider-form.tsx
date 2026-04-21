@@ -21,8 +21,8 @@ type ProviderFormProps = {
  * Right pane editing one provider's saved config.
  *
  * Renders provider-specific fields, chat model, then (when saved) agent-memory
- * embedding source (same as active vs other provider) and embedding model,
- * advanced classify/key/delete, and footer actions.
+ * embeddings and auxiliary ranking/classify LLM (same-as-active vs other provider),
+ * advanced key/delete, and footer actions.
  */
 export function ProviderForm({ api }: ProviderFormProps) {
   const { t } = useTranslation();
@@ -39,6 +39,12 @@ export function ProviderForm({ api }: ProviderFormProps) {
     updateEmbeddingModelForKind,
     embeddingModels,
     loadingEmbeddingModels,
+    rankingProviderKind,
+    setRankingProviderKind,
+    refreshRankingModels,
+    updateClassifyModelForKind,
+    rankingModels,
+    loadingRankingModels,
     draft,
     isDirty,
     isNew,
@@ -66,6 +72,13 @@ export function ProviderForm({ api }: ProviderFormProps) {
     ? (embeddingProviderKind as string)
     : activeKind;
 
+  const useSeparateRankingProvider = Boolean(
+    rankingProviderKind && activeKind && rankingProviderKind !== activeKind
+  );
+  const rankingSourceKind = useSeparateRankingProvider
+    ? (rankingProviderKind as string)
+    : activeKind;
+
   const canPickOtherProvider = Boolean(
     activeKind && configs.some((c) => c.provider_kind !== activeKind)
   );
@@ -86,6 +99,11 @@ export function ProviderForm({ api }: ProviderFormProps) {
     void refreshEmbeddingModels(memorySourceKind);
   }, [selectedConfig?.provider_kind, memorySourceKind, refreshEmbeddingModels]);
 
+  useEffect(() => {
+    if (!rankingSourceKind) return;
+    void refreshRankingModels(rankingSourceKind);
+  }, [selectedConfig?.provider_kind, rankingSourceKind, refreshRankingModels]);
+
   const editingMemoryRow = Boolean(
     selectedKind && memorySourceKind && selectedKind === memorySourceKind
   );
@@ -98,6 +116,21 @@ export function ProviderForm({ api }: ProviderFormProps) {
     selectedConfig && !editingMemoryRow && memorySourceKind
       ? t("settings.embeddings.editOnProviderHint", {
           label: providersById.get(memorySourceKind)?.label ?? memorySourceKind
+        })
+      : undefined;
+
+  const editingRankingRow = Boolean(
+    selectedKind && rankingSourceKind && selectedKind === rankingSourceKind
+  );
+
+  const classifyFieldValue = editingRankingRow
+    ? draft.classifyModel
+    : (configs.find((c) => c.provider_kind === rankingSourceKind)?.classify_model ?? "");
+
+  const classifyHelpRemote =
+    selectedConfig && !editingRankingRow && rankingSourceKind
+      ? t("settings.ranking.editOnProviderHint", {
+          label: providersById.get(rankingSourceKind)?.label ?? rankingSourceKind
         })
       : undefined;
 
@@ -160,6 +193,17 @@ export function ProviderForm({ api }: ProviderFormProps) {
           capability="chat"
           helpText={modelHelpText(t, selectedProvider, models, loadingModels)}
         />
+        {!selectedConfig ? (
+          <ModelSelector
+            label={t("settings.classifyModel")}
+            value={draft.classifyModel}
+            onChange={(v) => updateDraft({ classifyModel: v })}
+            models={models}
+            loading={loadingModels}
+            capability="chat"
+            helpText={t("settings.classifyHelp")}
+          />
+        ) : null}
         {selectedConfig ? (
           <div className="rounded-lg border border-border bg-surface-muted/35 p-3">
             <div className="text-sm font-semibold text-fg">{t("settings.embeddings.memoryBlockTitle")}</div>
@@ -257,17 +301,94 @@ export function ProviderForm({ api }: ProviderFormProps) {
           />
         )}
 
+        {selectedConfig ? (
+          <div className="rounded-lg border border-border bg-surface-muted/35 p-3">
+            <div className="text-sm font-semibold text-fg">{t("settings.ranking.blockTitle")}</div>
+            <p className="mt-1 text-xs text-fg-subtle">{t("settings.ranking.blockIntro")}</p>
+            <fieldset className="mt-3 flex flex-col gap-2">
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-fg">
+                <input
+                  type="radio"
+                  name="ranking-llm-source"
+                  className="mt-0.5"
+                  checked={!useSeparateRankingProvider}
+                  onChange={() => void setRankingProviderKind(null)}
+                />
+                <span>{t("settings.ranking.sameAsActive")}</span>
+              </label>
+              <label
+                className={cn(
+                  "flex items-start gap-2 text-sm",
+                  canPickOtherProvider ? "cursor-pointer text-fg" : "cursor-not-allowed text-fg-muted"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="ranking-llm-source"
+                  className="mt-0.5"
+                  checked={useSeparateRankingProvider}
+                  disabled={!canPickOtherProvider}
+                  onChange={() => {
+                    const first = configs.find((c) => c.provider_kind !== activeKind)?.provider_kind;
+                    if (first) void setRankingProviderKind(first);
+                  }}
+                />
+                <span>{t("settings.ranking.useOther")}</span>
+              </label>
+            </fieldset>
+            {!canPickOtherProvider ? (
+              <p className="mt-2 text-xs text-fg-muted">{t("settings.ranking.needTwoProviders")}</p>
+            ) : null}
+
+            {useSeparateRankingProvider ? (
+              <div className="mt-3 grid gap-1">
+                <label htmlFor="ranking-llm-provider" className="text-sm font-medium text-fg-muted">
+                  {t("settings.ranking.selectProvider")}
+                </label>
+                <select
+                  id="ranking-llm-provider"
+                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
+                  value={rankingProviderKind ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) void setRankingProviderKind(v);
+                  }}
+                >
+                  {configs
+                    .filter((c) => c.provider_kind !== activeKind)
+                    .map((c) => (
+                      <option key={c.provider_kind} value={c.provider_kind}>
+                        {providersById.get(c.provider_kind)?.label ?? c.provider_kind}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : null}
+
+            <div className="mt-3">
+              <ModelSelector
+                label={t("settings.classifyModel")}
+                value={classifyFieldValue}
+                onChange={(v) => {
+                  if (editingRankingRow) {
+                    updateDraft({ classifyModel: v });
+                  } else if (rankingSourceKind) {
+                    void updateClassifyModelForKind(rankingSourceKind, v);
+                  }
+                }}
+                models={rankingModels}
+                loading={loadingRankingModels}
+                capability="chat"
+                helpText={classifyHelpRemote ?? t("settings.classifyHelp")}
+                emptyHint={t("settings.ranking.pressTestChat")}
+              />
+            </div>
+          </div>
+        ) : null}
+
         <details className="rounded-md border border-border bg-surface-muted/40 p-3">
           <summary className="cursor-pointer text-sm font-medium text-fg-muted">{t("advanced.summary")}</summary>
           <div className="mt-3 grid gap-3">
-            <ModelSelector
-              label={t("settings.classifyModel")}
-              value={draft.classifyModel}
-              onChange={(v) => updateDraft({ classifyModel: v })}
-              models={models}
-              loading={loadingModels}
-              helpText={t("providerForm.classifyHelpInline")}
-            />
             {selectedConfig?.has_api_key ? (
               <Button
                 type="button"

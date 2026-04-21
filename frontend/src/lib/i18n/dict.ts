@@ -464,6 +464,16 @@ const en = {
     "Memory embeddings use «{label}». Pick that provider in the list to edit with Save, or change here (saved immediately).",
   "settings.embeddings.pressTestEmbedding": "Run connection test on that provider if the list is empty.",
   "settings.embeddings.hintNewProvider": "Set an embedding model for this new provider, then save.",
+  "settings.ranking.blockTitle": "Ranking / auxiliary LLM",
+  "settings.ranking.blockIntro":
+    "Triage and structured JSON tasks use the classify model on the chosen row (falls back to that row's chat model when empty). Chat above always uses the active provider.",
+  "settings.ranking.sameAsActive": "Same as chat (active provider)",
+  "settings.ranking.useOther": "Use another saved provider",
+  "settings.ranking.selectProvider": "Provider for classify / ranking",
+  "settings.ranking.needTwoProviders": "Add and save a second provider in the list to use a different backend for ranking and JSON.",
+  "settings.ranking.editOnProviderHint":
+    "Classify uses «{label}». Pick that provider in the list to edit with Save, or change here (saved immediately).",
+  "settings.ranking.pressTestChat": "Run connection test on that provider if the list is empty.",
   "settings.connectorsCardTitle": "Connectors",
   "settings.connectorsCardIntro":
     "Usually your manager walks you through linking Gmail, Outlook, or Google Drive from chat. This area is for inspecting or removing connections manually.",
@@ -1222,6 +1232,16 @@ const es: Record<keyof typeof en, string> = {
     "La memoria usa «{label}». Elige ese proveedor en la lista para editar con Guardar, o cámbialo aquí (se guarda al instante).",
   "settings.embeddings.pressTestEmbedding": "Prueba la conexión de ese proveedor si la lista está vacía.",
   "settings.embeddings.hintNewProvider": "Define un modelo de embeddings para este proveedor nuevo y guarda.",
+  "settings.ranking.blockTitle": "Clasificación / LLM auxiliar",
+  "settings.ranking.blockIntro":
+    "La clasificación y el JSON estructurado usan el modelo de clasificación de la fila elegida (si está vacío, el chat de esa fila). El chat de arriba siempre usa el proveedor activo.",
+  "settings.ranking.sameAsActive": "Igual que el chat (proveedor activo)",
+  "settings.ranking.useOther": "Usar otro proveedor guardado",
+  "settings.ranking.selectProvider": "Proveedor para clasificación / ranking",
+  "settings.ranking.needTwoProviders": "Añade y guarda un segundo proveedor en la lista para usar otro backend de clasificación y JSON.",
+  "settings.ranking.editOnProviderHint":
+    "La clasificación usa «{label}». Elige ese proveedor en la lista para editar con Guardar, o cámbialo aquí (se guarda al instante).",
+  "settings.ranking.pressTestChat": "Prueba la conexión de ese proveedor si la lista está vacía.",
   "settings.connectorsCardTitle": "Conectores",
   "settings.connectorsCardIntro":
     "Casi siempre tu mánager te guiará para conectar Gmail, Outlook o Google Drive desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.",

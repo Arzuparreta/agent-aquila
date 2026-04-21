@@ -173,6 +173,7 @@ async def list_provider_configs(
     return ProviderConfigsResponse(
         active_provider_kind=active,
         embedding_provider_kind=getattr(prefs, "embedding_provider_kind", None),
+        ranking_provider_kind=getattr(prefs, "ranking_provider_kind", None),
         ai_disabled=prefs.ai_disabled,
         harness_mode=coerce_harness_mode(prefs),
         user_timezone=getattr(prefs, "user_timezone", None),

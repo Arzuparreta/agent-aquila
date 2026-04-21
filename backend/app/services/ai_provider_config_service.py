@@ -44,6 +44,7 @@ from app.services.ai_providers import (
     resolve_known_provider_id,
 )
 from app.services.embedding_client import EmbeddingCallContext
+from app.services.llm_client import LlmProviderContext
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,46 @@ class AIProviderConfigService:
             base_url=row.base_url,
             embedding_model=em,
             extras=extras_dict,
+            api_key=api_key,
+        )
+
+    @staticmethod
+    async def resolve_ranking_runtime(
+        db: AsyncSession, user: User
+    ) -> LlmProviderContext | None:
+        """Build chat-completions context from ``ranking_provider_kind`` or the active row.
+
+        Returns ``None`` when AI is disabled, no target row exists, neither
+        ``classify_model`` nor ``chat_model`` is set, a required API key is
+        missing, or decryption fails.
+        """
+        prefs = await _get_or_create_prefs(db, user)
+        if prefs.ai_disabled:
+            return None
+        rank_kind = getattr(prefs, "ranking_provider_kind", None)
+        if rank_kind:
+            row = await AIProviderConfigService.get_config(db, user, rank_kind)
+        else:
+            row = await AIProviderConfigService.get_active(db, user)
+        if row is None:
+            return None
+        cm = (row.classify_model or "").strip()
+        chat = (row.chat_model or "").strip()
+        default_model = cm or chat
+        if not default_model:
+            return None
+        try:
+            api_key = AIProviderConfigService.decrypt_api_key(row)
+        except KeyDecryptError:
+            return None
+        if provider_kind_requires_api_key(row.provider_kind) and not api_key:
+            return None
+        extras_dict = dict(row.extras) if row.extras else None
+        return LlmProviderContext(
+            provider_kind=row.provider_kind,
+            base_url=row.base_url,
+            extras=extras_dict,
+            default_model=default_model,
             api_key=api_key,
         )
 
@@ -238,6 +279,9 @@ class AIProviderConfigService:
         prefs = await _get_or_create_prefs(db, user)
         if getattr(prefs, "embedding_provider_kind", None) == row.provider_kind:
             prefs.embedding_provider_kind = None
+            await db.flush()
+        if getattr(prefs, "ranking_provider_kind", None) == row.provider_kind:
+            prefs.ranking_provider_kind = None
             await db.flush()
         if was_active:
             prefs.active_provider_kind = None

@@ -576,6 +576,7 @@ async def main_async(args: argparse.Namespace) -> int:
         settings_row = await UserAISettingsService.get_or_create(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user) or ""
         embed_ctx = await AIProviderConfigService.resolve_embedding_runtime(db, user)
+        rank_ctx = await AIProviderConfigService.resolve_ranking_runtime(db, user)
 
         provider_id = normalize_provider_id(settings_row.provider_kind)
         definition = get_provider(provider_id)
@@ -589,6 +590,10 @@ async def main_async(args: argparse.Namespace) -> int:
         print(
             f"Embedding model: {embed_ctx.embedding_model if embed_ctx else settings_row.embedding_model or '(unset)'} "
             f"(source: {embed_ctx.provider_kind if embed_ctx else '—'})"
+        )
+        print(
+            f"Auxiliary LLM   : {rank_ctx.default_model if rank_ctx else '(unavailable)'} "
+            f"(source: {rank_ctx.provider_kind if rank_ctx else '—'})"
         )
         print(f"AI disabled    : {settings_row.ai_disabled}")
         hm = getattr(settings_row, "harness_mode", None) or "auto"
@@ -626,7 +631,10 @@ async def main_async(args: argparse.Namespace) -> int:
                 _warn("native failed, prompted passed — typical for qwen3:8b on Ollama")
         if "json" not in skipped:
             _section("[2/3] JSON mode")
-            results["json"] = await _check_json_mode(api_key, settings_row)
+            if rank_ctx is not None:
+                results["json"] = await _check_json_mode(rank_ctx.api_key or "", rank_ctx)
+            else:
+                results["json"] = await _check_json_mode(api_key, settings_row)
         if "embeddings" not in skipped:
             _section("[3/3] Embeddings")
             results["embeddings"] = await _check_embeddings(embed_ctx)

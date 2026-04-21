@@ -82,6 +82,7 @@ class UserAISettingsService:
             chat_model=row.chat_model,
             classify_model=row.classify_model,
             embedding_provider_kind=getattr(row, "embedding_provider_kind", None),
+            ranking_provider_kind=getattr(row, "ranking_provider_kind", None),
             ai_disabled=row.ai_disabled,
             has_api_key=False,  # Filled in by callers that have access to db; safe default.
             extras=row.extras,
@@ -102,6 +103,7 @@ class UserAISettingsService:
             chat_model=row.chat_model,
             classify_model=row.classify_model,
             embedding_provider_kind=getattr(row, "embedding_provider_kind", None),
+            ranking_provider_kind=getattr(row, "ranking_provider_kind", None),
             ai_disabled=row.ai_disabled,
             has_api_key=bool(active and active.has_api_key),
             extras=row.extras,
@@ -172,8 +174,27 @@ class UserAISettingsService:
                     prefs.embedding_provider_kind = embed_kind
             await db.flush()
 
+        if "ranking_provider_kind" in data:
+            rank_raw = data["ranking_provider_kind"]
+            if rank_raw is None:
+                prefs.ranking_provider_kind = None
+            else:
+                rank_kind = normalize_provider_id(str(rank_raw))
+                rank_row = await AIProviderConfigService.get_config(db, user, rank_kind)
+                if rank_row is None:
+                    raise ValueError(
+                        f"No saved configuration for provider {rank_kind!r}; save that provider first."
+                    )
+                active_raw = prefs.active_provider_kind or prefs.provider_kind
+                active_norm = normalize_provider_id(active_raw) if active_raw else None
+                if active_norm and rank_kind == active_norm:
+                    prefs.ranking_provider_kind = None
+                else:
+                    prefs.ranking_provider_kind = rank_kind
+            await db.flush()
+
         # Per-provider row updates: skip when the payload only touches user-level
-        # fields (e.g. ``embedding_provider_kind``) so we do not create a stray
+        # fields (e.g. ``embedding_provider_kind``, ``ranking_provider_kind``) so we do not create a stray
         # ``user_ai_provider_configs`` row via upsert.
         provider_patch_keys = (
             "provider_kind",

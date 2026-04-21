@@ -86,6 +86,8 @@ export type UseProviderConfigsApi = {
   activeKind: string | null;
   /** When set, embeddings use this provider row; null means same as active chat provider. */
   embeddingProviderKind: string | null;
+  /** When set, auxiliary LLM (classify / ranking) uses this row; null means same as active. */
+  rankingProviderKind: string | null;
   aiDisabled: boolean;
   harnessMode: HarnessMode;
   userTimezone: string;
@@ -126,6 +128,11 @@ export type UseProviderConfigsApi = {
   loadingEmbeddingModels: boolean;
   refreshEmbeddingModels: (kind: string) => Promise<void>;
   updateEmbeddingModelForKind: (kind: string, embedding_model: string) => Promise<void>;
+  setRankingProviderKind: (kind: string | null) => Promise<void>;
+  rankingModels: ModelInfo[];
+  loadingRankingModels: boolean;
+  refreshRankingModels: (kind: string) => Promise<void>;
+  updateClassifyModelForKind: (kind: string, classify_model: string) => Promise<void>;
   refreshModels: () => Promise<void>;
   reload: () => Promise<void>;
 };
@@ -150,6 +157,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [activeKind, setActiveKind] = useState<string | null>(null);
   const [embeddingProviderKind, setEmbeddingProviderKindState] = useState<string | null>(null);
+  const [rankingProviderKind, setRankingProviderKindState] = useState<string | null>(null);
   const [aiDisabled, setAIDisabledState] = useState<boolean>(false);
   const [harnessMode, setHarnessModeState] = useState<HarnessMode>("auto");
   const [userTimezone, setUserTimezoneState] = useState<string>("");
@@ -166,6 +174,8 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   const [loadingModels, setLoadingModels] = useState(false);
   const [embeddingModels, setEmbeddingModels] = useState<ModelInfo[]>([]);
   const [loadingEmbeddingModels, setLoadingEmbeddingModels] = useState(false);
+  const [rankingModels, setRankingModels] = useState<ModelInfo[]>([]);
+  const [loadingRankingModels, setLoadingRankingModels] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [saving, setSaving] = useState(false);
@@ -222,6 +232,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
       setConfigs(data.configs);
       setActiveKind(data.active_provider_kind);
       setEmbeddingProviderKindState(data.embedding_provider_kind ?? null);
+      setRankingProviderKindState(data.ranking_provider_kind ?? null);
       setAIDisabledState(data.ai_disabled);
       setHarnessModeState(data.harness_mode ?? "auto");
       setUserTimezoneState(data.user_timezone ?? "");
@@ -499,6 +510,14 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     await reload();
   }, [reload]);
 
+  const setRankingProviderKind = useCallback(async (kind: string | null) => {
+    await apiFetch<unknown>("/ai/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ ranking_provider_kind: kind })
+    });
+    await reload();
+  }, [reload]);
+
   const refreshEmbeddingModels = useCallback(
     async (kind: string) => {
       const cfg = configs.find((c) => c.provider_kind === kind);
@@ -532,6 +551,43 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     await apiFetch<ProviderConfig>(`/ai/providers/configs/${kind}`, {
       method: "PUT",
       body: JSON.stringify({ embedding_model })
+    });
+    await reload();
+  }, [reload]);
+
+  const refreshRankingModels = useCallback(
+    async (kind: string) => {
+      const cfg = configs.find((c) => c.provider_kind === kind);
+      if (!cfg) {
+        setRankingModels([]);
+        return;
+      }
+      setLoadingRankingModels(true);
+      try {
+        const payload = {
+          provider_id: kind,
+          api_key: cfg.has_api_key ? STORED_API_KEY_SENTINEL : null,
+          base_url: cfg.base_url || null,
+          extras: (cfg.extras as Record<string, unknown>) ?? {}
+        };
+        const response = await apiFetch<ListModelsResponse>("/ai/providers/models?capability=chat", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        setRankingModels(response.ok ? response.models : []);
+      } catch {
+        setRankingModels([]);
+      } finally {
+        setLoadingRankingModels(false);
+      }
+    },
+    [configs]
+  );
+
+  const updateClassifyModelForKind = useCallback(async (kind: string, classify_model: string) => {
+    await apiFetch<ProviderConfig>(`/ai/providers/configs/${kind}`, {
+      method: "PUT",
+      body: JSON.stringify({ classify_model })
     });
     await reload();
   }, [reload]);
@@ -579,6 +635,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     configs,
     activeKind,
     embeddingProviderKind,
+    rankingProviderKind,
     aiDisabled,
     harnessMode,
     userTimezone,
@@ -615,6 +672,11 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     loadingEmbeddingModels,
     refreshEmbeddingModels,
     updateEmbeddingModelForKind,
+    setRankingProviderKind,
+    rankingModels,
+    loadingRankingModels,
+    refreshRankingModels,
+    updateClassifyModelForKind,
     refreshModels,
     reload
   };
