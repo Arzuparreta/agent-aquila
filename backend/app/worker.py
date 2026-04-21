@@ -26,6 +26,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.agent_run import AgentRun
 from app.models.chat_thread import ChatThread
 from app.models.user import User
+from app.core.schema_probe import fail_fast_if_schema_stale
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
@@ -105,6 +106,7 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
 
 async def startup(ctx: dict[str, Any]) -> None:
     del ctx
+    await fail_fast_if_schema_stale()
     logger.info(
         "worker started; redis=%s heartbeat=%s every=%dm",
         settings.redis_url,

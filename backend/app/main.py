@@ -6,10 +6,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError,
+    OperationalError,
+    ProgrammingError,
+    SQLAlchemyError,
+)
 
 from app.core.config import settings
 from app.core.envelope_crypto import KeyDecryptError
+from app.core.schema_probe import fail_fast_if_schema_stale
 from app.routes import api_router
 from app.services.llm_client import aclose_llm_http_client
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
@@ -19,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
+    await fail_fast_if_schema_stale()
     yield
     await aclose_llm_http_client()
 
@@ -53,6 +61,32 @@ async def sqlalchemy_exception_handler(request, exc: SQLAlchemyError):
                 )
             },
         )
+    # Most common after a git pull: model expects columns/tables Alembic has not applied yet.
+    if isinstance(exc, ProgrammingError):
+        raw = str(getattr(exc, "orig", None) or exc)
+        lowered = raw.lower()
+        if (
+            "undefinedcolumn" in lowered
+            or "undefinedtable" in lowered
+            or "does not exist" in lowered
+        ):
+            logger.error(
+                "Database schema mismatch on %s (run Alembic migrations): %s",
+                request.url.path,
+                raw[:300],
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "Database schema is out of date. Apply migrations, then retry: "
+                        "`cd backend && alembic upgrade head`. "
+                        "With Docker Compose: `docker compose up --build backend` "
+                        "(the backend runs `alembic upgrade head` on start)."
+                    ),
+                    "kind": "schema_out_of_date",
+                },
+            )
     logger.exception("Unhandled database error on %s", request.url.path)
     return JSONResponse(
         status_code=500,
