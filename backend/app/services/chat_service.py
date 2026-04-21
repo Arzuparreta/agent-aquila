@@ -18,7 +18,8 @@ from typing import Any, Iterable
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
+from app.services.agent_runtime_config_service import merge_stored_with_env
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.models.user import User
@@ -176,14 +177,23 @@ async def append_message(
     return msg
 
 
+def _effective_runtime(runtime: AgentRuntimeConfigResolved | None) -> AgentRuntimeConfigResolved:
+    return runtime if runtime is not None else merge_stored_with_env(None)
+
+
 async def thread_messages_window_raw(
-    db: AsyncSession, thread: ChatThread, *, limit: int | None = None
+    db: AsyncSession,
+    thread: ChatThread,
+    *,
+    runtime: AgentRuntimeConfigResolved | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, str]]:
     """Chronological window of user/assistant/event messages (same fetch as ``history_for_agent``)."""
-    cap_pairs = settings.agent_history_turns if limit is None else limit
+    rt = _effective_runtime(runtime)
+    cap_pairs = rt.agent_history_turns if limit is None else limit
     fetch_cap = cap_pairs * 2
-    if settings.agent_thread_compact_after_pairs > cap_pairs:
-        fetch_cap = max(fetch_cap, settings.agent_thread_compact_after_pairs * 2)
+    if rt.agent_thread_compact_after_pairs > cap_pairs:
+        fetch_cap = max(fetch_cap, rt.agent_thread_compact_after_pairs * 2)
     stmt = (
         select(ChatMessage)
         .where(
@@ -202,18 +212,27 @@ async def thread_messages_window_raw(
 
 
 async def preview_memory_flush_dropped(
-    db: AsyncSession, thread: ChatThread, *, limit: int | None = None
+    db: AsyncSession,
+    thread: ChatThread,
+    *,
+    runtime: AgentRuntimeConfigResolved | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, str]]:
     """Oldest segment of the window that ``history_for_agent`` would drop (for flush-before-compact)."""
-    msgs = await thread_messages_window_raw(db, thread, limit=limit)
-    cap_pairs = settings.agent_history_turns if limit is None else limit
+    msgs = await thread_messages_window_raw(db, thread, runtime=runtime, limit=limit)
+    rt = _effective_runtime(runtime)
+    cap_pairs = rt.agent_history_turns if limit is None else limit
     if len(msgs) <= cap_pairs * 2:
         return []
     return msgs[: len(msgs) - cap_pairs * 2]
 
 
 async def history_for_agent(
-    db: AsyncSession, thread: ChatThread, *, limit: int | None = None
+    db: AsyncSession,
+    thread: ChatThread,
+    *,
+    runtime: AgentRuntimeConfigResolved | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, str]]:
     """Returns prior turns as the OpenAI-compatible ``[{role, content}, ...]`` list.
 
@@ -224,11 +243,12 @@ async def history_for_agent(
     When ``AGENT_THREAD_COMPACT_AFTER_PAIRS`` is set higher than the turn cap, we fetch
     a deeper window and trim with a short system notice so long threads stay bounded.
     """
-    cap_pairs = settings.agent_history_turns if limit is None else limit
-    msgs = await thread_messages_window_raw(db, thread, limit=limit)
+    rt = _effective_runtime(runtime)
+    cap_pairs = rt.agent_history_turns if limit is None else limit
+    msgs = await thread_messages_window_raw(db, thread, runtime=runtime, limit=limit)
     if len(msgs) > cap_pairs * 2:
         msgs = msgs[-(cap_pairs * 2) :]
-        if settings.agent_thread_compact_after_pairs > 0:
+        if rt.agent_thread_compact_after_pairs > 0:
             msgs = [
                 {
                     "role": "system",

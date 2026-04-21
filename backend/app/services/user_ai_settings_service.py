@@ -22,7 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.envelope_crypto import KeyDecryptError
 from app.models.user import User
 from app.models.user_ai_settings import UserAISettings
+from app.schemas.agent_runtime_config import AgentRuntimeConfigPartial
 from app.schemas.ai import UserAISettingsRead, UserAISettingsUpdate
+from app.services.agent_runtime_config_service import merge_patch_into_stored, runtime_from_row
 from app.services.ai_provider_config_service import (
     AIProviderConfigService,
     ProviderConfigUpsert,
@@ -90,6 +92,7 @@ class UserAISettingsService:
             user_timezone=getattr(row, "user_timezone", None),
             time_format=normalize_time_format(getattr(row, "time_format", None)),  # type: ignore[arg-type]
             agent_processing_paused=bool(getattr(row, "agent_processing_paused", False)),
+            agent_runtime=runtime_from_row(row),
         )
 
     @staticmethod
@@ -111,6 +114,7 @@ class UserAISettingsService:
             user_timezone=getattr(row, "user_timezone", None),
             time_format=normalize_time_format(getattr(row, "time_format", None)),  # type: ignore[arg-type]
             agent_processing_paused=bool(getattr(row, "agent_processing_paused", False)),
+            agent_runtime=runtime_from_row(row),
         )
 
     @staticmethod
@@ -154,6 +158,17 @@ class UserAISettingsService:
 
         if "agent_processing_paused" in data and data["agent_processing_paused"] is not None:
             prefs.agent_processing_paused = bool(data["agent_processing_paused"])
+
+        if "agent_runtime" in data:
+            ar = data["agent_runtime"]
+            if ar is None:
+                prefs.agent_runtime_config = None
+            else:
+                patch = AgentRuntimeConfigPartial.model_validate(ar)
+                prefs.agent_runtime_config = merge_patch_into_stored(
+                    prefs.agent_runtime_config if isinstance(prefs.agent_runtime_config, dict) else None,
+                    patch,
+                )
 
         if "embedding_provider_kind" in data:
             embed_raw = data["embedding_provider_kind"]

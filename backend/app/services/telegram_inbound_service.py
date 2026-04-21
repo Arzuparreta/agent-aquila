@@ -13,7 +13,9 @@ from app.core.config import settings
 from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
 from app.models.user import User
 from app.services.agent_attachments import attachments_from_agent_run_read
+from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
 from app.services.agent_rate_limit_service import AgentRateLimitService
+from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_service import AgentService
 from app.services.channel_binding import get_or_create_thread_for_channel
 from app.services.chat_service import (
@@ -109,7 +111,8 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
         )
         return
 
-    AgentRateLimitService.check(user.id)
+    agent_rt = await resolve_for_user(db, user)
+    AgentRateLimitService.check(user.id, max_runs_per_hour=agent_rt.agent_max_runs_per_hour)
     thread = await get_or_create_thread_for_channel(
         db,
         user,
@@ -121,12 +124,12 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
     await db.commit()
     await db.refresh(thread)
 
-    dropped = await preview_memory_flush_dropped(db, thread)
+    dropped = await preview_memory_flush_dropped(db, thread, runtime=agent_rt)
     if dropped:
         await AgentService.run_memory_flush_turn(
             db, user, thread_id=thread.id, dropped_messages=dropped
         )
-    prior = await history_for_agent(db, thread)
+    prior = await history_for_agent(db, thread, runtime=agent_rt)
     if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == text:
         prior = prior[:-1]
     rendered = render_user_message(text, [])
@@ -147,10 +150,17 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
             agent_run_id=early.id,
         )
         await db.commit()
+        if early.status == "completed":
+            await maybe_ingest_post_turn_memory(
+                db,
+                user,
+                user_message=rendered,
+                assistant_message=body or "",
+            )
         await send_telegram_text(telegram_chat_id, body or "Something went wrong.")
         return
 
-    use_async = settings.agent_async_runs and bool(settings.redis_url)
+    use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
     if use_async:
         run_row = await AgentService.create_pending_agent_run(db, user, rendered, thread_id=thread.id)
         run_id = int(run_row.id)
@@ -199,4 +209,11 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
         agent_run_id=run.id,
     )
     await db.commit()
+    if run.status == "completed":
+        await maybe_ingest_post_turn_memory(
+            db,
+            user,
+            user_message=rendered,
+            assistant_message=assistant_text or "",
+        )
     await send_telegram_text(telegram_chat_id, assistant_text or run.error or "")

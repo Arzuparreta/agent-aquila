@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.agent_runtime_config import AgentRuntimeConfigPartial, AgentRuntimeConfigResolved
 from app.services.ai_providers import PROVIDER_IDS, resolve_known_provider_id
 
 # Sentinel clients send in place of api_key to mean "reuse the key that is
@@ -45,6 +46,7 @@ class UserAISettingsRead(BaseModel):
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] = "auto"
     agent_processing_paused: bool = False
+    agent_runtime: AgentRuntimeConfigResolved
 
 
 class UserAISettingsUpdate(BaseModel):
@@ -60,6 +62,7 @@ class UserAISettingsUpdate(BaseModel):
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] | None = None
     agent_processing_paused: bool | None = None
+    agent_runtime: AgentRuntimeConfigPartial | None = None
     api_key: str | None = Field(
         default=None,
         description="When set, replaces the stored key. Send empty string to clear.",
@@ -217,6 +220,7 @@ class ProviderConfigsResponse(BaseModel):
     harness_mode: Literal["auto", "native", "prompted"] = "auto"
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] = "auto"
+    agent_runtime: AgentRuntimeConfigResolved
     configs: list[ProviderConfigRead] = Field(default_factory=list)
 
 

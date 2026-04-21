@@ -39,6 +39,8 @@ from app.schemas.chat import (
     ThreadRead,
 )
 from app.services.agent_attachments import attachments_from_agent_run_read
+from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
 from app.services.chat_service import (
@@ -71,6 +73,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/threads", tags=["threads"], dependencies=[Depends(get_current_user)])
 
 _AGENT_REPLY_PLACEHOLDER = "\u2026"
+
+
+async def _post_turn_memory_if_completed(
+    db: AsyncSession,
+    user: User,
+    *,
+    rendered_user_message: str,
+    assistant_text: str,
+    run_status: str,
+) -> None:
+    """Persist durable facts from the last exchange after a successful agent run."""
+    if run_status != "completed":
+        return
+    await maybe_ingest_post_turn_memory(
+        db,
+        user,
+        user_message=rendered_user_message,
+        assistant_message=assistant_text or "",
+    )
 
 
 async def _enqueue_chat_agent_turn(
@@ -322,7 +343,8 @@ async def send_message(
     thread = await get_thread(db, current_user, thread_id)
     if not thread:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
-    AgentRateLimitService.check(current_user.id)
+    agent_rt = await resolve_for_user(db, current_user)
+    AgentRateLimitService.check(current_user.id, max_runs_per_hour=agent_rt.agent_max_runs_per_hour)
     idem_key = _normalize_idempotency_key(payload.idempotency_key)
     if idem_key:
         existing = await get_message_by_client_token(db, thread, idem_key)
@@ -346,12 +368,12 @@ async def send_message(
     await db.refresh(user_msg)
     await db.refresh(thread)
 
-    dropped = await preview_memory_flush_dropped(db, thread)
+    dropped = await preview_memory_flush_dropped(db, thread, runtime=agent_rt)
     if dropped:
         await AgentService.run_memory_flush_turn(
             db, current_user, thread_id=thread.id, dropped_messages=dropped
         )
-    prior = await history_for_agent(db, thread)
+    prior = await history_for_agent(db, thread, runtime=agent_rt)
     # Drop the most recent user message we just persisted (it's already last in `prior`),
     # since the agent expects it as the live `message` arg.
     if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == payload.content:
@@ -386,9 +408,16 @@ async def send_message(
         await db.commit()
         await db.refresh(asst_msg)
         await db.refresh(thread)
+        await _post_turn_memory_if_completed(
+            db,
+            current_user,
+            rendered_user_message=rendered,
+            assistant_text=assistant_text,
+            run_status=early.status,
+        )
         return _message_send_result(thread, user_msg, asst_msg, early)
 
-    use_async = settings.agent_async_runs and bool(settings.redis_url)
+    use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
     if use_async:
         run_row = await AgentService.create_pending_agent_run(
             db, current_user, rendered, thread_id=thread.id
@@ -447,6 +476,13 @@ async def send_message(
             db, thread, agent_run_id=run_id_snap, run_read=read
         )
         await db.commit()
+        await _post_turn_memory_if_completed(
+            db,
+            current_user,
+            rendered_user_message=rendered,
+            assistant_text=read.assistant_reply or "",
+            run_status=read.status,
+        )
         asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
         assert asst_final is not None
         await db.refresh(thread)
@@ -482,6 +518,13 @@ async def send_message(
     await db.commit()
     await db.refresh(asst_msg)
     await db.refresh(thread)
+    await _post_turn_memory_if_completed(
+        db,
+        current_user,
+        rendered_user_message=rendered,
+        assistant_text=assistant_text,
+        run_status=run.status,
+    )
     return _message_send_result(thread, user_msg, asst_msg, run)
 
 
@@ -532,19 +575,19 @@ async def retry_failed_message(
             detail="No user message found to retry from",
         )
 
-    AgentRateLimitService.check(current_user.id)
-
     await db.delete(failed)
     await db.commit()
 
     refs = attachments_as_entity_refs(user_msg.attachments)
     rendered = render_user_message(user_msg.content, refs)
-    dropped = await preview_memory_flush_dropped(db, thread)
+    agent_rt = await resolve_for_user(db, current_user)
+    AgentRateLimitService.check(current_user.id, max_runs_per_hour=agent_rt.agent_max_runs_per_hour)
+    dropped = await preview_memory_flush_dropped(db, thread, runtime=agent_rt)
     if dropped:
         await AgentService.run_memory_flush_turn(
             db, current_user, thread_id=thread.id, dropped_messages=dropped
         )
-    prior = await history_for_agent(db, thread)
+    prior = await history_for_agent(db, thread, runtime=agent_rt)
     if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == user_msg.content:
         prior = prior[:-1]
 
@@ -577,9 +620,16 @@ async def retry_failed_message(
         await db.commit()
         await db.refresh(asst_msg)
         await db.refresh(thread)
+        await _post_turn_memory_if_completed(
+            db,
+            current_user,
+            rendered_user_message=rendered,
+            assistant_text=assistant_text,
+            run_status=early.status,
+        )
         return _message_send_result(thread, user_msg, asst_msg, early)
 
-    use_async = settings.agent_async_runs and bool(settings.redis_url)
+    use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
     if use_async:
         run_row = await AgentService.create_pending_agent_run(
             db, current_user, rendered, thread_id=thread.id
@@ -639,6 +689,13 @@ async def retry_failed_message(
             db, thread, agent_run_id=run_id_snap, run_read=read
         )
         await db.commit()
+        await _post_turn_memory_if_completed(
+            db,
+            current_user,
+            rendered_user_message=rendered,
+            assistant_text=read.assistant_reply or "",
+            run_status=read.status,
+        )
         asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
         assert asst_final is not None
         await db.refresh(thread)
@@ -675,4 +732,11 @@ async def retry_failed_message(
     await db.commit()
     await db.refresh(asst_msg)
     await db.refresh(thread)
+    await _post_turn_memory_if_completed(
+        db,
+        current_user,
+        rendered_user_message=rendered,
+        assistant_text=assistant_text,
+        run_status=run.status,
+    )
     return _message_send_result(thread, user_msg, asst_msg, run)

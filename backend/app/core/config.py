@@ -114,6 +114,14 @@ class Settings(BaseSettings):
     agent_memory_flush_max_transcript_chars: int = Field(
         default=16000, ge=1000, le=500_000, validation_alias="AGENT_MEMORY_FLUSH_MAX_TRANSCRIPT_CHARS"
     )
+    # After a completed agent reply, optionally extract durable facts from the last exchange (JSON LLM call).
+    agent_memory_post_turn_enabled: bool = Field(
+        default=True, validation_alias="AGENT_MEMORY_POST_TURN_ENABLED"
+    )
+    # heuristic = only when name/remember/preference signals match; always = every completed turn (higher cost).
+    agent_memory_post_turn_mode: str = Field(
+        default="heuristic", validation_alias="AGENT_MEMORY_POST_TURN_MODE"
+    )
     # Telegram bot (optional). Webhook path uses secret; leave empty to disable routes.
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str = Field(default="", validation_alias="TELEGRAM_WEBHOOK_SECRET")

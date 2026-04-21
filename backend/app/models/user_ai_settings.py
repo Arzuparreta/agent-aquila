@@ -56,6 +56,9 @@ class UserAISettings(Base, TimestampMixin):
     embedding_provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ranking_provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Partial overrides for ``config.settings`` agent_* keys (merged server-side).
+    agent_runtime_config: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror
     # stays in sync with user_ai_provider_configs (the canonical source).

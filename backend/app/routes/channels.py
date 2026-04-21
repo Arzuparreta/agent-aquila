@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.config import settings
+from app.services.agent_runtime_config_service import resolve_for_user
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
@@ -29,10 +30,11 @@ async def gateway_deliver(
     Requires ``AGENT_CHANNEL_GATEWAY_ENABLED=true`` so production instances do not
     expose this path accidentally.
     """
-    if not settings.agent_channel_gateway_enabled:
+    rt = await resolve_for_user(db, current_user)
+    if not rt.agent_channel_gateway_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel gateway is disabled")
 
-    AgentRateLimitService.check(current_user.id)
+    AgentRateLimitService.check(current_user.id, max_runs_per_hour=rt.agent_max_runs_per_hour)
     thread = await get_or_create_thread_for_channel(
         db,
         current_user,

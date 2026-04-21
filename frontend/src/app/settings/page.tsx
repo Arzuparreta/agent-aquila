@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { AgentRuntimeSection } from "@/components/features/ai-settings/agent-runtime-section";
 import { ProviderForm } from "@/components/features/ai-settings/provider-form";
 import { ProviderList } from "@/components/features/ai-settings/provider-list";
 import { useProviderConfigs } from "@/components/features/ai-settings/use-provider-configs";
@@ -177,6 +178,19 @@ export default function SettingsPage() {
                 dismissAriaLabel={t("chat.dismissToast")}
               />
             ) : null}
+          </Card>
+
+          <Card>
+            <h2 className="mb-1 text-base font-semibold">{t("settings.agentRuntime.title")}</h2>
+            <p className="mb-3 text-xs text-fg-subtle">{t("settings.agentRuntime.intro")}</p>
+            <AgentRuntimeSection
+              agentRuntime={api.agentRuntime}
+              formKey={api.agentRuntimeFormKey}
+              saving={api.agentRuntimeSaving}
+              error={api.agentRuntimeError}
+              patchAgentRuntime={api.patchAgentRuntime}
+              resetAllAgentRuntimeOverrides={api.resetAllAgentRuntimeOverrides}
+            />
           </Card>
 
           <TelemetrySection />

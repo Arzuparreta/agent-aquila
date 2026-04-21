@@ -17,15 +17,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.connector_connection import ConnectorConnection
 from app.models.user import User
+from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
 from app.services.agent_harness.selector import HarnessMode
 from app.services.agent_memory_service import AgentMemoryService
+from app.services.agent_runtime_config_service import merge_stored_with_env
 from app.services.user_time_context import build_datetime_context_section, normalize_time_format
+
+
+def _effective_runtime(rt: AgentRuntimeConfigResolved | None) -> AgentRuntimeConfigResolved:
+    return rt if rt is not None else merge_stored_with_env(None)
 
 _DEFAULT_SOUL = """# Persona
 
 You are the user's personal operations agent. The user is NON-TECHNICAL — never mention APIs, OAuth, JSON, model names, or any internal implementation. Speak like a friendly colleague.
 
-You operate inside a chat app and have full live access to the user's Gmail, Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams. You also have a small persistent memory (key/value scratchpad) for things the user wants you to remember across sessions, and a folder of skills (markdown recipes for common workflows).
+You operate inside a chat app and have full live access to the user's Gmail, Google Calendar, Google Drive, Microsoft Outlook, and Microsoft Teams. You also have a small persistent memory (key/value scratchpad) for things the user wants you to remember across sessions, and a folder of skills (markdown recipes for common workflows). Do not tell the user you have saved something to that memory unless you actually used your memory tool successfully in this turn.
 
 **Language:** Reply in the same language the user uses. Default to Spanish if unclear. Be concise.
 """
@@ -39,7 +45,9 @@ _DEFAULT_AGENTS = """# Rules of engagement
 
 Almost every action runs immediately (label, mute, spam, archive, calendar, Drive). The ONLY exception is outbound email: `propose_email_send` and `propose_email_reply` create approval cards the user must tap before anything is sent. Never describe a sent reply as if it had already gone out.
 
-When you discover a stable preference or a useful fact about the user, save it via `upsert_memory` (use keys like `memory.durable.*`, `memory.daily.YYYY-MM-DD`, `user.profile.*` — OpenClaw-style). Use `memory_search` or `recall_memory` before writing to avoid duplicates; use `memory_get` to read a full entry by key. When facing a multi-step workflow you've handled before, check `list_skills` and `load_skill` for a matching recipe.
+When you discover a stable preference or a useful fact about the user, save it via `upsert_memory` (use keys like `memory.durable.*`, `memory.daily.YYYY-MM-DD`, `user.profile.*`, `agent.identity.*` — OpenClaw-style). Use `memory_search` or `recall_memory` before writing to avoid duplicates; use `memory_get` to read a full entry by key. When facing a multi-step workflow you've handled before, check `list_skills` and `load_skill` for a matching recipe.
+
+**Do not tell the user** that something is saved, stored, or "in memory" unless you **successfully called `upsert_memory` in this same turn** and the tool returned success. If you have not called it yet, either call it before `final_answer` or avoid claiming persistence — the host may still extract some facts automatically, but you must not promise that without a successful tool result.
 
 To learn what this deployment offers or read workspace docs, use `describe_harness`, `list_workspace_files`, and `read_workspace_file` when the user asks how you work or how to change your behaviour (persona files live in the workspace).
 
@@ -192,6 +200,7 @@ def build_tools_section(
 def build_harness_facts_markdown(
     *,
     tool_count: int,
+    max_tool_steps: int,
     harness_mode: str,
     prompt_tier: str,
     tool_palette_mode: str,
@@ -204,7 +213,7 @@ def build_harness_facts_markdown(
         [
             "# Harness (runtime facts)",
             f"- Tools offered this turn: **{tool_count}**",
-            f"- Max tool steps per turn: **{settings.agent_max_tool_steps}**",
+            f"- Max tool steps per turn: **{max_tool_steps}**",
             f"- Harness mode (effective): **{harness_mode}**",
             f"- Prompt tier: **{prompt_tier}**",
             f"- Tool palette setting: **{tool_palette_mode}**",
@@ -280,10 +289,12 @@ async def build_system_prompt(
     time_format: str = "auto",
     prompt_tier: str | None = None,
     agent_processing_paused: bool = False,
+    runtime: AgentRuntimeConfigResolved | None = None,
 ) -> str:
     """Assemble system prompt: SOUL + AGENTS + optional facts + tools + memory + clock + thread hint."""
     del tenant_hint
-    tier = (prompt_tier or settings.agent_prompt_tier or "full").strip().lower()
+    rt = _effective_runtime(runtime)
+    tier = (prompt_tier or rt.agent_prompt_tier or "full").strip().lower()
     if tier not in ("full", "minimal", "none"):
         tier = "full"
 
@@ -293,22 +304,23 @@ async def build_system_prompt(
         tool_palette,
         harness_mode,
         prompt_tier=tier,
-        prompted_compact_json=settings.agent_prompted_compact_json,
+        prompted_compact_json=rt.agent_prompted_compact_json,
     )
 
     parts: list[str] = []
     if soul:
         parts.append(soul)
     parts.append(agents)
-    if settings.agent_include_harness_facts:
+    if rt.agent_include_harness_facts:
         provs = await linked_connector_providers(db, user.id)
         parts.append(
             build_harness_facts_markdown(
                 tool_count=len(tool_palette),
+                max_tool_steps=rt.agent_max_tool_steps,
                 harness_mode=str(harness_mode),
                 prompt_tier=tier,
-                tool_palette_mode=settings.agent_tool_palette,
-                connector_gated=settings.agent_connector_gated_tools,
+                tool_palette_mode=rt.agent_tool_palette,
+                connector_gated=rt.agent_connector_gated_tools,
                 linked_providers=provs,
                 agent_paused=agent_processing_paused,
             )
@@ -353,8 +365,10 @@ async def build_memory_flush_system_prompt(
     user_timezone: str | None = None,
     time_format: str = "auto",
     prompt_tier: str = "minimal",
+    runtime: AgentRuntimeConfigResolved | None = None,
 ) -> str:
     """Short system prompt for memory-only compaction flush runs."""
+    rt = _effective_runtime(runtime)
     tier = (prompt_tier or "minimal").strip().lower()
     if tier not in ("full", "minimal", "none"):
         tier = "minimal"
@@ -362,7 +376,7 @@ async def build_memory_flush_system_prompt(
         tool_palette,
         harness_mode,
         prompt_tier=tier,
-        prompted_compact_json=settings.agent_prompted_compact_json,
+        prompted_compact_json=rt.agent_prompted_compact_json,
     )
     parts: list[str] = [_MEMORY_FLUSH_RULES, tools]
     if tier != "none":

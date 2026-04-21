@@ -27,7 +27,9 @@ from app.models.agent_run import AgentRun
 from app.models.chat_thread import ChatThread
 from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
+from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
 from app.services.agent_rate_limit_service import AgentRateLimitService
+from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.llm_client import aclose_llm_http_client
@@ -58,8 +60,8 @@ HEARTBEAT_PROMPT_LIGHT = (
 )
 
 
-def _heartbeat_prompt() -> str:
-    if settings.agent_heartbeat_check_gmail:
+def _heartbeat_prompt(*, check_gmail: bool) -> str:
+    if check_gmail:
         return HEARTBEAT_PROMPT_WITH_GMAIL
     return HEARTBEAT_PROMPT_LIGHT
 
@@ -82,7 +84,12 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
             (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
         )
         for user in users:
-            if not AgentRateLimitService.try_consume_heartbeat(user.id):
+            rt = await resolve_for_user(db, user)
+            if not rt.agent_heartbeat_enabled:
+                continue
+            if not AgentRateLimitService.try_consume_heartbeat(
+                user.id, heartbeat_burst_per_hour=rt.agent_heartbeat_burst_per_hour
+            ):
                 summaries.append({"user_id": user.id, "status": "rate_limited"})
                 continue
             prefs = await UserAISettingsService.get_or_create(db, user)
@@ -90,7 +97,9 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
                 summaries.append({"user_id": user.id, "status": "paused"})
                 continue
             try:
-                run = await AgentService.run_agent(db, user, _heartbeat_prompt())
+                run = await AgentService.run_agent(
+                    db, user, _heartbeat_prompt(check_gmail=rt.agent_heartbeat_check_gmail)
+                )
                 summaries.append(
                     {
                         "user_id": user.id,
@@ -167,6 +176,13 @@ async def run_chat_agent_turn(
                 error=read.error,
             )
             await db.commit()
+            if read.status == "completed":
+                await maybe_ingest_post_turn_memory(
+                    db,
+                    user,
+                    user_message=run_row.user_message or "",
+                    assistant_message=read.assistant_reply or "",
+                )
             return {"ok": True, "run_id": run_id, "status": read.status}
     except Exception as exc:
         logger.exception("run_chat_agent_turn failed run_id=%s", run_id)

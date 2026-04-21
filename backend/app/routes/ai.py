@@ -40,6 +40,7 @@ from app.services.ai_providers.adapters import (
     safe_list_models,
     test_connection as adapter_test_connection,
 )
+from app.services.agent_runtime_config_service import runtime_from_row
 from app.services.user_ai_settings_service import UserAISettingsService, coerce_harness_mode
 from app.services.user_time_context import normalize_time_format
 
@@ -178,6 +179,7 @@ async def list_provider_configs(
         harness_mode=coerce_harness_mode(prefs),
         user_timezone=getattr(prefs, "user_timezone", None),
         time_format=normalize_time_format(getattr(prefs, "time_format", None)),  # type: ignore[arg-type]
+        agent_runtime=runtime_from_row(prefs),
         configs=[_row_to_read(r, active_kind=active) for r in rows],
     )
 

@@ -50,6 +50,60 @@ export type HarnessMode = "auto" | "native" | "prompted";
 
 export type TimeFormatPreference = "auto" | "12" | "24";
 
+export type AgentToolPalette = "full" | "compact";
+export type AgentPromptTier = "full" | "minimal" | "none";
+export type AgentMemoryPostTurnMode = "heuristic" | "always";
+
+/** Effective agent tunables after merging server env defaults with per-user overrides. */
+export type AgentRuntimeConfigResolved = {
+  agent_max_runs_per_hour: number;
+  agent_max_tool_steps: number;
+  agent_async_runs: boolean;
+  agent_heartbeat_burst_per_hour: number;
+  agent_heartbeat_enabled: boolean;
+  agent_heartbeat_minutes: number;
+  agent_heartbeat_check_gmail: boolean;
+  agent_tool_palette: AgentToolPalette;
+  agent_prompt_tier: AgentPromptTier;
+  agent_include_harness_facts: boolean;
+  agent_connector_gated_tools: boolean;
+  agent_prompted_compact_json: boolean;
+  agent_history_turns: number;
+  agent_thread_compact_after_pairs: number;
+  agent_memory_flush_enabled: boolean;
+  agent_memory_flush_max_steps: number;
+  agent_memory_flush_max_transcript_chars: number;
+  agent_memory_post_turn_enabled: boolean;
+  agent_memory_post_turn_mode: AgentMemoryPostTurnMode;
+  agent_channel_gateway_enabled: boolean;
+  agent_email_domain_allowlist: string;
+};
+
+/** PATCH payload: set a field to `null` to clear an override and fall back to env default. */
+export type AgentRuntimeConfigPartial = {
+  agent_max_runs_per_hour?: number | null;
+  agent_max_tool_steps?: number | null;
+  agent_async_runs?: boolean | null;
+  agent_heartbeat_burst_per_hour?: number | null;
+  agent_heartbeat_enabled?: boolean | null;
+  agent_heartbeat_minutes?: number | null;
+  agent_heartbeat_check_gmail?: boolean | null;
+  agent_tool_palette?: AgentToolPalette | null;
+  agent_prompt_tier?: AgentPromptTier | null;
+  agent_include_harness_facts?: boolean | null;
+  agent_connector_gated_tools?: boolean | null;
+  agent_prompted_compact_json?: boolean | null;
+  agent_history_turns?: number | null;
+  agent_thread_compact_after_pairs?: number | null;
+  agent_memory_flush_enabled?: boolean | null;
+  agent_memory_flush_max_steps?: number | null;
+  agent_memory_flush_max_transcript_chars?: number | null;
+  agent_memory_post_turn_enabled?: boolean | null;
+  agent_memory_post_turn_mode?: AgentMemoryPostTurnMode | null;
+  agent_channel_gateway_enabled?: boolean | null;
+  agent_email_domain_allowlist?: string | null;
+};
+
 export type UserAISettings = {
   provider_kind: string;
   base_url: string | null;
@@ -66,6 +120,8 @@ export type UserAISettings = {
   harness_mode: HarnessMode;
   user_timezone: string | null;
   time_format: TimeFormatPreference;
+  agent_processing_paused?: boolean;
+  agent_runtime?: AgentRuntimeConfigResolved;
 };
 
 export type ProviderFieldType = "text" | "password" | "url" | "select";
@@ -164,6 +220,8 @@ export type ProviderConfigsResponse = {
   harness_mode: HarnessMode;
   user_timezone: string | null;
   time_format: TimeFormatPreference;
+  /** Effective agent behavior settings (env defaults merged with per-user overrides). */
+  agent_runtime: AgentRuntimeConfigResolved;
   configs: ProviderConfig[];
 };
 

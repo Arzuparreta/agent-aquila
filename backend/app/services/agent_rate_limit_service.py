@@ -10,6 +10,14 @@ from app.core.config import settings
 _WINDOW_SEC = 3600
 
 
+def _hourly_limit(override: int | None) -> int:
+    return int(override) if override is not None else int(settings.agent_max_runs_per_hour)
+
+
+def _heartbeat_burst_limit(override: int | None) -> int:
+    return int(override) if override is not None else int(settings.agent_heartbeat_burst_per_hour)
+
+
 class AgentRateLimitService:
     _by_user: dict[int, deque[float]] = defaultdict(deque)
     # Separate bucket for proactive (worker-spawned) runs so the synchronous
@@ -17,12 +25,12 @@ class AgentRateLimitService:
     _proactive_by_user: dict[int, deque[float]] = defaultdict(deque)
 
     @classmethod
-    def check(cls, user_id: int) -> None:
+    def check(cls, user_id: int, *, max_runs_per_hour: int | None = None) -> None:
         now = time.monotonic()
         q = cls._by_user[user_id]
         while q and now - q[0] > _WINDOW_SEC:
             q.popleft()
-        limit = settings.agent_max_runs_per_hour
+        limit = _hourly_limit(max_runs_per_hour)
         if len(q) >= limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -31,14 +39,14 @@ class AgentRateLimitService:
         q.append(now)
 
     @classmethod
-    def try_consume_heartbeat(cls, user_id: int) -> bool:
+    def try_consume_heartbeat(cls, user_id: int, *, heartbeat_burst_per_hour: int | None = None) -> bool:
         """Non-raising counterpart used by the agent heartbeat worker.
 
         Returns ``True`` when the burst budget allows another background
         agent run for ``user_id``, ``False`` otherwise.
         ``agent_heartbeat_burst_per_hour=0`` disables the cap.
         """
-        limit = settings.agent_heartbeat_burst_per_hour
+        limit = _heartbeat_burst_limit(heartbeat_burst_per_hour)
         if limit <= 0:
             return True
         now = time.monotonic()

@@ -52,7 +52,9 @@ from app.services.agent_harness.prompted import (
 )
 from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_dispatch_table import AGENT_TOOL_DISPATCH
+from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
 from app.services.agent_memory_service import AgentMemoryService
+from app.services.agent_runtime_config_service import merge_stored_with_env, resolve_for_user
 from app.services.agent_replay import AgentReplayContext
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
@@ -131,18 +133,21 @@ def get_tool_palette(
     *,
     tenant_hint: str | None = None,
     palette_mode: str | None = None,
+    runtime: AgentRuntimeConfigResolved | None = None,
 ) -> list[dict[str, Any]]:
     """Synchronous palette (no connector gating). Prefer :func:`resolve_turn_tool_palette` in the loop."""
     del tenant_hint
     del user
-    mode = palette_mode if palette_mode is not None else settings.agent_tool_palette
+    rt = runtime if runtime is not None else merge_stored_with_env(None)
+    mode = palette_mode if palette_mode is not None else rt.agent_tool_palette
     return tools_for_palette_mode(mode)
 
 
 async def resolve_turn_tool_palette(db: AsyncSession, user: User) -> list[dict[str, Any]]:
     """Tool schemas for this run, optionally omitting tools for disconnected providers."""
-    base = tools_for_palette_mode(settings.agent_tool_palette)
-    if not settings.agent_connector_gated_tools:
+    rt = await resolve_for_user(db, user)
+    base = tools_for_palette_mode(rt.agent_tool_palette)
+    if not rt.agent_connector_gated_tools:
         return base
     filtered = await filter_tools_for_user_connectors(db, user.id, base)
     names = {t["function"]["name"] for t in filtered}
@@ -889,18 +894,19 @@ class AgentService:
         from app.services.capability_registry import describe_capabilities
 
         prefs = await UserAISettingsService.get_or_create(db, user)
+        rt = await resolve_for_user(db, user)
         provs = await linked_connector_providers(db, user.id)
         palette = await resolve_turn_tool_palette(db, user)
         return {
             "harness": "agent-aquila",
             "harness_mode_configured": coerce_harness_mode(prefs),
-            "tool_palette_mode": settings.agent_tool_palette,
+            "tool_palette_mode": rt.agent_tool_palette,
             "tool_count_this_turn": len(palette),
             "tool_names_sample": [t["function"]["name"] for t in palette[:40]],
             "linked_connector_providers": provs,
-            "agent_max_tool_steps": settings.agent_max_tool_steps,
-            "prompt_tier": settings.agent_prompt_tier,
-            "connector_gated_tools": settings.agent_connector_gated_tools,
+            "agent_max_tool_steps": rt.agent_max_tool_steps,
+            "prompt_tier": rt.agent_prompt_tier,
+            "connector_gated_tools": rt.agent_connector_gated_tools,
             "agent_processing_paused": bool(getattr(prefs, "agent_processing_paused", False)),
             "capabilities": describe_capabilities(),
         }
@@ -1180,7 +1186,8 @@ class AgentService:
         dropped_messages: list[dict[str, str]],
     ) -> None:
         """Persist facts from chat turns that are about to be dropped from context."""
-        if not dropped_messages or not settings.agent_memory_flush_enabled:
+        rt = await resolve_for_user(db, user)
+        if not dropped_messages or not rt.agent_memory_flush_enabled:
             return
         settings_row = await UserAISettingsService.get_or_create(db, user)
         if getattr(settings_row, "agent_processing_paused", False) or settings_row.ai_disabled:
@@ -1196,7 +1203,7 @@ class AgentService:
                 content = content[:7997] + "…"
             lines.append(f"{role.upper()}: {content}")
         transcript = "\n\n".join(lines)
-        max_c = settings.agent_memory_flush_max_transcript_chars
+        max_c = rt.agent_memory_flush_max_transcript_chars
         if len(transcript) > max_c:
             transcript = transcript[: max_c - 20] + "\n…[truncated]"
         root_trace = new_trace_id()
@@ -1225,6 +1232,7 @@ class AgentService:
             user_timezone=getattr(settings_row, "user_timezone", None),
             time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
             prompt_tier="minimal",
+            runtime=rt,
         )
         await AgentService._execute_agent_loop(
             db,
@@ -1235,7 +1243,7 @@ class AgentService:
             replay=None,
             tool_palette_override=palette,
             system_prompt_override=system_prompt,
-            max_tool_steps_override=settings.agent_memory_flush_max_steps,
+            max_tool_steps_override=rt.agent_memory_flush_max_steps,
         )
 
     # ------------------------------------------------------------------
@@ -1371,6 +1379,7 @@ class AgentService:
         message = run.user_message
         thread_id = run.chat_thread_id
         settings_row = await UserAISettingsService.get_or_create(db, user)
+        rt = await resolve_for_user(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user)
         turn_tools = (
             tool_palette_override
@@ -1416,8 +1425,9 @@ class AgentService:
                 thread_context_hint=thread_context_hint,
                 user_timezone=getattr(settings_row, "user_timezone", None),
                 time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
-                prompt_tier=settings.agent_prompt_tier,
+                prompt_tier=rt.agent_prompt_tier,
                 agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
+                runtime=rt,
             )
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
@@ -1454,7 +1464,7 @@ class AgentService:
             max_steps = (
                 max_tool_steps_override
                 if max_tool_steps_override is not None
-                else settings.agent_max_tool_steps
+                else rt.agent_max_tool_steps
             )
             for _ in range(max_steps):
                 parse_errors: list[str] = []
@@ -1514,8 +1524,9 @@ class AgentService:
                         thread_context_hint=thread_context_hint,
                         user_timezone=getattr(settings_row, "user_timezone", None),
                         time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
-                        prompt_tier=settings.agent_prompt_tier,
+                        prompt_tier=rt.agent_prompt_tier,
                         agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
+                        runtime=rt,
                     )
                     conversation[0] = {"role": "system", "content": system_prompt}
                     _llm_t0_fb = time.monotonic()

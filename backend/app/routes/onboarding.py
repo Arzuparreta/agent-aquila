@@ -12,6 +12,7 @@ from app.core.deps import get_current_user
 from app.models.connector_connection import ConnectorConnection
 from app.models.user import User
 from app.schemas.cockpit import OnboardingStatusRead
+from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.user_ai_settings_service import UserAISettingsService
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"], dependencies=[Depends(get_current_user)])
@@ -42,6 +43,7 @@ async def onboarding_status(
             redis_ok = False
 
     prefs = await UserAISettingsService.get_or_create(db, current_user)
+    rt = await resolve_for_user(db, current_user)
     has_ai_provider = bool(prefs.active_provider_kind) and not prefs.ai_disabled
 
     cc = await db.execute(
@@ -57,5 +59,5 @@ async def onboarding_status(
         has_ai_provider=has_ai_provider,
         connector_count=connector_count,
         telegram_configured=bool((settings.telegram_bot_token or "").strip()),
-        agent_async_runs=bool(settings.agent_async_runs and (settings.redis_url or "").strip()),
+        agent_async_runs=bool(rt.agent_async_runs and (settings.redis_url or "").strip()),
     )

@@ -11,7 +11,12 @@ from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import PendingProposalRead
 from app.services.audit_service import create_audit_log
-from app.services.capability_policy import enforce_email_recipients_allowed, risk_tier_for_kind
+from app.services.agent_runtime_config_service import resolve_for_user
+from app.services.capability_policy import (
+    enforce_email_recipients_allowed,
+    frozen_allowlist_from_csv,
+    risk_tier_for_kind,
+)
 from app.services.pending_execution_service import PendingExecutionService
 
 
@@ -49,7 +54,9 @@ class ProposalService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Proposal is not pending")
 
         if prop.kind in ("email_send", "email_reply"):
-            enforce_email_recipients_allowed(dict(prop.payload))
+            rt = await resolve_for_user(db, user)
+            allow = frozen_allowlist_from_csv(rt.agent_email_domain_allowlist)
+            enforce_email_recipients_allowed(dict(prop.payload), allowlist=allow)
 
         try:
             await PendingExecutionService.execute(db, user, prop.kind, dict(prop.payload), commit=False)

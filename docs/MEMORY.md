@@ -64,16 +64,6 @@ you, newest first, with importance and tags. You can delete any row from
 there; the agent will simply re-create it next time if it still considers it
 worth remembering.
 
-## Privacy
-
-Memories live in **your** Postgres only. They are never sent to the LLM
-provider unless the agent explicitly includes them in a prompt (which is what
-the warmup does). If you want to wipe everything, truncate the table:
-
-```bash
-docker compose exec db psql -U app -d app -c "TRUNCATE agent_memories;"
-```
-
 ## OpenClaw-style conventions (keys)
 
 The agent is encouraged to use predictable key prefixes (same spirit as OpenClaw `MEMORY.md`, `USER.md`, `memory/YYYY-MM-DD.md`):
@@ -87,4 +77,33 @@ Use optional `tags` for the same concepts when filtering with `recall_memory`.
 ## Memory flush before compaction
 
 When chat history is trimmed (see `AGENT_HISTORY_TURNS` / `AGENT_THREAD_COMPACT_AFTER_PAIRS`), the backend may run a **memory flush** turn first: a short internal agent run that only has memory tools, fed the transcript of messages about to be dropped. Configure with `AGENT_MEMORY_FLUSH_*` env vars.
+
+### How this differs from OpenClaw’s “flush before compaction”
+
+OpenClaw runs a silent pass **before** summarizing so that important context in the conversation block being compacted is written to disk first. Aquila’s pre-trim flush is **similar in spirit** but **only receives the oldest segment** of the thread: the messages that no longer fit in the sliding window (`preview_memory_flush_dropped` in `chat_service.py`). It does **not** include the **latest** user/assistant exchange until those turns have aged out of the window. **Short threads** (fewer messages than the history cap) never produce a dropped segment, so **no** flush runs at all.
+
+That is why durable facts stated in the **current** turn (for example “your name is Agente Áquila”) are **not** covered by this mechanism alone. For that, see **post-turn memory ingestion** below.
+
+## Post-turn memory ingestion
+
+After a completed agent reply, the backend may run a **structured extraction** pass (single JSON completion, not the full tool loop) on the **last user message + assistant reply**, then **upsert** into `agent_memories`. This aligns with OpenClaw’s idea that important dialogue should be **persisted explicitly**, without relying on the main chat turn to call `upsert_memory`.
+
+Configure with **deployment defaults** (environment variables) and optional **per-user overrides** in the app (**Settings → Agent behavior**), stored in `user_ai_settings.agent_runtime_config`. See [AGENT_SETTINGS.md](./AGENT_SETTINGS.md).
+
+| Env | Meaning |
+| --- | --- |
+| `AGENT_MEMORY_POST_TURN_ENABLED` | Default `true`. Set `false` to disable the extra LLM call entirely. |
+| `AGENT_MEMORY_POST_TURN_MODE` | `heuristic` (default): only run extraction when heuristics suggest memory-worthy content (name assignment, “remember”, preferences, etc.). `always`: run extraction after every completed turn (higher cost). |
+
+When `AGENT_MEMORY_POST_TURN_MODE=heuristic`, most turns skip extraction without calling the provider.
+
+## Privacy
+
+Memories live in **your** Postgres. **Warmup** (injecting existing rows into the system prompt) only repeats what the chat already sent to the provider in that turn. **Post-turn extraction** (when enabled and not skipped by heuristics) sends the last user + assistant strings to the provider for a JSON extraction call. The main agent loop also sends full chat context to the provider as usual.
+
+To wipe all stored memories:
+
+```bash
+docker compose exec db psql -U app -d app -c "TRUNCATE agent_memories;"
+```
 

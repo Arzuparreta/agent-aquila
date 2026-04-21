@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { isExtraField } from "@/lib/ai-providers";
 import {
+  AgentRuntimeConfigPartial,
+  AgentRuntimeConfigResolved,
   AIProvider,
   HarnessMode,
   ListModelsResponse,
@@ -14,7 +16,8 @@ import {
   ProviderConfigUpsertRequest,
   STORED_API_KEY_SENTINEL,
   TestConnectionResult,
-  TimeFormatPreference
+  TimeFormatPreference,
+  UserAISettings
 } from "@/types/api";
 
 /**
@@ -92,6 +95,10 @@ export type UseProviderConfigsApi = {
   harnessMode: HarnessMode;
   userTimezone: string;
   timeFormat: TimeFormatPreference;
+  agentRuntime: AgentRuntimeConfigResolved | null;
+  agentRuntimeSaving: boolean;
+  agentRuntimeError: string | null;
+  agentRuntimeFormKey: number;
 
   selectedKind: string | null;
   selectedConfig: ProviderConfig | null;
@@ -135,6 +142,8 @@ export type UseProviderConfigsApi = {
   updateClassifyModelForKind: (kind: string, classify_model: string) => Promise<void>;
   refreshModels: () => Promise<void>;
   reload: () => Promise<void>;
+  patchAgentRuntime: (patch: AgentRuntimeConfigPartial) => Promise<void>;
+  resetAllAgentRuntimeOverrides: () => Promise<void>;
 };
 
 type Options = {
@@ -162,6 +171,10 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   const [harnessMode, setHarnessModeState] = useState<HarnessMode>("auto");
   const [userTimezone, setUserTimezoneState] = useState<string>("");
   const [timeFormat, setTimeFormatState] = useState<TimeFormatPreference>("auto");
+  const [agentRuntime, setAgentRuntime] = useState<AgentRuntimeConfigResolved | null>(null);
+  const [agentRuntimeSaving, setAgentRuntimeSaving] = useState(false);
+  const [agentRuntimeError, setAgentRuntimeError] = useState<string | null>(null);
+  const [agentRuntimeFormKey, setAgentRuntimeFormKey] = useState(0);
 
   const [selectedKind, setSelectedKind] = useState<string | null>(null);
   const [draftByKind, setDraftByKind] = useState<Record<string, ProviderDraft>>({});
@@ -237,6 +250,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
       setHarnessModeState(data.harness_mode ?? "auto");
       setUserTimezoneState(data.user_timezone ?? "");
       setTimeFormatState(data.time_format ?? "auto");
+      setAgentRuntime(data.agent_runtime);
       // After reload, drop drafts for kinds whose saved row matches what we
       // just got back (the save probably succeeded). Keep drafts for kinds
       // that diverge so an in-flight edit isn't silently wiped.
@@ -592,6 +606,40 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     await reload();
   }, [reload]);
 
+  const patchAgentRuntime = useCallback(async (patch: AgentRuntimeConfigPartial) => {
+    setAgentRuntimeSaving(true);
+    setAgentRuntimeError(null);
+    try {
+      await apiFetch<UserAISettings>("/ai/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ agent_runtime: patch })
+      });
+      await reload();
+      setAgentRuntimeFormKey((k) => k + 1);
+    } catch (error) {
+      setAgentRuntimeError(error instanceof Error ? error.message : "Could not save agent settings");
+    } finally {
+      setAgentRuntimeSaving(false);
+    }
+  }, [reload]);
+
+  const resetAllAgentRuntimeOverrides = useCallback(async () => {
+    setAgentRuntimeSaving(true);
+    setAgentRuntimeError(null);
+    try {
+      await apiFetch<UserAISettings>("/ai/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ agent_runtime: null })
+      });
+      await reload();
+      setAgentRuntimeFormKey((k) => k + 1);
+    } catch (error) {
+      setAgentRuntimeError(error instanceof Error ? error.message : "Could not reset agent settings");
+    } finally {
+      setAgentRuntimeSaving(false);
+    }
+  }, [reload]);
+
   const refreshModels = useCallback(async () => {
     if (!selectedKind) return;
     setLoadingModels(true);
@@ -640,6 +688,10 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     harnessMode,
     userTimezone,
     timeFormat,
+    agentRuntime,
+    agentRuntimeSaving,
+    agentRuntimeError,
+    agentRuntimeFormKey,
     selectedKind,
     selectedConfig,
     selectedProvider,
@@ -678,6 +730,8 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     refreshRankingModels,
     updateClassifyModelForKind,
     refreshModels,
-    reload
+    reload,
+    patchAgentRuntime,
+    resetAllAgentRuntimeOverrides
   };
 }

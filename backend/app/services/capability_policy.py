@@ -31,12 +31,17 @@ def kind_is_auto_apply(kind: str) -> bool:
     return False
 
 
-def _email_allowlist_from_settings() -> frozenset[str]:
-    raw = (settings.agent_email_domain_allowlist or "").strip()
-    if not raw:
+def frozen_allowlist_from_csv(raw: str) -> frozenset[str]:
+    """Comma-separated domains or full addresses (lowercased). Empty string → no restriction when checked."""
+    s = (raw or "").strip()
+    if not s:
         return frozenset()
-    parts = {p.strip().lower() for p in raw.split(",") if p.strip()}
+    parts = {p.strip().lower() for p in s.split(",") if p.strip()}
     return frozenset(parts)
+
+
+def _email_allowlist_from_settings() -> frozenset[str]:
+    return frozen_allowlist_from_csv(settings.agent_email_domain_allowlist or "")
 
 
 def email_recipient_allowed(address: str, allowlist: frozenset[str] | None = None) -> bool:
@@ -48,9 +53,15 @@ def email_recipient_allowed(address: str, allowlist: frozenset[str] | None = Non
     return domain in allowed or addr in allowed
 
 
-def enforce_email_recipients_allowed(payload: dict) -> None:
-    """Raise 400 if AGENT_EMAIL_DOMAIN_ALLOWLIST is set and a recipient is not allowed."""
-    allow = _email_allowlist_from_settings()
+def enforce_email_recipients_allowed(
+    payload: dict, *, allowlist: frozenset[str] | None = None
+) -> None:
+    """Raise 400 if an allowlist is set and a recipient is not allowed.
+
+    When ``allowlist`` is ``None``, uses the server env default. Callers may pass
+    a per-user merged allowlist from :func:`~app.services.agent_runtime_config_service.resolve_for_user`.
+    """
+    allow = allowlist if allowlist is not None else _email_allowlist_from_settings()
     if not allow:
         return
     to_raw = payload.get("to")
