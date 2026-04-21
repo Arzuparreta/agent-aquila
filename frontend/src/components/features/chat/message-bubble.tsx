@@ -9,6 +9,9 @@ import { KeyDecryptErrorCard } from "./cards/key-decrypt-error-card";
 import { OAuthCard } from "./cards/oauth-card";
 import { ProviderErrorCard } from "./cards/provider-error-card";
 
+/** Matches backend ``_AGENT_REPLY_PLACEHOLDER`` (single Unicode ellipsis). */
+const AGENT_REPLY_PLACEHOLDER = "\u2026";
+
 function formatTime(iso: string, localeTag: string): string {
   return new Date(iso).toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
 }
@@ -37,6 +40,8 @@ export function MessageBubble({
     message.role === "system" &&
     !hasRetryableErrorCard &&
     Boolean(message.content?.trim());
+  const isAssistantPlaceholder =
+    message.role === "assistant" && message.content === AGENT_REPLY_PLACEHOLDER;
 
   if (isEvent) {
     return (
@@ -49,7 +54,11 @@ export function MessageBubble({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className="flex max-w-[85%] flex-col gap-2">
-        {message.content ? (
+        {isAssistantPlaceholder ? (
+          <div className="animate-pulse rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted shadow-sm">
+            {t("chat.threadView.thinking")}
+          </div>
+        ) : message.content ? (
           <div
             className={`rounded-2xl px-4 py-2 text-base shadow-sm ${
               isUser
@@ -82,9 +91,11 @@ export function MessageBubble({
             {t("chat.message.retry")}
           </button>
         ) : null}
-        <div className={`text-xs text-fg-subtle ${isUser ? "text-right" : "text-left"}`}>
-          {formatTime(message.created_at, localeTag)}
-        </div>
+        {!isAssistantPlaceholder ? (
+          <div className={`text-xs text-fg-subtle ${isUser ? "text-right" : "text-left"}`}>
+            {formatTime(message.created_at, localeTag)}
+          </div>
+        ) : null}
       </div>
     </div>
   );

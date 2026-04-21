@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
-import { waitForRunTerminalWebSocket } from "@/lib/realtime";
+import { waitForRunTerminal } from "@/lib/realtime";
 import {
   recordTelemetryAgentRunFailed,
   recordTelemetryAssistantWsError,
@@ -67,37 +67,56 @@ export function ChatThreadView({
     []
   );
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const rows = await apiFetch<ChatMessage[]>(`/threads/${thread.id}/messages`);
-      setMessages(rows);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("chat.threadView.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [thread.id, t]);
+  const reload = useCallback(
+    async (opts?: { silent?: boolean }): Promise<ChatMessage[] | null> => {
+      if (!opts?.silent) {
+        setLoading(true);
+      }
+      try {
+        const rows = await apiFetch<ChatMessage[]>(`/threads/${thread.id}/messages`);
+        setMessages(rows);
+        if (!opts?.silent) {
+          setError(null);
+        }
+        return rows;
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : t("chat.threadView.loadFailed"));
+        return null;
+      } finally {
+        if (!opts?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [thread.id, t]
+  );
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
+  const pendingRunId = useMemo(() => findPendingAgentRunId(messages), [messages]);
+  const composerBusy = sending || pendingRunId != null;
+  const showEphemeralThinking = sending && pendingRunId == null;
+
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, sending]);
+  }, [messages.length, sending, pendingRunId]);
 
   const runAgentRunFollowUp = useCallback(
     async (runId: number) => {
       setError(null);
       try {
-        const run = await waitForRunTerminalWebSocket(runId);
+        const run = await waitForRunTerminal(runId);
         if (run.status === "failed") {
           recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
         }
-        await reload();
+        const refreshed = await reload({ silent: true });
+        if (refreshed != null) {
+          setError(null);
+        }
       } catch (err) {
+        const rows = await reload({ silent: true });
         if (err instanceof ApiError) {
           if (err.status === 408) {
             recordTelemetryAssistantWsTimeout();
@@ -105,8 +124,15 @@ export function ChatThreadView({
             recordTelemetryAssistantWsError({ runId, status: err.status, message: err.message });
           }
         }
-        setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));
-        await reload();
+        if (rows == null) {
+          return;
+        }
+        const stillPending = findPendingAgentRunId(rows) != null;
+        if (stillPending) {
+          setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));
+        } else {
+          setError(null);
+        }
       }
     },
     [reload, t]
@@ -241,7 +267,23 @@ export function ChatThreadView({
         {loading ? <div className="text-center text-base text-fg-subtle">{t("common.loading")}</div> : null}
         {error ? (
           <div className="mx-auto mb-3 max-w-md rounded-md bg-rose-900/40 px-3 py-2 text-base text-rose-100">
-            {error}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <span className="min-w-0 flex-1">{error}</span>
+              <button
+                type="button"
+                className="shrink-0 rounded-md bg-rose-100/20 px-3 py-1 text-sm font-semibold text-rose-50 hover:bg-rose-100/30"
+                onClick={() => {
+                  void (async () => {
+                    const rows = await reload({ silent: true });
+                    if (rows != null && findPendingAgentRunId(rows) == null) {
+                      setError(null);
+                    }
+                  })();
+                }}
+              >
+                {t("common.retry")}
+              </button>
+            </div>
           </div>
         ) : null}
         {!loading && messages.length === 0 ? (
@@ -256,17 +298,17 @@ export function ChatThreadView({
               message={m}
               onMessageUpdate={updateMessage}
               onRetryFailedMessage={retryFailedMessage}
-              retryDisabled={sending}
+              retryDisabled={composerBusy}
             />
           ))}
-          {sending ? (
+          {showEphemeralThinking ? (
             <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted">
               {t("chat.threadView.thinking")}
             </div>
           ) : null}
         </div>
       </div>
-      <ChatComposer onSend={onSend} disabled={sending} />
+      <ChatComposer onSend={onSend} disabled={composerBusy} />
     </div>
   );
 }
