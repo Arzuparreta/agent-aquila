@@ -11,6 +11,28 @@ import { useTranslation } from "@/lib/i18n";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, "");
 
+function messageFromFastApiDetail(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return "";
+        const rec = item as { msg?: unknown; loc?: unknown };
+        const msg = typeof rec.msg === "string" ? rec.msg : "";
+        if (!Array.isArray(rec.loc)) return msg;
+        const loc = rec.loc
+          .filter((x) => x !== "body" && typeof x === "string")
+          .join(".");
+        return loc ? `${loc}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join("; ") : null;
+  }
+  return null;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { setToken } = useAuth();
@@ -31,7 +53,23 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError(t("login.invalidCredentials"));
+        let message: string | null = null;
+        const ct = response.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          try {
+            const errBody: unknown = await response.json();
+            message = messageFromFastApiDetail(errBody);
+          } catch {
+            /* ignore malformed JSON */
+          }
+        }
+        if (!message) {
+          message =
+            response.status === 401
+              ? t("login.invalidCredentials")
+              : t("login.requestFailed", { status: String(response.status) });
+        }
+        setError(message);
         return;
       }
 

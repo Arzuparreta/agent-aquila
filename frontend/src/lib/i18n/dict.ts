@@ -60,6 +60,7 @@ const en = {
   "login.password": "Password",
   "login.signIn": "Sign In",
   "login.invalidCredentials": "Invalid credentials",
+  "login.requestFailed": "The server returned HTTP {status}. If you recently updated the app, run database migrations (for example `alembic upgrade head`) and try again.",
   "login.networkError":
     "Could not reach the server. If you use Docker, run `docker compose up` and open the app on the same host/port as in your compose file.",
   "auth.redirecting": "Redirecting...",
@@ -727,6 +728,8 @@ const es: Record<keyof typeof en, string> = {
   "login.password": "Contraseña",
   "login.signIn": "Entrar",
   "login.invalidCredentials": "Credenciales no válidas",
+  "login.requestFailed":
+    "El servidor respondió con HTTP {status}. Si acabas de actualizar la app, ejecuta las migraciones de base de datos (por ejemplo `alembic upgrade head`) e inténtalo de nuevo.",
   "login.networkError":
     "No se pudo contactar con el servidor. Si usas Docker, ejecuta `docker compose up` y abre la app en el mismo host y puerto que en tu archivo compose.",
   "auth.redirecting": "Redirigiendo...",

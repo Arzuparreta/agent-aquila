@@ -23,6 +23,11 @@ def _email_domain_or_400(email: str) -> str:
     return parts[1].lower()
 
 
+def _normalize_login_email(email: str) -> str:
+    """Canonical form for lookup (avoids EmailStr normalization differing from stored `User.email`)."""
+    return str(email).strip().lower()
+
+
 class AuthService:
     @staticmethod
     async def register(db: AsyncSession, payload: RegisterRequest) -> User:
@@ -32,7 +37,7 @@ class AuthService:
                 detail="Registration is disabled.",
             )
 
-        email_str = str(payload.email).strip()
+        email_str = _normalize_login_email(payload.email)
         allow_domains = _registration_domain_allowset(settings.registration_email_domain_allowlist)
         if allow_domains:
             dom = _email_domain_or_400(email_str)
@@ -50,7 +55,7 @@ class AuthService:
                     detail="No additional user accounts are allowed.",
                 )
 
-        existing = await db.execute(select(User).where(User.email == email_str))
+        existing = await db.execute(select(User).where(func.lower(User.email) == email_str))
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
@@ -66,7 +71,8 @@ class AuthService:
 
     @staticmethod
     async def login(db: AsyncSession, payload: LoginRequest) -> TokenResponse:
-        result = await db.execute(select(User).where(User.email == payload.email))
+        email_key = _normalize_login_email(payload.email)
+        result = await db.execute(select(User).where(func.lower(User.email) == email_key))
         user = result.scalar_one_or_none()
         if not user or not verify_password(payload.password, user.hashed_password):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
