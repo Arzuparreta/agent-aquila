@@ -11,6 +11,7 @@ import pytest
 from app.services.agent_service import AgentService
 from app.services.agent_tools import (
     _AUTO_APPLY_TOOLS,
+    _INTROSPECTION_TOOLS,
     _PROPOSAL_TOOLS,
     _READ_ONLY_TOOLS,
     _TERMINATOR_TOOLS,
@@ -29,9 +30,9 @@ def test_proposal_tool_set_is_email_only() -> None:
 
 def test_every_tool_in_one_bucket() -> None:
     """Every tool definition lives in exactly one bucket — read-only,
-    auto-apply, proposal, or terminator. The four buckets must be disjoint
-    and together cover the full ``AGENT_TOOLS`` palette."""
-    read = _names(_READ_ONLY_TOOLS)
+    auto-apply, proposal, terminator, or harness introspection (read-only).
+    The buckets must be disjoint and together cover the full ``AGENT_TOOLS`` palette."""
+    read = _names(_READ_ONLY_TOOLS) | _names(_INTROSPECTION_TOOLS)
     auto = _names(_AUTO_APPLY_TOOLS)
     proposals = _names(_PROPOSAL_TOOLS)
     terminators = _names(_TERMINATOR_TOOLS)

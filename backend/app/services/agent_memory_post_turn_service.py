@@ -16,8 +16,15 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent_run import AgentRun
 from app.models.user import User
 from app.services.agent_memory_service import AgentMemoryService
+from app.services.agent_trace import (
+    EV_POST_TURN_COMPLETED,
+    EV_POST_TURN_SKIPPED,
+    EV_POST_TURN_STARTED,
+    emit_trace_event,
+)
 from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.ai_providers import provider_kind_requires_api_key
 from app.services.llm_client import LLMClient
@@ -42,6 +49,17 @@ _USER_MEMORY_HINT = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# User confirms a prior naming / identity assignment without repeating "agent" keywords
+# (e.g. "Vale pues ese es tu nombre!").
+_NAME_ASSIGNMENT_CONFIRM = re.compile(
+    r"(?:^|\b)(?:"
+    r"ese\s+es\s+tu\s+nombre|ese\s+es\s+el\s+nombre|as[ií]\s+te\s+llamo|"
+    r"qu[eé]date\s+con\s+ese|quedamos\s+en\s+eso|vale\s+.*\bnombre\b|"
+    r"that'?s\s+your\s+name|confirmed|deal\b"
+    r")(?:\b|$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 # Assistant text: claimed persistence (often without a real tool call).
 _ASSISTANT_MEMORY_PROMISE = re.compile(
     r"(?:^|\b)(?:guardo\s+en\s+memoria|lo\s+guardo|guardar[eé]\s+en\s+memoria|"
@@ -55,16 +73,28 @@ Return ONLY a JSON object with this exact shape:
 {"memories":[{"key":"string","content":"string","importance":0}]}
 
 Rules:
-- "memories" may be an empty array if nothing durable should be stored.
+- Use "memories": [] only when the exchange has no durable fact (pure small talk, no preferences, no naming).
 - Keys: lowercase, dot-separated segments, max 200 characters. Use prefixes such as
   user.profile.*, agent.identity.*, memory.durable.*, prefs.* — never raw PII buckets.
 - Content: short plain text; one main fact per entry.
 - importance: integer 0-10 (use 8-10 when the user explicitly asked to remember, or for stable identity).
 - Do NOT store passwords, API keys, tokens, or full third-party message bodies.
+- **Identity (required when applicable):** If the user assigns, confirms, or agrees on what the assistant
+  should be called, or the assistant states or accepts a display name in the reply (e.g. "Agente Áquila",
+  "Agent Aquila"), you MUST emit at least one row under agent.identity.* (e.g. agent.identity.display_name_es,
+  agent.identity.display_name_en, or agent.identity.names with both in content). Use importance 8-10.
 - If the user assigns the assistant display names in Spanish and/or English, use keys like
   agent.identity.display_name_es and agent.identity.display_name_en, or a single agent.identity.names
   with both names in the content.
 - Do not duplicate the same fact under many keys; prefer one canonical key per fact."""
+
+_EXTRACTION_SYSTEM_RETRY = """You extract durable facts. A previous pass returned an empty list; fix it if the exchange clearly establishes identity or preferences.
+
+Return ONLY JSON: {"memories":[{"key":"string","content":"string","importance":0}]}
+
+If the USER or ASSISTANT assigns, confirms, or states the assistant's name (including nicknames like
+"Agente Áquila"), you MUST include at least one agent.identity.* row with importance 8-10 unless there is
+literally no name or preference in the text. Otherwise return {"memories":[]}."""
 
 
 @dataclass(frozen=True)
@@ -84,6 +114,8 @@ def heuristic_wants_post_turn_extraction(user_message: str, assistant_message: s
         return True
     if _ASSISTANT_MEMORY_PROMISE.search(a):
         return True
+    if len(u) <= 600 and _NAME_ASSIGNMENT_CONFIRM.search(u):
+        return True
     # Short identity-style turns (e.g. "Eres Agente Áquila en español...")
     if len(u) <= 600 and (
         re.search(r"\b(agente|agent|águila|aquila|assistant|asistente)\b", u, re.I)
@@ -91,6 +123,27 @@ def heuristic_wants_post_turn_extraction(user_message: str, assistant_message: s
     ):
         return True
     return False
+
+
+async def _emit_post_turn_trace(
+    db: AsyncSession,
+    run_id: int | None,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    if run_id is None:
+        return
+    row = await db.get(AgentRun, run_id)
+    if not row or not row.root_trace_id:
+        return
+    await emit_trace_event(
+        db,
+        run_id=run_id,
+        event_type=event_type,
+        trace_id=row.root_trace_id,
+        payload={"schema": "agent_trace.v1", **payload},
+    )
+    await db.commit()
 
 
 def _parse_json_object(raw: str) -> dict[str, Any]:
@@ -145,10 +198,21 @@ async def maybe_ingest_post_turn_memory(
     *,
     user_message: str,
     assistant_message: str,
+    run_id: int | None = None,
 ) -> PostTurnMemoryResult:
-    """Optionally extract and upsert memories from the last exchange. Never raises."""
+    """Optionally extract and upsert memories from the last exchange. Never raises.
+
+    When ``run_id`` is set, emits ``post_turn.*`` rows into ``agent_trace_events``
+    (same trace id as the agent run) for observability.
+    """
     rt = await resolve_for_user(db, user)
     if not rt.agent_memory_post_turn_enabled:
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "disabled", "mode": None, "upserts": 0},
+        )
         return PostTurnMemoryResult(True, "disabled", 0)
 
     mode = (rt.agent_memory_post_turn_mode or "heuristic").strip().lower()
@@ -158,25 +222,57 @@ async def maybe_ingest_post_turn_memory(
     u = (user_message or "").strip()
     a = (assistant_message or "").strip()
     if not a:
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "empty_assistant", "mode": mode, "upserts": 0},
+        )
         return PostTurnMemoryResult(True, "empty_assistant", 0)
 
     if mode == "heuristic" and not heuristic_wants_post_turn_extraction(u, a):
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "heuristic_skip", "mode": mode, "upserts": 0},
+        )
         return PostTurnMemoryResult(True, "heuristic_skip", 0)
 
     settings_row = await UserAISettingsService.get_or_create(db, user)
     if getattr(settings_row, "agent_processing_paused", False) or settings_row.ai_disabled:
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "ai_paused_or_disabled", "mode": mode, "upserts": 0},
+        )
         return PostTurnMemoryResult(True, "ai_paused_or_disabled", 0)
 
     api_key = await UserAISettingsService.get_api_key(db, user)
     if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "no_api_key", "mode": mode, "upserts": 0},
+        )
         return PostTurnMemoryResult(True, "no_api_key", 0)
+
+    await _emit_post_turn_trace(
+        db,
+        run_id,
+        EV_POST_TURN_STARTED,
+        {"mode": mode, "user_message_chars": len(u), "assistant_message_chars": len(a)},
+    )
 
     user_block = u if u else "(empty)"
     assistant_block = a if a else "(empty)"
     user_prompt = (
         "Extract durable memories from this single exchange only.\n\n"
         f"USER:\n{user_block}\n\nASSISTANT:\n{assistant_block}\n\n"
-        'If nothing should be persisted, return exactly: {"memories":[]}'
+        'If the exchange only contains greetings or questions with no durable fact, return {"memories":[]}. '
+        "If identity or preferences are established, include them in memories."
     )
 
     try:
@@ -192,15 +288,61 @@ async def maybe_ingest_post_turn_memory(
         )
     except Exception:
         logger.exception("post_turn_memory: LLM extraction failed user_id=%s", user.id)
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "llm_error", "mode": mode, "upserts": 0},
+        )
         return PostTurnMemoryResult(False, "llm_error", 0)
 
     payload = _parse_json_object(raw)
     items = _normalize_memory_items(payload)
+    if not items and heuristic_wants_post_turn_extraction(u, a):
+        logger.info(
+            "post_turn_memory: retry_after_empty user_id=%s mode=%s",
+            user.id,
+            mode,
+        )
+        try:
+            raw_retry = await LLMClient.chat_completion(
+                api_key,
+                settings_row,
+                messages=[
+                    {"role": "system", "content": _EXTRACTION_SYSTEM_RETRY},
+                    {
+                        "role": "user",
+                        "content": user_prompt
+                        + "\n\n[Retry: previous extraction returned []. "
+                        "If this dialogue names or confirms the assistant, emit agent.identity.* rows.]",
+                    },
+                ],
+                temperature=0.0,
+                response_format_json=True,
+            )
+        except Exception:
+            logger.exception("post_turn_memory: LLM retry failed user_id=%s", user.id)
+            await _emit_post_turn_trace(
+                db,
+                run_id,
+                EV_POST_TURN_SKIPPED,
+                {"reason": "llm_error", "mode": mode, "upserts": 0},
+            )
+            return PostTurnMemoryResult(False, "llm_error", 0)
+        payload = _parse_json_object(raw_retry)
+        items = _normalize_memory_items(payload)
+
     if not items:
         logger.info(
             "post_turn_memory: no items user_id=%s mode=%s reason=empty_extraction",
             user.id,
             mode,
+        )
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "empty_extraction", "mode": mode, "upserts": 0},
         )
         return PostTurnMemoryResult(True, "empty_extraction", 0)
 
@@ -227,5 +369,11 @@ async def maybe_ingest_post_turn_memory(
         user.id,
         mode,
         upserts,
+    )
+    await _emit_post_turn_trace(
+        db,
+        run_id,
+        EV_POST_TURN_COMPLETED,
+        {"reason": "ok", "mode": mode, "upserts": upserts},
     )
     return PostTurnMemoryResult(False, "ok", upserts)

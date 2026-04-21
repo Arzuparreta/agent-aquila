@@ -18,6 +18,8 @@ database of your emails — it's a private notebook the agent owns.
 | HTTP API    | `backend/app/routes/memory.py` — `GET/POST/DELETE /memory`          |
 | Agent tools | `upsert_memory`, `recall_memory`, `memory_search`, `memory_get`, `list_memory`, `delete_memory` in `agent_tools.py` |
 | Settings UI | **Settings → Memoria del agente** (`frontend/src/components/features/memory/memory-section.tsx`) |
+| Diagnostics | [MEMORY_POST_TURN_DIAGNOSTICS.md](./MEMORY_POST_TURN_DIAGNOSTICS.md) — SQL + trace event queries |
+
 
 Each row is `(user_id, key, content, importance, tags, embedding,
 embedding_model, meta, created_at, updated_at)` with a `UNIQUE (user_id, key)`

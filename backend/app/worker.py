@@ -182,6 +182,7 @@ async def run_chat_agent_turn(
                     user,
                     user_message=run_row.user_message or "",
                     assistant_message=read.assistant_reply or "",
+                    run_id=run_id,
                 )
             return {"ok": True, "run_id": run_id, "status": read.status}
     except Exception as exc:

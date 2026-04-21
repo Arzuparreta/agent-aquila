@@ -25,6 +25,14 @@ def test_heuristic_remembers_and_names() -> None:
         "Eres Agente Áquila en español y Agent Aquila en inglés.",
         "Perfecto, lo tendré en cuenta.",
     )
+    assert heuristic_wants_post_turn_extraction(
+        "Vale pues ese es tu nombre!",
+        "¡Perfecto! A partir de ahora soy el Agente Áquila.",
+    )
+    assert heuristic_wants_post_turn_extraction(
+        "That's your name — I'll use it.",
+        "Sounds good.",
+    )
     assert not heuristic_wants_post_turn_extraction(
         "¿Qué hora es?",
         "Son las tres.",

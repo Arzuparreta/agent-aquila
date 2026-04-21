@@ -20,6 +20,10 @@ EV_TOOL_STARTED = "tool.started"
 EV_TOOL_FINISHED = "tool.finished"
 EV_RUN_COMPLETED = "run.completed"
 EV_RUN_FAILED = "run.failed"
+# Post-turn durable memory extraction (correlates with run_id / root_trace_id).
+EV_POST_TURN_STARTED = "post_turn.started"
+EV_POST_TURN_SKIPPED = "post_turn.skipped"
+EV_POST_TURN_COMPLETED = "post_turn.completed"
 
 
 def new_trace_id() -> str:

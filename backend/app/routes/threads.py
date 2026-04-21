@@ -82,6 +82,7 @@ async def _post_turn_memory_if_completed(
     rendered_user_message: str,
     assistant_text: str,
     run_status: str,
+    agent_run_id: int | None = None,
 ) -> None:
     """Persist durable facts from the last exchange after a successful agent run."""
     if run_status != "completed":
@@ -91,6 +92,7 @@ async def _post_turn_memory_if_completed(
         user,
         user_message=rendered_user_message,
         assistant_message=assistant_text or "",
+        run_id=agent_run_id,
     )
 
 
@@ -414,6 +416,7 @@ async def send_message(
             rendered_user_message=rendered,
             assistant_text=assistant_text,
             run_status=early.status,
+            agent_run_id=early.id,
         )
         return _message_send_result(thread, user_msg, asst_msg, early)
 
@@ -482,6 +485,7 @@ async def send_message(
             rendered_user_message=rendered,
             assistant_text=read.assistant_reply or "",
             run_status=read.status,
+            agent_run_id=run_id_snap,
         )
         asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
         assert asst_final is not None
@@ -524,6 +528,7 @@ async def send_message(
         rendered_user_message=rendered,
         assistant_text=assistant_text,
         run_status=run.status,
+        agent_run_id=run.id,
     )
     return _message_send_result(thread, user_msg, asst_msg, run)
 
@@ -626,6 +631,7 @@ async def retry_failed_message(
             rendered_user_message=rendered,
             assistant_text=assistant_text,
             run_status=early.status,
+            agent_run_id=early.id,
         )
         return _message_send_result(thread, user_msg, asst_msg, early)
 
@@ -695,6 +701,7 @@ async def retry_failed_message(
             rendered_user_message=rendered,
             assistant_text=read.assistant_reply or "",
             run_status=read.status,
+            agent_run_id=run_id_snap,
         )
         asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
         assert asst_final is not None
@@ -738,5 +745,6 @@ async def retry_failed_message(
         rendered_user_message=rendered,
         assistant_text=assistant_text,
         run_status=run.status,
+        agent_run_id=run.id,
     )
     return _message_send_result(thread, user_msg, asst_msg, run)
