@@ -107,7 +107,11 @@ from app.services.proposal_service import proposal_to_read
 from app.services.skills_service import _skills_dir
 from app.services.skills_service import list_skills as _list_skills
 from app.services.skills_service import load_skill as _load_skill
-from app.services.user_ai_settings_service import UserAISettingsService, coerce_harness_mode
+from app.services.user_ai_settings_service import (
+    UserAISettingsService,
+    coerce_harness_mode,
+    merge_calendar_timezone_from_user_prefs,
+)
 from app.services.user_time_context import normalize_time_format, session_time_result
 
 # Provider id sets used by ``_resolve_connection``.
@@ -620,7 +624,8 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
-        return await create_calendar_event(provider, creds, args)
+        payload = await merge_calendar_timezone_from_user_prefs(db, user, args)
+        return await create_calendar_event(provider, creds, payload)
 
     @staticmethod
     async def _tool_calendar_update_event(
@@ -628,7 +633,8 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
-        return await update_calendar_event(provider, creds, args)
+        payload = await merge_calendar_timezone_from_user_prefs(db, user, args)
+        return await update_calendar_event(provider, creds, payload)
 
     @staticmethod
     async def _tool_calendar_delete_event(

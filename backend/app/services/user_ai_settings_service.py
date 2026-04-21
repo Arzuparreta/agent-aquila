@@ -14,7 +14,7 @@ All writes go through :class:`AIProviderConfigService` so the canonical
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,25 @@ from app.services.ai_providers import normalize_provider_id
 from app.services.user_time_context import normalize_time_format
 
 HarnessMode = Literal["auto", "native", "prompted"]
+
+
+async def merge_calendar_timezone_from_user_prefs(
+    db: AsyncSession, user: User, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """When ``timezone`` is absent, use the user's IANA zone from AI settings.
+
+    Google/Graph interpret ``dateTime`` as *wall time in ``timeZone``*. If we
+    default to UTC while the model supplies local clock times (e.g. "12:00"
+    meaning noon at home), the calendar shows an offset (often +1h or +2h in
+    Europe)."""
+    out = dict(payload)
+    if str(out.get("timezone") or "").strip():
+        return out
+    prefs = await UserAISettingsService.get_or_create(db, user)
+    tz = getattr(prefs, "user_timezone", None)
+    if tz and str(tz).strip():
+        out["timezone"] = str(tz).strip()
+    return out
 
 
 def coerce_harness_mode(row: UserAISettings) -> HarnessMode:

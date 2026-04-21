@@ -399,8 +399,10 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         "calendar_create_event",
         "Create a new event on the user's Google Calendar. Auto-applies. "
         "Inputs: ``summary`` (required), ``start_iso`` (required, RFC3339 "
-        "datetime), ``end_iso`` (required), optional ``description``, "
-        "``timezone`` (defaults to UTC), ``connection_id``.",
+        "datetime — **local wall time** in ``timezone``), ``end_iso`` "
+        "(required), optional ``description``, ``timezone`` (IANA, e.g. "
+        "``Europe/Madrid``; if omitted, the user's **Agent time zone** from "
+        "Settings is used, else UTC), ``connection_id``.",
         {
             **_CONNECTION_ID,
             "summary": {"type": "string", "maxLength": 500},
@@ -416,7 +418,8 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         "calendar_update_event",
         "Update an existing Google Calendar event. Auto-applies. "
         "Inputs: ``event_id`` (required) plus any of ``summary`` / "
-        "``description`` / ``start_iso`` / ``end_iso`` / ``timezone``.",
+        "``description`` / ``start_iso`` / ``end_iso`` / ``timezone`` (same "
+        "rules as ``calendar_create_event``).",
         {
             **_CONNECTION_ID,
             "event_id": {"type": "string"},

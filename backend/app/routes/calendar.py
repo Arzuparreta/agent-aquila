@@ -25,6 +25,7 @@ from app.services.connectors.calendar_adapters import (
 from app.services.connectors.gcal_client import CalendarAPIError, GoogleCalendarClient
 from app.services.oauth import TokenManager
 from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
+from app.services.user_ai_settings_service import merge_calendar_timezone_from_user_prefs
 
 router = APIRouter(prefix="/calendar", tags=["calendar"], dependencies=[Depends(get_current_user)])
 
@@ -95,6 +96,7 @@ async def create_event(
 ) -> dict[str, Any]:
     row = await _resolve(db, current_user, connection_id)
     _token, creds, provider = await _creds(db, row)
+    payload = await merge_calendar_timezone_from_user_prefs(db, current_user, payload)
     return await create_calendar_event(provider, creds, payload)
 
 
@@ -108,7 +110,8 @@ async def patch_event(
 ) -> dict[str, Any]:
     row = await _resolve(db, current_user, connection_id)
     _token, creds, provider = await _creds(db, row)
-    return await update_calendar_event(provider, creds, {**payload, "event_id": event_id})
+    merged = await merge_calendar_timezone_from_user_prefs(db, current_user, payload)
+    return await update_calendar_event(provider, creds, {**merged, "event_id": event_id})
 
 
 @router.delete("/events/{event_id}")
