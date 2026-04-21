@@ -129,6 +129,10 @@ def run_migrations_online() -> None:
     async def run() -> None:
         async with connectable.connect() as connection:
             await connection.run_sync(do_run_migrations)
+            # SQLAlchemy 2 async connections autobegin; exiting the context without an
+            # explicit commit rolls back the whole migration transaction. Without this,
+            # `alembic upgrade head` logs upgrades but `alembic_version` and DDL stay stale.
+            await connection.commit()
         await connectable.dispose()
 
     import asyncio
