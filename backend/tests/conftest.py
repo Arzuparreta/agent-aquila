@@ -52,6 +52,12 @@ async def db_session() -> AsyncSession:
 
 
 @pytest_asyncio.fixture
+async def crm_user(db_session: AsyncSession, aquila_user: User) -> User:
+    """Alias used by older tests; same as ``aquila_user`` once DB fixtures bind."""
+    return aquila_user
+
+
+@pytest_asyncio.fixture
 async def aquila_user(db_session: AsyncSession) -> User:
     """User with Ollama provider so semantic search does not require an API key."""
     user = User(

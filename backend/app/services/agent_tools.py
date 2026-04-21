@@ -506,13 +506,13 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         "Auto-applies. "
         "Inputs: ``key`` (required, short snake_case slug), ``content`` "
         "(required, free-form text — keep it under a few sentences), "
-        "optional ``importance`` (0 default; 1+ pins it to the top of "
-        "the system prompt warmup), optional ``tags`` (array of short "
-        "labels for grouping).",
+            "optional ``importance`` (0 default; higher values pin closer to the top of "
+        "the system prompt warmup; use 8–10 for identity the user asked to remember), "
+        "optional ``tags`` (array of short labels for grouping).",
         {
             "key": {"type": "string", "maxLength": 200},
             "content": {"type": "string"},
-            "importance": {"type": "integer", "minimum": 0, "maximum": 5},
+            "importance": {"type": "integer", "minimum": 0, "maximum": 10},
             "tags": {"type": "array", "items": {"type": "string"}},
         },
         required=["key", "content"],
@@ -727,13 +727,15 @@ _TERMINATOR_TOOLS: list[dict[str, Any]] = [
         FINAL_ANSWER_TOOL_NAME,
         "Use to deliver the FINAL natural-language reply to the user. This "
         "is the terminator — calling it ends the turn. Call it EXACTLY "
-        "ONCE, AFTER you have gathered enough information from the other "
-        "tools (or you are certain no data tool is needed for a "
-        "chitchat-style message). "
+        "ONCE per assistant message that contains tool calls, AFTER any "
+        "non-terminator tools you need (e.g. ``upsert_memory`` to save a "
+        "name or preference — emit those tool calls **first**, then "
+        "``final_answer`` **last** in the same assistant message when possible). "
+        "If the API only allows one tool per step, call ``upsert_memory`` in "
+        "one step and ``final_answer`` in the next. "
         "Do NOT call this on turn 1 for a factual question about the "
         "user's data — first call the appropriate data tool to ground the "
         "answer, then call this with a summary that cites the result. "
-        "Do NOT call any other tool in the same response as this one. "
         "Inputs: ``text`` (required, the reply shown verbatim to the user, "
         "in the same language they used — default Spanish, conversational, "
         "concise), optional ``citations`` (array of bare ids referenced "
