@@ -41,7 +41,8 @@ _USER_MEMORY_HINT = re.compile(
     r"(?:^|\b)(?:remember|recuerda|recuerde|recuerdas|don'?t\s+forget|no\s+olvides|"
     r"prefer|prefiero|prefieres|preference|preferencia|"
     r"my\s+name\s+is|me\s+llamo|ll[aá]mame|ll[aá]mate|your\s+name\s+is|tu\s+nombre|"
-    r"te\s+llamas|how\s+should\s+i\s+call|c[oó]mo\s+te\s+llamo|"
+    r"te\s+llamas|te\s+llamar[áa]s|te\s+llamaras\b|how\s+should\s+i\s+call|c[oó]mo\s+te\s+llamo|"
+    r"a\s+partir\s+de\s+ahora|desde\s+ahora\s+te\s+llam|"
     r"\byou\s+are\s+|\beres\b|you'?re\s+the\s+|"
     r"call\s+me|call\s+yourself|"
     r"guarda\s+en\s+memoria|guardar\s+en\s+memoria|"
@@ -66,7 +67,8 @@ _ASSISTANT_MEMORY_PROMISE = re.compile(
     r"i['’]?ll\s+save|i\s+will\s+save|saved\s+to\s+memory|"
     r"lo\s+memorizo|memorizar[eé]|"
     r"lo\s+recordar[eé]|recordar[eé]\s+para|"
-    r"i['’]?ll\s+remember|remember\s+for)(?:\b|$)",
+    r"i['’]?ll\s+remember|remember\s+for|"
+    r"a\s+partir\s+de\s+ahora\s+me\s+llamar|me\s+llamar[ée]|me\s+llamare)(?:\b|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -118,10 +120,14 @@ def heuristic_wants_post_turn_extraction(user_message: str, assistant_message: s
         return True
     if len(u) <= 600 and _NAME_ASSIGNMENT_CONFIRM.search(u):
         return True
-    # Short identity-style turns (e.g. "Eres Agente Áquila en español...")
+    # Short identity-style turns (e.g. "Eres Agente Áquila en español..." or "te llamarás X")
     if len(u) <= 600 and (
         re.search(r"\b(agente|agent|águila|aquila|assistant|asistente)\b", u, re.I)
-        and re.search(r"\b(eres|you are|llam|name|nombre|call)\b", u, re.I)
+        and re.search(
+            r"\b(eres|you are|llam|name|nombre|call|llamar[áa]s|llamaras|llamarte)\b",
+            u,
+            re.I,
+        )
     ):
         return True
     return False

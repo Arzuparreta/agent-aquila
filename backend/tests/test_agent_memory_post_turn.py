@@ -47,6 +47,11 @@ def test_heuristic_remembers_and_names() -> None:
         "ok",
         "Lo recordaré para nuestras próximas conversaciones.",
     )
+    # "a partir de ahora te llamarás …" was not matched by older regexes → no host nudge, post_turn heuristic_skip.
+    assert heuristic_wants_post_turn_extraction(
+        "a partir de ahora te llamarás Agente Águila (Agent Aquila in english)!",
+        "¡Entendido! A partir de ahora me llamaré **Agente Águila**.",
+    )
 
 
 def test_parse_json_object_fenced() -> None:
