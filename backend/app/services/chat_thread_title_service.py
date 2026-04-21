@@ -26,12 +26,22 @@ _THREAD_TITLE_PLACEHOLDERS_FOLDED: frozenset[str] = frozenset(
 
 _AGENT_REPLY_PLACEHOLDER = "\u2026"
 
-_TITLE_SYSTEM = """You name chat conversations for a sidebar list.
-Return exactly one short title: about 3–8 words, plain text, no quotes, one line.
+_TITLE_SYSTEM = """You label chat threads for a sidebar, the same way ChatGPT does.
+Return exactly one short title: about 2–6 words (max 8), plain text, no quotes, one line.
+
+What the title must capture:
+- The topic or intent of the USER's message: what they are asking about, looking for, or discussing.
+- Think noun phrases or topic labels: e.g. a question about the user's own info → something like "Personal info" / "Información personal" (in the conversation language), NOT a play-by-play of the reply.
+- Use the ASSISTANT text only to disambiguate the user's topic if the user message is vague.
+
+Strict bans:
+- Do NOT describe what the assistant or agent did (no "Agent reveals…", "Assistant explains…", "Bot responds…", "The model…").
+- Do NOT use meta narration about the conversation; name the subject matter instead.
+
 Language rules (critical):
-- Write the title in the same language as the conversation below.
-- If the user mixes two or more languages, use the language of the first substantive user message—do not translate to English or any other language.
-- Do not output labels like "Title:"."""
+- Write the title in the same language as the conversation.
+- If the user mixes languages, follow the first substantive user message—do not translate to another language.
+- Do not output prefixes like "Title:"."""
 
 _TITLE_USER_TEMPLATE = """USER:
 {user}

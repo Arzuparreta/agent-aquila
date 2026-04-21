@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { pollThreadUntilTitleReady } from "@/lib/chat-thread-title";
 import { waitForRunTerminal } from "@/lib/realtime";
 import {
   recordTelemetryAgentRunFailed,
@@ -115,10 +116,14 @@ export function ChatThreadView({
         if (refreshed != null) {
           setError(null);
           try {
-            const updatedThread = await apiFetch<ChatThread>(`/threads/${thread.id}`);
-            onThreadUpdated(updatedThread);
+            const updatedThread = await pollThreadUntilTitleReady(thread.id, (id) =>
+              apiFetch<ChatThread>(`/threads/${id}`)
+            );
+            if (updatedThread != null) {
+              onThreadUpdated(updatedThread);
+            }
           } catch {
-            // Sidebar title may lag until next list refresh; chat messages are already current.
+            // Sidebar may lag; messages are already current.
           }
         }
       } catch (err) {
@@ -138,6 +143,16 @@ export function ChatThreadView({
           setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));
         } else {
           setError(null);
+          try {
+            const updatedThread = await pollThreadUntilTitleReady(thread.id, (id) =>
+              apiFetch<ChatThread>(`/threads/${id}`)
+            );
+            if (updatedThread != null) {
+              onThreadUpdated(updatedThread);
+            }
+          } catch {
+            // ignore
+          }
         }
       }
     },
