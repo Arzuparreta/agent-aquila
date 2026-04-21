@@ -38,5 +38,7 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
+    # Client-generated idempotency token for deduplicating retried HTTP sends.
+    client_token: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
 
     thread = relationship("ChatThread", back_populates="messages")

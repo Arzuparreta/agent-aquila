@@ -5,6 +5,8 @@ import {
   recordTelemetryNetworkError,
   recordTelemetrySlowRequest,
 } from "@/lib/telemetry/record";
+import { dictionaries, type TranslationKey } from "@/lib/i18n/dict";
+import { DEFAULT_LOCALE, STORAGE_KEY, type Locale } from "@/lib/i18n/types";
 
 /** Same-origin `/api/v1` is proxied by Next (see next.config.ts). Override with full URL only if needed. */
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, "");
@@ -35,14 +37,33 @@ function looksLikeHtml(body: string): boolean {
   return t.startsWith("<") || body.includes("<!DOCTYPE") || body.includes("<html");
 }
 
-function fallbackMessage(status: number): string {
+function detectLocale(): Locale {
+  if (typeof window === "undefined") return DEFAULT_LOCALE;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw === "en" || raw === "es" ? raw : DEFAULT_LOCALE;
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
+
+function t(key: TranslationKey, params?: Record<string, string | number>): string {
+  const template = dictionaries[detectLocale()][key] ?? dictionaries[DEFAULT_LOCALE][key] ?? key;
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (m, p: string) => {
+    const v = params[p];
+    return v === undefined || v === null ? m : String(v);
+  });
+}
+
+function fallbackMessage(status: number): { message: string; category: string } {
   if (status === 401) {
-    return "Unauthorized";
+    return { message: "Unauthorized", category: "unauthorized" };
   }
   if (status >= 500) {
-    return `Server error (${status}). The API or Next.js proxy failed—check Docker logs for \`backend\` and \`frontend\`, and that BACKEND_INTERNAL_URL reaches the API.`;
+    return { message: t("api.error.server", { status }), category: "server_error" };
   }
-  return `Request failed (${status})`;
+  return { message: t("api.error.requestFailed", { status }), category: "request_failed" };
 }
 
 function messageFromFastApiDetail(detail: unknown): string | null {
@@ -78,7 +99,11 @@ async function readErrorPayload(
   const raw = (await response.text()).trim();
 
   if (!raw || raw === "Internal Server Error" || looksLikeHtml(raw)) {
-    return { message: fallbackMessage(response.status), detail: undefined };
+    const fallback = fallbackMessage(response.status);
+    return {
+      message: fallback.message,
+      detail: { kind: "proxy_or_empty_error", status: response.status, category: fallback.category },
+    };
   }
 
   try {
@@ -89,14 +114,19 @@ async function readErrorPayload(
       return { message: fromDetail, detail };
     }
     if (detail !== undefined) {
-      return { message: fallbackMessage(response.status), detail };
+      const fallback = fallbackMessage(response.status);
+      return { message: fallback.message, detail };
     }
   } catch {
     // not JSON — fall through and use short text if reasonable
   }
 
   if (raw.length > 500) {
-    return { message: fallbackMessage(response.status), detail: undefined };
+    const fallback = fallbackMessage(response.status);
+    return {
+      message: fallback.message,
+      detail: { kind: "long_non_json_error", status: response.status, category: fallback.category },
+    };
   }
 
   return { message: raw, detail: undefined };

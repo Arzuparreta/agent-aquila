@@ -47,6 +47,13 @@ export function ChatThreadView({
   const scrollerRef = useRef<HTMLDivElement>(null);
   const optimisticIdRef = useRef(0);
   const refs = useChatReferences();
+  const createIdempotencyKey = useCallback(
+    () =>
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    []
+  );
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -88,14 +95,32 @@ export function ChatThreadView({
     []
   );
 
+  const reconcileUncertainSend = useCallback(
+    async (content: string, idempotencyKey: string): Promise<boolean> => {
+      const rows = await apiFetch<ChatMessage[]>(`/threads/${thread.id}/messages`);
+      const matched = rows.some((m) => m.role === "user" && m.client_token === idempotencyKey);
+      if (!matched) {
+        const recentUser = [...rows].reverse().find((m) => m.role === "user");
+        if (!recentUser || recentUser.content !== content) {
+          return false;
+        }
+      }
+      setMessages(rows);
+      setError(t("chat.threadView.sendRecovered"));
+      return true;
+    },
+    [thread.id, t]
+  );
+
   const retryFailedMessage = useCallback(
     async (failedMessageId: number) => {
       setSending(true);
       setError(null);
       try {
+        const retryKey = createIdempotencyKey();
         const result = await apiFetch<ChatSendResult>(
           `/threads/${thread.id}/messages/${failedMessageId}/retry`,
-          { method: "POST" }
+          { method: "POST", headers: { "X-Idempotency-Key": retryKey } }
         );
         setMessages((prev) => {
           const without = prev.filter((m) => m.id !== failedMessageId);
@@ -115,6 +140,7 @@ export function ChatThreadView({
               recordTelemetryAssistantPollTimeout();
             }
             setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.retryFailed"));
+            await reload();
           }
           return;
         }
@@ -126,11 +152,12 @@ export function ChatThreadView({
         setSending(false);
       }
     },
-    [thread.id, onThreadUpdated, pollAgentRunUntilDone, reload, t]
+    [createIdempotencyKey, thread.id, onThreadUpdated, pollAgentRunUntilDone, reload, t]
   );
 
   const onSend = useCallback(
     async (content: string, references: EntityRef[]) => {
+      const idempotencyKey = createIdempotencyKey();
       const optimisticId = (optimisticIdRef.current -= 1);
       const optimistic: ChatMessage = {
         id: optimisticId,
@@ -146,7 +173,7 @@ export function ChatThreadView({
       try {
         const result = await apiFetch<ChatSendResult>(`/threads/${thread.id}/messages`, {
           method: "POST",
-          body: JSON.stringify({ content, references })
+          body: JSON.stringify({ content, references, idempotency_key: idempotencyKey })
         });
         setMessages((prev) => {
           const without = prev.filter((m) => m.id !== optimisticId);
@@ -167,6 +194,7 @@ export function ChatThreadView({
               recordTelemetryAssistantPollTimeout();
             }
             setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.sendFailed"));
+            await reload();
           }
           return;
         }
@@ -174,6 +202,15 @@ export function ChatThreadView({
         else setError(null);
         refs.clear();
       } catch (err) {
+        try {
+          const recovered = await reconcileUncertainSend(content, idempotencyKey);
+          if (recovered) {
+            refs.clear();
+            return;
+          }
+        } catch {
+          // Keep original send error flow below if reconciliation also fails.
+        }
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         setError(err instanceof ApiError ? err.message : t("chat.threadView.sendFailed"));
         throw err;
@@ -181,7 +218,7 @@ export function ChatThreadView({
         setSending(false);
       }
     },
-    [thread.id, onThreadUpdated, pollAgentRunUntilDone, refs, reload, t]
+    [createIdempotencyKey, thread.id, onThreadUpdated, pollAgentRunUntilDone, reconcileUncertainSend, refs, reload, t]
   );
 
   const updateMessage = useCallback((updated: ChatMessage) => {

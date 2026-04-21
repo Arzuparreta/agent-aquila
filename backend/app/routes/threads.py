@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -41,6 +41,8 @@ from app.services.chat_service import (
     append_message,
     apply_agent_run_to_placeholder,
     attachments_as_entity_refs,
+    first_assistant_message_after_id,
+    get_message_by_client_token,
     get_message_by_agent_run,
     get_or_create_entity_thread,
     get_thread,
@@ -56,12 +58,62 @@ from app.services.chat_service import (
     thread_to_read,
 )
 from app.services.job_queue import enqueue
+from app.models.agent_run import AgentRun
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/threads", tags=["threads"], dependencies=[Depends(get_current_user)])
 
 _AGENT_REPLY_PLACEHOLDER = "\u2026"
+
+
+def _normalize_idempotency_key(raw: str | None) -> str | None:
+    key = (raw or "").strip()
+    if not key:
+        return None
+    return key[:128]
+
+
+async def _result_from_idempotent_send(
+    db: AsyncSession,
+    thread,
+    user_msg,
+) -> MessageSendResult | None:
+    asst_msg = await first_assistant_message_after_id(db, thread, user_msg.id)
+    if not asst_msg:
+        return None
+    pending = False
+    if asst_msg.agent_run_id is not None:
+        run = await db.get(AgentRun, asst_msg.agent_run_id)
+        pending = bool(run and run.status in ("pending", "running"))
+    return MessageSendResult(
+        thread=thread_to_read(thread),
+        user_message=message_to_read(user_msg),
+        assistant_message=message_to_read(asst_msg),
+        error=None,
+        agent_run_pending=pending,
+    )
+
+
+async def _result_from_idempotent_retry(
+    db: AsyncSession,
+    thread,
+    assistant_msg,
+) -> MessageSendResult | None:
+    user_msg = await latest_prior_user_message(db, thread, assistant_msg.id)
+    if not user_msg:
+        return None
+    pending = False
+    if assistant_msg.agent_run_id is not None:
+        run = await db.get(AgentRun, assistant_msg.agent_run_id)
+        pending = bool(run and run.status in ("pending", "running"))
+    return MessageSendResult(
+        thread=thread_to_read(thread),
+        user_message=message_to_read(user_msg),
+        assistant_message=message_to_read(assistant_msg),
+        error=None,
+        agent_run_pending=pending,
+    )
 
 
 def _message_send_result(
@@ -221,6 +273,13 @@ async def send_message(
     if not thread:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
     AgentRateLimitService.check(current_user.id)
+    idem_key = _normalize_idempotency_key(payload.idempotency_key)
+    if idem_key:
+        existing = await get_message_by_client_token(db, thread, idem_key)
+        if existing and existing.role == "user":
+            replay = await _result_from_idempotent_send(db, thread, existing)
+            if replay is not None:
+                return replay
 
     user_attachments = (
         [r.model_dump() for r in payload.references] if payload.references else None
@@ -231,6 +290,7 @@ async def send_message(
         role="user",
         content=payload.content,
         attachments=user_attachments,
+        client_token=idem_key,
     )
     await db.commit()
     await db.refresh(user_msg)
@@ -374,6 +434,7 @@ async def send_message(
 async def retry_failed_message(
     thread_id: int,
     message_id: int,
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MessageSendResult:
@@ -385,6 +446,13 @@ async def retry_failed_message(
     thread = await get_thread(db, current_user, thread_id)
     if not thread:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
+    idem_key = _normalize_idempotency_key(x_idempotency_key)
+    if idem_key:
+        existing = await get_message_by_client_token(db, thread, idem_key)
+        if existing and existing.role in ("assistant", "system"):
+            replay = await _result_from_idempotent_retry(db, thread, existing)
+            if replay is not None:
+                return replay
 
     failed = await get_thread_message(db, thread, message_id)
     if not failed:
@@ -444,6 +512,7 @@ async def retry_failed_message(
             content=assistant_text,
             attachments=cards or None,
             agent_run_id=early.id,
+            client_token=idem_key,
         )
         await db.commit()
         await db.refresh(asst_msg)
@@ -463,6 +532,7 @@ async def retry_failed_message(
             role="assistant",
             content=_AGENT_REPLY_PLACEHOLDER,
             agent_run_id=run_id_snap,
+            client_token=idem_key,
         )
         await db.commit()
         await db.refresh(asst_msg)
@@ -540,6 +610,7 @@ async def retry_failed_message(
         content=assistant_text,
         attachments=cards or None,
         agent_run_id=run.id,
+        client_token=idem_key,
     )
     await db.commit()
     await db.refresh(asst_msg)

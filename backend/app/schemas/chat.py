@@ -56,12 +56,14 @@ class MessageRead(BaseModel):
     content: str
     attachments: list[dict[str, Any]] | None = None
     agent_run_id: int | None = None
+    client_token: str | None = None
     created_at: datetime
 
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=16000)
     references: list[EntityRef] = Field(default_factory=list)
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 class MessageSendResult(BaseModel):

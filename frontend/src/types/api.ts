@@ -347,12 +347,14 @@ export type ChatMessage = {
   content: string;
   attachments: ChatCard[] | null;
   agent_run_id: number | null;
+  client_token?: string | null;
   created_at: string;
 };
 
 export type ChatMessageCreate = {
   content: string;
   references?: EntityRef[];
+  idempotency_key?: string;
 };
 
 export type ChatSendResult = {

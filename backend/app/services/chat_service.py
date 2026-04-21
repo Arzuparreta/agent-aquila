@@ -148,6 +148,7 @@ async def append_message(
     content: str,
     attachments: list[dict] | None = None,
     agent_run_id: int | None = None,
+    client_token: str | None = None,
     flush: bool = True,
 ) -> ChatMessage:
     msg = ChatMessage(
@@ -156,6 +157,7 @@ async def append_message(
         content=content,
         attachments=attachments,
         agent_run_id=agent_run_id,
+        client_token=client_token,
     )
     db.add(msg)
     thread.last_message_at = datetime.now(UTC)
@@ -232,6 +234,7 @@ def message_to_read(msg: ChatMessage) -> MessageRead:
         content=msg.content,
         attachments=msg.attachments,
         agent_run_id=msg.agent_run_id,
+        client_token=msg.client_token,
         created_at=msg.created_at,
     )
 
@@ -271,6 +274,20 @@ async def get_thread_message(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def get_message_by_client_token(
+    db: AsyncSession, thread: ChatThread, client_token: str
+) -> ChatMessage | None:
+    stmt = (
+        select(ChatMessage)
+        .where(
+            ChatMessage.thread_id == thread.id,
+            ChatMessage.client_token == client_token,
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 async def latest_prior_user_message(
     db: AsyncSession, thread: ChatThread, before_message_id: int
 ) -> ChatMessage | None:
@@ -282,6 +299,22 @@ async def latest_prior_user_message(
             ChatMessage.role == "user",
         )
         .order_by(ChatMessage.id.desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def first_assistant_message_after_id(
+    db: AsyncSession, thread: ChatThread, after_message_id: int
+) -> ChatMessage | None:
+    stmt = (
+        select(ChatMessage)
+        .where(
+            ChatMessage.thread_id == thread.id,
+            ChatMessage.id > after_message_id,
+            ChatMessage.role.in_(("assistant", "system")),
+        )
+        .order_by(ChatMessage.id.asc())
         .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()

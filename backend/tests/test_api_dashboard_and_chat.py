@@ -20,6 +20,8 @@ from app.core.deps import get_current_user
 from app.main import app
 from app.models.chat_thread import ChatThread
 from app.models.user import User
+from app.schemas.agent import AgentRunRead
+from app.services.chat_service import append_message
 from app.services.llm_client import ChatResponse, ChatToolCall
 
 
@@ -100,6 +102,149 @@ async def test_dashboard_endpoints_and_chat_message(
             asst = payload.get("assistant_message") or {}
             content = str(asst.get("content") or "")
             assert "Integration test reply" in content
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_chat_send_idempotency_key_deduplicates_retries(
+    db_session: AsyncSession,
+    crm_user: User,
+    chat_thread: ChatThread,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def override_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    async def override_user() -> User:
+        return crm_user
+
+    monkeypatch.setattr(settings, "agent_async_runs", False)
+
+    async def fake_native(*args: object, **kwargs: object) -> ChatResponse:
+        return ChatResponse(
+            content="",
+            tool_calls=[
+                ChatToolCall(
+                    id="call_it",
+                    name="final_answer",
+                    arguments={"text": "Idempotent reply"},
+                )
+            ],
+        )
+
+    monkeypatch.setattr("app.services.agent_service.chat_turn_native", fake_native)
+    monkeypatch.setattr(
+        "app.services.agent_service.resolve_effective_mode",
+        lambda *a, **k: "native",
+    )
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            key = "test-idem-send-1"
+            first = await ac.post(
+                f"/api/v1/threads/{chat_thread.id}/messages",
+                json={
+                    "content": "Please schedule tomorrow's check-in",
+                    "references": [],
+                    "idempotency_key": key,
+                },
+            )
+            assert first.status_code == 200, first.text
+            second = await ac.post(
+                f"/api/v1/threads/{chat_thread.id}/messages",
+                json={
+                    "content": "Please schedule tomorrow's check-in",
+                    "references": [],
+                    "idempotency_key": key,
+                },
+            )
+            assert second.status_code == 200, second.text
+            p1 = first.json()
+            p2 = second.json()
+            assert p1["user_message"]["id"] == p2["user_message"]["id"]
+            assert p1["assistant_message"]["id"] == p2["assistant_message"]["id"]
+
+            rows = await ac.get(f"/api/v1/threads/{chat_thread.id}/messages")
+            assert rows.status_code == 200, rows.text
+            messages = rows.json()
+            user_rows = [m for m in messages if m["role"] == "user"]
+            assert len(user_rows) == 1
+            assert user_rows[0]["client_token"] == key
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_retry_endpoint_idempotency_header_deduplicates(
+    db_session: AsyncSession,
+    crm_user: User,
+    chat_thread: ChatThread,
+    agent_run,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def override_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    async def override_user() -> User:
+        return crm_user
+
+    monkeypatch.setattr(settings, "agent_async_runs", False)
+    async def fake_preflight(*args: object, **kwargs: object):
+        return None
+
+    monkeypatch.setattr("app.services.agent_service.AgentService.run_agent_invalid_preflight", fake_preflight)
+
+    async def fake_run_agent(*args: object, **kwargs: object) -> AgentRunRead:
+        return AgentRunRead(
+            id=agent_run.id,
+            status="completed",
+            user_message="replay",
+            assistant_reply="Retry completed",
+            error=None,
+            root_trace_id=None,
+            chat_thread_id=chat_thread.id,
+            steps=[],
+            pending_proposals=[],
+        )
+
+    monkeypatch.setattr("app.services.agent_service.AgentService.run_agent", fake_run_agent)
+
+    user_msg = await append_message(db_session, chat_thread, role="user", content="Do the thing")
+    failed_msg = await append_message(db_session, chat_thread, role="system", content="Tool provider failed")
+    await db_session.commit()
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            key = "test-idem-retry-1"
+            first = await ac.post(
+                f"/api/v1/threads/{chat_thread.id}/messages/{failed_msg.id}/retry",
+                headers={"X-Idempotency-Key": key},
+            )
+            assert first.status_code == 200, first.text
+            second = await ac.post(
+                f"/api/v1/threads/{chat_thread.id}/messages/{failed_msg.id}/retry",
+                headers={"X-Idempotency-Key": key},
+            )
+            assert second.status_code == 200, second.text
+            p1 = first.json()
+            p2 = second.json()
+            assert p1["assistant_message"]["id"] == p2["assistant_message"]["id"]
+            assert p1["user_message"]["id"] == user_msg.id
+
+            rows = await ac.get(f"/api/v1/threads/{chat_thread.id}/messages")
+            assert rows.status_code == 200, rows.text
+            messages = rows.json()
+            retry_rows = [m for m in messages if m["role"] in ("assistant", "system") and m.get("client_token") == key]
+            assert len(retry_rows) == 1
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)
