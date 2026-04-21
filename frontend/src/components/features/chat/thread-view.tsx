@@ -20,6 +20,22 @@ import { ChatComposer } from "./composer";
 import { MessageBubble } from "./message-bubble";
 import { useChatReferences } from "./reference-context";
 
+/** Matches backend ``_AGENT_REPLY_PLACEHOLDER`` (single Unicode ellipsis). */
+const AGENT_REPLY_PLACEHOLDER = "\u2026";
+
+function findPendingAgentRunId(rows: ChatMessage[]): number | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const m = rows[i];
+    if (m.role !== "assistant" || m.agent_run_id == null) {
+      continue;
+    }
+    if (m.content === AGENT_REPLY_PLACEHOLDER) {
+      return m.agent_run_id;
+    }
+  }
+  return null;
+}
+
 /**
  * Loads + renders a single chat thread:
  *   - Initial fetch of the last 200 messages (oldest at top, newest at bottom).
@@ -95,21 +111,44 @@ export function ChatThreadView({
     []
   );
 
+  const runAgentRunFollowUp = useCallback(
+    async (runId: number) => {
+      setError(null);
+      try {
+        const run = await pollAgentRunUntilDone(runId);
+        if (run.status === "failed") {
+          recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
+        }
+        await reload();
+      } catch (pollErr) {
+        if (pollErr instanceof ApiError && pollErr.status === 408) {
+          recordTelemetryAssistantPollTimeout();
+        }
+        setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.sendFailed"));
+        await reload();
+      }
+    },
+    [pollAgentRunUntilDone, reload, t]
+  );
+
   const reconcileUncertainSend = useCallback(
-    async (content: string, idempotencyKey: string): Promise<boolean> => {
+    async (
+      content: string,
+      idempotencyKey: string
+    ): Promise<{ ok: boolean; pendingRunId: number | null }> => {
       const rows = await apiFetch<ChatMessage[]>(`/threads/${thread.id}/messages`);
       const matched = rows.some((m) => m.role === "user" && m.client_token === idempotencyKey);
       if (!matched) {
         const recentUser = [...rows].reverse().find((m) => m.role === "user");
         if (!recentUser || recentUser.content !== content) {
-          return false;
+          return { ok: false, pendingRunId: null };
         }
       }
+      const pendingRunId = findPendingAgentRunId(rows);
       setMessages(rows);
-      setError(t("chat.threadView.sendRecovered"));
-      return true;
+      return { ok: true, pendingRunId };
     },
-    [thread.id, t]
+    [thread.id]
   );
 
   const retryFailedMessage = useCallback(
@@ -128,20 +167,7 @@ export function ChatThreadView({
         });
         onThreadUpdated(result.thread);
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
-          setError(null);
-          try {
-            const run = await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
-            if (run.status === "failed") {
-              recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
-            }
-            await reload();
-          } catch (pollErr) {
-            if (pollErr instanceof ApiError && pollErr.status === 408) {
-              recordTelemetryAssistantPollTimeout();
-            }
-            setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.retryFailed"));
-            await reload();
-          }
+          await runAgentRunFollowUp(result.assistant_message.agent_run_id);
           return;
         }
         if (result.error) setError(result.error);
@@ -152,7 +178,7 @@ export function ChatThreadView({
         setSending(false);
       }
     },
-    [createIdempotencyKey, thread.id, onThreadUpdated, pollAgentRunUntilDone, reload, t]
+    [createIdempotencyKey, thread.id, onThreadUpdated, runAgentRunFollowUp, t]
   );
 
   const onSend = useCallback(
@@ -181,21 +207,8 @@ export function ChatThreadView({
         });
         onThreadUpdated(result.thread);
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
-          setError(null);
           refs.clear();
-          try {
-            const run = await pollAgentRunUntilDone(result.assistant_message.agent_run_id);
-            if (run.status === "failed") {
-              recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
-            }
-            await reload();
-          } catch (pollErr) {
-            if (pollErr instanceof ApiError && pollErr.status === 408) {
-              recordTelemetryAssistantPollTimeout();
-            }
-            setError(pollErr instanceof ApiError ? pollErr.message : t("chat.threadView.sendFailed"));
-            await reload();
-          }
+          await runAgentRunFollowUp(result.assistant_message.agent_run_id);
           return;
         }
         if (result.error) setError(result.error);
@@ -203,9 +216,14 @@ export function ChatThreadView({
         refs.clear();
       } catch (err) {
         try {
-          const recovered = await reconcileUncertainSend(content, idempotencyKey);
-          if (recovered) {
+          const { ok, pendingRunId } = await reconcileUncertainSend(content, idempotencyKey);
+          if (ok) {
             refs.clear();
+            if (pendingRunId != null) {
+              await runAgentRunFollowUp(pendingRunId);
+            } else {
+              setError(null);
+            }
             return;
           }
         } catch {
@@ -218,7 +236,15 @@ export function ChatThreadView({
         setSending(false);
       }
     },
-    [createIdempotencyKey, thread.id, onThreadUpdated, pollAgentRunUntilDone, reconcileUncertainSend, refs, reload, t]
+    [
+      createIdempotencyKey,
+      thread.id,
+      onThreadUpdated,
+      reconcileUncertainSend,
+      refs,
+      runAgentRunFollowUp,
+      t
+    ]
   );
 
   const updateMessage = useCallback((updated: ChatMessage) => {

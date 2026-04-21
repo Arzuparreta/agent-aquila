@@ -16,7 +16,9 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,6 +67,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/threads", tags=["threads"], dependencies=[Depends(get_current_user)])
 
 _AGENT_REPLY_PLACEHOLDER = "\u2026"
+
+
+async def _enqueue_chat_agent_turn(
+    *,
+    run_id: int,
+    user_id: int,
+    prior: list[dict[str, str]] | None,
+    hint: str | None,
+) -> dict[str, Any]:
+    """Try twice with a short pause — transient Redis/ARQ hiccups should not force a sync HTTP agent run."""
+    last: dict[str, Any] = {"queued": False}
+    for attempt in range(2):
+        try:
+            last = await enqueue(
+                "run_chat_agent_turn",
+                run_id,
+                user_id,
+                prior,
+                hint,
+                _job_id=f"agent_run:{run_id}",
+            )
+            if last.get("queued"):
+                return last
+        except Exception:
+            logger.exception(
+                "failed to enqueue run_chat_agent_turn run_id=%s attempt=%s",
+                run_id,
+                attempt + 1,
+            )
+            last = {"queued": False}
+        if attempt == 0:
+            await asyncio.sleep(0.15)
+    return last
 
 
 def _normalize_idempotency_key(raw: str | None) -> str | None:
@@ -350,18 +385,18 @@ async def send_message(
         await db.commit()
         await db.refresh(asst_msg)
         await db.refresh(thread)
-        try:
-            enq = await enqueue(
-                "run_chat_agent_turn",
+        enq = await _enqueue_chat_agent_turn(
+            run_id=run_id_snap,
+            user_id=current_user.id,
+            prior=prior,
+            hint=hint,
+        )
+        if not enq.get("queued"):
+            logger.warning(
+                "ARQ enqueue did not queue run_id=%s; running agent inline (may exceed Next.js proxy time). "
+                "Check Redis, worker, and AGENT_ASYNC_RUNS.",
                 run_id_snap,
-                current_user.id,
-                prior,
-                hint,
-                _job_id=f"agent_run:{run_id_snap}",
             )
-        except Exception:
-            logger.exception("failed to enqueue run_chat_agent_turn run_id=%s", run_id_snap)
-            enq = {"queued": False}
         if enq.get("queued"):
             pending_read = AgentRunRead(
                 id=run_id_snap,
@@ -537,18 +572,18 @@ async def retry_failed_message(
         await db.commit()
         await db.refresh(asst_msg)
         await db.refresh(thread)
-        try:
-            enq = await enqueue(
-                "run_chat_agent_turn",
+        enq = await _enqueue_chat_agent_turn(
+            run_id=run_id_snap,
+            user_id=current_user.id,
+            prior=prior,
+            hint=hint,
+        )
+        if not enq.get("queued"):
+            logger.warning(
+                "ARQ enqueue did not queue run_id=%s; running agent inline (may exceed Next.js proxy time). "
+                "Check Redis, worker, and AGENT_ASYNC_RUNS.",
                 run_id_snap,
-                current_user.id,
-                prior,
-                hint,
-                _job_id=f"agent_run:{run_id_snap}",
             )
-        except Exception:
-            logger.exception("failed to enqueue run_chat_agent_turn run_id=%s", run_id_snap)
-            enq = {"queued": False}
         if enq.get("queued"):
             pending_read = AgentRunRead(
                 id=run_id_snap,

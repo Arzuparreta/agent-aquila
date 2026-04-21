@@ -521,8 +521,6 @@ const en = {
   "chat.threadView.loadFailed": "Could not load the chat.",
   "chat.threadView.retryFailed": "Retry failed.",
   "chat.threadView.sendFailed": "Send failed.",
-  "chat.threadView.sendRecovered":
-    "Your message was delivered, but the acknowledgement failed. Conversation re-synced.",
   "chat.threadView.emptyHint":
     "Hi. Tell me what you need and I will take care of it. I can also notify you when something important arrives (email, events, proposals).",
   "chat.threadView.thinking": "Thinking…",
@@ -545,6 +543,8 @@ const en = {
   "api.error.server":
     "Server error ({status}). The API or Next.js proxy failed—check Docker logs for `backend` and `frontend`, and that BACKEND_INTERNAL_URL reaches the API.",
   "api.error.requestFailed": "Request failed ({status}).",
+  "api.error.emptyBody": "The server returned an empty response. Try again, or check Docker logs for the API.",
+  "api.error.badJson": "The server returned data that is not valid JSON. The proxy may have cut off the response—check Docker logs for `frontend` and `backend`.",
 
   "common.retry": "Retry",
   "common.back": "Back",
@@ -1256,8 +1256,6 @@ const es: Record<keyof typeof en, string> = {
   "chat.threadView.loadFailed": "No se pudo cargar el chat.",
   "chat.threadView.retryFailed": "El reintento falló.",
   "chat.threadView.sendFailed": "El envío falló.",
-  "chat.threadView.sendRecovered":
-    "Tu mensaje se entregó, pero falló la confirmación. La conversación se sincronizó de nuevo.",
   "chat.threadView.emptyHint":
     "Hola. Cuéntame qué necesitas y me encargo. También puedo avisarte cuando llegue algo importante (correos, eventos, propuestas).",
   "chat.threadView.thinking": "Pensando…",
@@ -1280,6 +1278,10 @@ const es: Record<keyof typeof en, string> = {
   "api.error.server":
     "Error del servidor ({status}). Falló la API o el proxy de Next.js; revisa los logs de `backend` y `frontend`, y que BACKEND_INTERNAL_URL alcance la API.",
   "api.error.requestFailed": "La solicitud falló ({status}).",
+  "api.error.emptyBody":
+    "El servidor devolvió una respuesta vacía. Inténtalo de nuevo o revisa los logs de la API en Docker.",
+  "api.error.badJson":
+    "El servidor devolvió datos que no son JSON válido. El proxy pudo cortar la respuesta; revisa los logs de `frontend` y `backend` en Docker.",
 
   "common.retry": "Reintentar",
   "common.back": "Volver",

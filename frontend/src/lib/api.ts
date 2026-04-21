@@ -2,6 +2,7 @@
 
 import {
   recordTelemetryApiError,
+  recordTelemetryClientError,
   recordTelemetryNetworkError,
   recordTelemetrySlowRequest,
 } from "@/lib/telemetry/record";
@@ -188,6 +189,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     return {} as T;
   }
 
+  const rawBody = await response.text();
+
   if (durationMs >= SLOW_REQUEST_MS) {
     recordTelemetrySlowRequest({
       path,
@@ -197,5 +200,21 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     });
   }
 
-  return (await response.json()) as T;
+  const trimmed = rawBody.trim();
+  if (!trimmed) {
+    recordTelemetryClientError({
+      message: `Empty JSON body on ${method} ${path} (HTTP ${response.status})`,
+      source: "apiFetch_empty_body",
+    });
+    throw new ApiError(t("api.error.emptyBody"), 502, { kind: "empty_body" });
+  }
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    recordTelemetryClientError({
+      message: `Invalid JSON on ${method} ${path}: ${trimmed.slice(0, 240)}`,
+      source: "apiFetch_json_parse",
+    });
+    throw new ApiError(t("api.error.badJson"), 502, { kind: "json_parse_error" });
+  }
 }
