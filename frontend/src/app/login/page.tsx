@@ -19,6 +19,14 @@ function messageFromFastApiDetail(body: unknown): string | null {
     const rec = detail as Record<string, unknown>;
     if (typeof rec.message === "string" && rec.message.trim()) return rec.message.trim();
     if (typeof rec.detail === "string" && rec.detail.trim()) return rec.detail.trim();
+    const kind = typeof rec.kind === "string" ? rec.kind : "";
+    if (kind) {
+      try {
+        return `${kind}: ${JSON.stringify(detail)}`.slice(0, 600);
+      } catch {
+        return kind;
+      }
+    }
   }
   if (Array.isArray(detail)) {
     const parts = detail
@@ -36,6 +44,28 @@ function messageFromFastApiDetail(body: unknown): string | null {
     return parts.length ? parts.join("; ") : null;
   }
   return null;
+}
+
+/** Read error body: Next/proxies sometimes omit or mislabel Content-Type on 5xx. */
+async function messageFromErrorResponse(
+  response: Response,
+  htmlFallback: string
+): Promise<string | null> {
+  const raw = await response.text();
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      return messageFromFastApiDetail(parsed);
+    } catch {
+      /* fall through */
+    }
+  }
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+    return htmlFallback;
+  }
+  return trimmed.length > 480 ? `${trimmed.slice(0, 480)}…` : trimmed;
 }
 
 export default function LoginPage() {
@@ -58,16 +88,10 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        let message: string | null = null;
-        const ct = response.headers.get("content-type") || "";
-        if (ct.includes("application/json")) {
-          try {
-            const errBody: unknown = await response.json();
-            message = messageFromFastApiDetail(errBody);
-          } catch {
-            /* ignore malformed JSON */
-          }
-        }
+        let message: string | null = await messageFromErrorResponse(
+          response,
+          t("login.errorHtmlResponse")
+        );
         if (!message) {
           message =
             response.status === 401

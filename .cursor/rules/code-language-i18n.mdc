@@ -1,0 +1,11 @@
+---
+description: UI strings via i18n only; code comments and logs in English
+alwaysApply: true
+---
+
+# Language: UI vs code
+
+- **User-visible UI** (labels, errors, toasts): Use the i18n layer only — e.g. `frontend/src/lib/i18n/dict.ts` and `t("…")` in React. Supported locales (e.g. English + Spanish) belong there, not inline in components except `t()` keys.
+- **Code comments**, **maintainer-facing docstrings**, **`console.*` / logger / diagnostic output**, and **shell or ops script messages** (what developers or operators read in terminals): **English only**. Do not write Spanish or other non-English in those places.
+
+Backend API `detail` strings are operator/user-facing over HTTP; keep them **English** unless the product later adds server-side locale negotiation.

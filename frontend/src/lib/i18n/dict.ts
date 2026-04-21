@@ -61,6 +61,8 @@ const en = {
   "login.signIn": "Sign In",
   "login.invalidCredentials": "Invalid credentials",
   "login.requestFailed": "The server returned HTTP {status}. If you recently updated the app, run database migrations (for example `alembic upgrade head`) and try again.",
+  "login.errorHtmlResponse":
+    "The app returned an HTML error page instead of JSON — the UI proxy probably cannot reach the API. In Docker Compose, set BACKEND_INTERNAL_URL=http://backend:8000 for the frontend service (see .env.example) and recompose.",
   "login.networkError":
     "Could not reach the server. If you use Docker, run `docker compose up` and open the app on the same host/port as in your compose file.",
   "auth.redirecting": "Redirecting...",
@@ -730,6 +732,8 @@ const es: Record<keyof typeof en, string> = {
   "login.invalidCredentials": "Credenciales no válidas",
   "login.requestFailed":
     "El servidor respondió con HTTP {status}. Si acabas de actualizar la app, ejecuta las migraciones de base de datos (por ejemplo `alembic upgrade head`) e inténtalo de nuevo.",
+  "login.errorHtmlResponse":
+    "La aplicación devolvió HTML en lugar de JSON: el proxy del frontend no está llegando a la API. En Docker Compose, pon BACKEND_INTERNAL_URL=http://backend:8000 en el servicio frontend (ver .env.example) y vuelve a levantar los contenedores.",
   "login.networkError":
     "No se pudo contactar con el servidor. Si usas Docker, ejecuta `docker compose up` y abre la app en el mismo host y puerto que en tu archivo compose.",
   "auth.redirecting": "Redirigiendo...",
