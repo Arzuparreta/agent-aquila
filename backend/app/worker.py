@@ -29,6 +29,7 @@ from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
 from app.services.agent_event_bus import publish_run_status_event
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_service import AgentService
@@ -214,6 +215,14 @@ async def run_chat_agent_turn(
                 terminal=True,
             )
             if read.status == "completed":
+                await maybe_generate_thread_title(
+                    db,
+                    user,
+                    tid,
+                    user_message=run_row.user_message or "",
+                    assistant_message=read.assistant_reply or "",
+                    run_status=read.status,
+                )
                 await maybe_ingest_post_turn_memory(
                     db,
                     user,

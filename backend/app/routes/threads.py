@@ -40,6 +40,7 @@ from app.schemas.chat import (
 )
 from app.services.agent_attachments import attachments_from_agent_run_read
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
@@ -417,6 +418,15 @@ async def send_message(
             run_status=early.status,
             agent_run_id=early.id,
         )
+        await maybe_generate_thread_title(
+            db,
+            current_user,
+            thread.id,
+            user_message=rendered,
+            assistant_message=assistant_text,
+            run_status=early.status,
+        )
+        await db.refresh(thread)
         return _message_send_result(thread, user_msg, asst_msg, early)
 
     use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
@@ -524,6 +534,15 @@ async def send_message(
         run_status=run.status,
         agent_run_id=run.id,
     )
+    await maybe_generate_thread_title(
+        db,
+        current_user,
+        thread.id,
+        user_message=rendered,
+        assistant_message=assistant_text,
+        run_status=run.status,
+    )
+    await db.refresh(thread)
     return _message_send_result(thread, user_msg, asst_msg, run)
 
 
@@ -627,6 +646,15 @@ async def retry_failed_message(
             run_status=early.status,
             agent_run_id=early.id,
         )
+        await maybe_generate_thread_title(
+            db,
+            current_user,
+            thread.id,
+            user_message=rendered,
+            assistant_message=assistant_text,
+            run_status=early.status,
+        )
+        await db.refresh(thread)
         return _message_send_result(thread, user_msg, asst_msg, early)
 
     use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
@@ -736,4 +764,13 @@ async def retry_failed_message(
         run_status=run.status,
         agent_run_id=run.id,
     )
+    await maybe_generate_thread_title(
+        db,
+        current_user,
+        thread.id,
+        user_message=rendered,
+        assistant_message=assistant_text,
+        run_status=run.status,
+    )
+    await db.refresh(thread)
     return _message_send_result(thread, user_msg, asst_msg, run)

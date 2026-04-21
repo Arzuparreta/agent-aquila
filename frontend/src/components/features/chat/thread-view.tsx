@@ -114,6 +114,12 @@ export function ChatThreadView({
         const refreshed = await reload({ silent: true });
         if (refreshed != null) {
           setError(null);
+          try {
+            const updatedThread = await apiFetch<ChatThread>(`/threads/${thread.id}`);
+            onThreadUpdated(updatedThread);
+          } catch {
+            // Sidebar title may lag until next list refresh; chat messages are already current.
+          }
         }
       } catch (err) {
         const rows = await reload({ silent: true });
@@ -135,7 +141,7 @@ export function ChatThreadView({
         }
       }
     },
-    [reload, t]
+    [onThreadUpdated, reload, t, thread.id]
   );
 
   const reconcileUncertainSend = useCallback(

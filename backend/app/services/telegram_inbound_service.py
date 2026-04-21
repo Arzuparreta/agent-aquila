@@ -14,6 +14,7 @@ from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
 from app.models.user import User
 from app.services.agent_attachments import attachments_from_agent_run_read
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_service import AgentService
@@ -216,6 +217,14 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
         agent_run_id=run.id,
     )
     await db.commit()
+    await maybe_generate_thread_title(
+        db,
+        user,
+        thread.id,
+        user_message=rendered,
+        assistant_message=assistant_text or "",
+        run_status=run.status,
+    )
     if run.status == "completed":
         await maybe_ingest_post_turn_memory(
             db,

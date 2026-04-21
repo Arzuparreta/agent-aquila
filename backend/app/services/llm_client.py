@@ -118,6 +118,7 @@ class LLMClient:
         model: str | None = None,
         temperature: float = 0.2,
         response_format_json: bool = False,
+        max_tokens: int | None = None,
     ) -> str:
         """Plain text chat completion. Returns just the assistant's content string.
 
@@ -126,16 +127,15 @@ class LLMClient:
         effective_key = api_key
         if isinstance(settings_row, LlmProviderContext):
             effective_key = api_key or (settings_row.api_key or "")
-        response = await LLMClient._post(
-            effective_key,
-            settings_row,
-            body={
-                "model": model or _default_chat_model(settings_row),
-                "messages": messages,
-                "temperature": temperature,
-                **({"response_format": {"type": "json_object"}} if response_format_json else {}),
-            },
-        )
+        body: dict[str, Any] = {
+            "model": model or _default_chat_model(settings_row),
+            "messages": messages,
+            "temperature": temperature,
+            **({"response_format": {"type": "json_object"}} if response_format_json else {}),
+        }
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        response = await LLMClient._post(effective_key, settings_row, body=body)
         return str(response["choices"][0]["message"].get("content") or "")
 
     @staticmethod
