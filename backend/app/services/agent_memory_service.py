@@ -59,7 +59,7 @@ async def _embed_one(db: AsyncSession, user: User, text: str) -> tuple[list[floa
         return None, None
     if not vectors:
         return None, None
-    return pad_embedding(vectors[0], 1536), ctx.embedding_model
+    return pad_embedding(vectors[0]), ctx.embedding_model
 
 
 class AgentMemoryService:

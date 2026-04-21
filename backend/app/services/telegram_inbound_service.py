@@ -20,7 +20,6 @@ from app.services.agent_service import AgentService
 from app.services.channel_binding import get_or_create_thread_for_channel
 from app.services.chat_service import (
     append_message,
-    apply_agent_run_to_placeholder,
     history_for_agent,
     preview_memory_flush_dropped,
     render_user_message,
@@ -164,21 +163,29 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
     if use_async:
         run_row = await AgentService.create_pending_agent_run(db, user, rendered, thread_id=thread.id)
         run_id = int(run_row.id)
-        await append_message(
+        asst_msg = await append_message(
             db, thread, role="assistant", content=_PLACEHOLDER, agent_run_id=run_id
         )
         await db.commit()
+        await db.refresh(asst_msg)
         try:
-            await enqueue(
+            enq = await enqueue(
                 "run_chat_agent_turn",
                 run_id,
                 user.id,
                 prior,
                 hint,
-                _job_id=f"agent_run:{run_id}",
+                job_id=f"agent_run:{run_id}",
             )
         except Exception:
             logger.exception("telegram ARQ enqueue failed run_id=%s", run_id)
+            enq = {"queued": False}
+        if not enq.get("queued"):
+            read = await AgentService.abort_pending_run_queue_unavailable(
+                db, run=run_row, placeholder_message=asst_msg
+            )
+            await send_telegram_text(telegram_chat_id, read.error or "Queue unavailable.")
+            return
         return
 
     run = await AgentService.run_agent(

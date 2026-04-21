@@ -167,6 +167,7 @@ export function ChatThreadView({
         });
         onThreadUpdated(result.thread);
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
+          setSending(false);
           await runAgentRunFollowUp(result.assistant_message.agent_run_id);
           return;
         }
@@ -207,6 +208,7 @@ export function ChatThreadView({
         });
         onThreadUpdated(result.thread);
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
+          setSending(false);
           refs.clear();
           await runAgentRunFollowUp(result.assistant_message.agent_run_id);
           return;
@@ -218,6 +220,7 @@ export function ChatThreadView({
         try {
           const { ok, pendingRunId } = await reconcileUncertainSend(content, idempotencyKey);
           if (ok) {
+            setSending(false);
             refs.clear();
             if (pendingRunId != null) {
               await runAgentRunFollowUp(pendingRunId);

@@ -46,11 +46,9 @@ from app.services.agent_service import AgentService
 from app.services.chat_service import (
     append_message,
     delete_all_archived_threads,
-    apply_agent_run_to_placeholder,
     attachments_as_entity_refs,
     first_assistant_message_after_id,
     get_message_by_client_token,
-    get_message_by_agent_run,
     get_or_create_entity_thread,
     get_thread,
     get_thread_message,
@@ -113,7 +111,7 @@ async def _enqueue_chat_agent_turn(
                 user_id,
                 prior,
                 hint,
-                _job_id=f"agent_run:{run_id}",
+                job_id=f"agent_run:{run_id}",
             )
             if last.get("queued"):
                 return last
@@ -444,53 +442,30 @@ async def send_message(
             hint=hint,
         )
         if not enq.get("queued"):
-            logger.warning(
-                "ARQ enqueue did not queue run_id=%s; running agent inline (may exceed Next.js proxy time). "
-                "Check Redis, worker, and AGENT_ASYNC_RUNS.",
+            logger.error(
+                "ARQ did not accept run_id=%s — refusing inline agent loop (avoids Next.js/proxy 5xxs). "
+                "Fix Redis, the worker, and REDIS_URL; see docker-compose worker + redis services.",
                 run_id_snap,
             )
-        if enq.get("queued"):
-            pending_read = AgentRunRead(
-                id=run_id_snap,
-                status="pending",
-                user_message=rendered,
-                assistant_reply=None,
-                error=None,
-                root_trace_id=root_trace_snap,
-                chat_thread_id=thread.id,
-                steps=[],
-                pending_proposals=[],
+            read = await AgentService.abort_pending_run_queue_unavailable(
+                db, run=run_row, placeholder_message=asst_msg
             )
-            return _message_send_result(
-                thread, user_msg, asst_msg, pending_read, agent_run_pending=True
-            )
-        await db.refresh(run_row)
-        run_row.status = "running"
-        await db.commit()
-        read = await AgentService._execute_agent_loop(
-            db,
-            current_user,
-            run_row,
-            prior_messages=prior,
-            thread_context_hint=hint,
-            replay=None,
+            await db.refresh(thread)
+            return _message_send_result(thread, user_msg, asst_msg, read, agent_run_pending=False)
+        pending_read = AgentRunRead(
+            id=run_id_snap,
+            status="pending",
+            user_message=rendered,
+            assistant_reply=None,
+            error=None,
+            root_trace_id=root_trace_snap,
+            chat_thread_id=thread.id,
+            steps=[],
+            pending_proposals=[],
         )
-        await apply_agent_run_to_placeholder(
-            db, thread, agent_run_id=run_id_snap, run_read=read
+        return _message_send_result(
+            thread, user_msg, asst_msg, pending_read, agent_run_pending=True
         )
-        await db.commit()
-        await _post_turn_memory_if_completed(
-            db,
-            current_user,
-            rendered_user_message=rendered,
-            assistant_text=read.assistant_reply or "",
-            run_status=read.status,
-            agent_run_id=run_id_snap,
-        )
-        asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
-        assert asst_final is not None
-        await db.refresh(thread)
-        return _message_send_result(thread, user_msg, asst_final, read)
 
     run = await AgentService.run_agent(
         db,
@@ -660,53 +635,30 @@ async def retry_failed_message(
             hint=hint,
         )
         if not enq.get("queued"):
-            logger.warning(
-                "ARQ enqueue did not queue run_id=%s; running agent inline (may exceed Next.js proxy time). "
-                "Check Redis, worker, and AGENT_ASYNC_RUNS.",
+            logger.error(
+                "ARQ did not accept run_id=%s — refusing inline agent loop (avoids Next.js/proxy 5xxs). "
+                "Fix Redis, the worker, and REDIS_URL; see docker-compose worker + redis services.",
                 run_id_snap,
             )
-        if enq.get("queued"):
-            pending_read = AgentRunRead(
-                id=run_id_snap,
-                status="pending",
-                user_message=rendered,
-                assistant_reply=None,
-                error=None,
-                root_trace_id=root_trace_snap,
-                chat_thread_id=thread.id,
-                steps=[],
-                pending_proposals=[],
+            read = await AgentService.abort_pending_run_queue_unavailable(
+                db, run=run_row, placeholder_message=asst_msg
             )
-            return _message_send_result(
-                thread, user_msg, asst_msg, pending_read, agent_run_pending=True
-            )
-        await db.refresh(run_row)
-        run_row.status = "running"
-        await db.commit()
-        read = await AgentService._execute_agent_loop(
-            db,
-            current_user,
-            run_row,
-            prior_messages=prior,
-            thread_context_hint=hint,
-            replay=None,
+            await db.refresh(thread)
+            return _message_send_result(thread, user_msg, asst_msg, read, agent_run_pending=False)
+        pending_read = AgentRunRead(
+            id=run_id_snap,
+            status="pending",
+            user_message=rendered,
+            assistant_reply=None,
+            error=None,
+            root_trace_id=root_trace_snap,
+            chat_thread_id=thread.id,
+            steps=[],
+            pending_proposals=[],
         )
-        await apply_agent_run_to_placeholder(
-            db, thread, agent_run_id=run_id_snap, run_read=read
+        return _message_send_result(
+            thread, user_msg, asst_msg, pending_read, agent_run_pending=True
         )
-        await db.commit()
-        await _post_turn_memory_if_completed(
-            db,
-            current_user,
-            rendered_user_message=rendered,
-            assistant_text=read.assistant_reply or "",
-            run_status=read.status,
-            agent_run_id=run_id_snap,
-        )
-        asst_final = await get_message_by_agent_run(db, thread, run_id_snap)
-        assert asst_final is not None
-        await db.refresh(thread)
-        return _message_send_result(thread, user_msg, asst_final, read)
 
     run = await AgentService.run_agent(
         db,

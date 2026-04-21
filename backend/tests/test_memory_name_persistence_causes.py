@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from app.services.agent_runtime_config_service import merge_stored_with_env
+from app.services.agent_service import AgentService
 from app.services.agent_memory_post_turn_service import (
     heuristic_wants_post_turn_extraction,
     maybe_ingest_post_turn_memory,
@@ -227,3 +228,30 @@ def test_cause_upsert_memory_importance_matches_service_cap() -> None:
         .get("importance", {})
     )
     assert imp.get("maximum") == 10
+
+
+@pytest.mark.asyncio
+async def test_cause_upsert_memory_tool_normalizes_args(db_session, aquila_user) -> None:
+    """Bad types from the model should not crash ``_tool_upsert_memory`` (→ generic dispatch error)."""
+    r = await AgentService._tool_upsert_memory(
+        db_session,
+        aquila_user,
+        {
+            "key": "  agent.identity.display_name_es  ",
+            "content": '  Agente "Águila"  ',
+            "importance": "9",
+            "tags": ["identity", "display-name"],
+        },
+    )
+    assert r.get("ok") is True
+    assert r.get("key") == "agent.identity.display_name_es"
+
+
+@pytest.mark.asyncio
+async def test_cause_upsert_memory_tool_rejects_missing_fields(db_session, aquila_user) -> None:
+    r = await AgentService._tool_upsert_memory(
+        db_session,
+        aquila_user,
+        {"content": "only content"},
+    )
+    assert r.get("error") == "missing_fields"

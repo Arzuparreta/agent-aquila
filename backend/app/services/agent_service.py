@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import time
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.envelope_crypto import KeyDecryptError
 from app.models.agent_run import AgentRun, AgentRunStep, AgentTraceEvent
+from app.models.chat_message import ChatMessage
 from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
@@ -127,6 +129,8 @@ _OUTLOOK_PROVIDERS = ("graph_mail",)
 _TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
 
 _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
+
+_logger_memory_tools = logging.getLogger(__name__)
 
 # When the user turn looks like naming / “remember this” / durable prefs, bias the model toward
 # `upsert_memory` before `final_answer` (native `tool_choice="required"` allows final_answer alone).
@@ -777,14 +781,57 @@ class AgentService:
     async def _tool_upsert_memory(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await AgentMemoryService.upsert(
-            db,
-            user,
-            key=str(args["key"]),
-            content=str(args["content"]),
-            importance=int(args.get("importance") or 0),
-            tags=args.get("tags"),
-        )
+        """Persist scratchpad memory; return structured errors instead of raising when args are bad.
+
+        The model sees ``{"error": ...}`` in the tool channel — phrases like "problema técnico con
+        la memoria" usually mean this path returned an error dict (DB issue, missing fields, etc.).
+        """
+        if not isinstance(args, dict):
+            return {"error": "invalid_arguments", "detail": "expected a JSON object of arguments"}
+        rk = args.get("key")
+        rc = args.get("content")
+        if rk is None or rc is None:
+            return {
+                "error": "missing_fields",
+                "detail": "Provide non-empty 'key' and 'content' (strings).",
+            }
+        key = str(rk).strip()
+        content = str(rc).strip()
+        if not key or not content:
+            return {
+                "error": "empty_key_or_content",
+                "detail": "key and content must be non-empty after trimming.",
+            }
+        imp = 0
+        if args.get("importance") is not None:
+            try:
+                imp = max(0, min(10, int(args["importance"])))
+            except (TypeError, ValueError):
+                imp = 0
+        tags_arg = args.get("tags")
+        tags: list[str] | None = None
+        if isinstance(tags_arg, list):
+            tags = [str(x).strip() for x in tags_arg if str(x).strip()][:50] or None
+
+        try:
+            row = await AgentMemoryService.upsert(
+                db,
+                user,
+                key=key,
+                content=content,
+                importance=imp,
+                tags=tags,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface a clear payload to the model + ops logs
+            _logger_memory_tools.exception(
+                "upsert_memory persist_failed user_id=%s key_prefix=%s",
+                user.id,
+                key[:80],
+            )
+            return {
+                "error": "persist_failed",
+                "detail": str(exc)[:400],
+            }
         return {"ok": True, "key": row.key, "id": row.id}
 
     @staticmethod
@@ -1305,6 +1352,33 @@ class AgentService:
             await db.refresh(run)
             return AgentService._to_read(run, [], [])
         return None
+
+    @staticmethod
+    async def abort_pending_run_queue_unavailable(
+        db: AsyncSession,
+        *,
+        run: AgentRun,
+        placeholder_message: ChatMessage,
+    ) -> AgentRunRead:
+        """The worker queue could not take this run — never run the LLM in the HTTP handler.
+
+        OpenClaw-style: agent turns are processed out-of-band. A failed enqueue means the
+        infrastructure is down or misconfigured; we surface a clear system row instead
+        of blocking the request (and tripping Next.js / reverse-proxy timeouts) or leaving
+        a ``…`` placeholder row up forever.
+        """
+        err = (
+            "Could not start the assistant: the job queue is unavailable. "
+            "Ensure Redis and the ARQ worker are running and REDIS_URL is set."
+        )
+        run.status = "failed"
+        run.error = err
+        placeholder_message.role = "system"
+        placeholder_message.content = err
+        await db.commit()
+        await db.refresh(run)
+        await db.refresh(placeholder_message)
+        return AgentService._to_read(run, [], [])
 
     @staticmethod
     async def create_pending_agent_run(

@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     agent_max_runs_per_hour: int = Field(default=60, ge=1, le=10_000, validation_alias="AGENT_MAX_RUNS_PER_HOUR")
     agent_max_tool_steps: int = Field(default=10, ge=1, le=100, validation_alias="AGENT_MAX_TOOL_STEPS")
     # When true and REDIS_URL is set, chat agent turns are enqueued to ARQ so the HTTP
-    # request returns immediately (avoids Next.js dev proxy / browser timeouts on long runs).
+    # request returns immediately. Do not run the agent in the request handler: it trips
+    # Next.js / reverse-proxy limits and spurious 5xx. If the queue is unavailable, the
+    # API returns a clear system message instead of blocking or hanging.
     agent_async_runs: bool = Field(default=True, validation_alias="AGENT_ASYNC_RUNS")
     # Hard cap on proactive agent heartbeat runs per user/hour. 0 disables the cap.
     agent_heartbeat_burst_per_hour: int = Field(
