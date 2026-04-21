@@ -74,7 +74,10 @@ async def patch_ai_settings(
     current_user: User = Depends(get_current_user),
 ) -> UserAISettingsRead:
     """Compatibility writer; routes the update into the new multi-config tables."""
-    return await UserAISettingsService.update_settings(db, current_user, payload)
+    try:
+        return await UserAISettingsService.update_settings(db, current_user, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +172,7 @@ async def list_provider_configs(
     active = prefs.active_provider_kind or (prefs.provider_kind or None)
     return ProviderConfigsResponse(
         active_provider_kind=active,
+        embedding_provider_kind=getattr(prefs, "embedding_provider_kind", None),
         ai_disabled=prefs.ai_disabled,
         harness_mode=coerce_harness_mode(prefs),
         user_timezone=getattr(prefs, "user_timezone", None),

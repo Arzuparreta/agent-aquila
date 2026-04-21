@@ -453,6 +453,17 @@ const en = {
   "settings.technical.timeFormat.auto": "24 h (automatic)",
   "settings.technical.timeFormat.24": "24 h",
   "settings.technical.timeFormat.12": "12 h (AM/PM)",
+  "settings.embeddings.memoryBlockTitle": "Agent memory (embeddings)",
+  "settings.embeddings.memoryBlockIntro":
+    "Controls which saved provider generates vectors for semantic memory recall. Chat always uses the active provider above.",
+  "settings.embeddings.sameAsActive": "Same as chat (active provider)",
+  "settings.embeddings.useOther": "Use another saved provider",
+  "settings.embeddings.selectProvider": "Provider for memory embeddings",
+  "settings.embeddings.needTwoProviders": "Add and save a second provider in the list to use a different embedding backend.",
+  "settings.embeddings.editOnProviderHint":
+    "Memory embeddings use «{label}». Pick that provider in the list to edit with Save, or change here (saved immediately).",
+  "settings.embeddings.pressTestEmbedding": "Run connection test on that provider if the list is empty.",
+  "settings.embeddings.hintNewProvider": "Set an embedding model for this new provider, then save.",
   "settings.connectorsCardTitle": "Connectors",
   "settings.connectorsCardIntro":
     "Usually your manager walks you through linking Gmail, Outlook, or Google Drive from chat. This area is for inspecting or removing connections manually.",
@@ -1200,6 +1211,17 @@ const es: Record<keyof typeof en, string> = {
   "settings.technical.timeFormat.auto": "24 h (automático)",
   "settings.technical.timeFormat.24": "24 h",
   "settings.technical.timeFormat.12": "12 h (AM/PM)",
+  "settings.embeddings.memoryBlockTitle": "Memoria del agente (embeddings)",
+  "settings.embeddings.memoryBlockIntro":
+    "Define qué proveedor guardado genera los vectores para la memoria semántica. El chat siempre usa el proveedor activo de arriba.",
+  "settings.embeddings.sameAsActive": "Igual que el chat (proveedor activo)",
+  "settings.embeddings.useOther": "Usar otro proveedor guardado",
+  "settings.embeddings.selectProvider": "Proveedor para embeddings de memoria",
+  "settings.embeddings.needTwoProviders": "Añade y guarda un segundo proveedor en la lista para usar otro backend de embeddings.",
+  "settings.embeddings.editOnProviderHint":
+    "La memoria usa «{label}». Elige ese proveedor en la lista para editar con Guardar, o cámbialo aquí (se guarda al instante).",
+  "settings.embeddings.pressTestEmbedding": "Prueba la conexión de ese proveedor si la lista está vacía.",
+  "settings.embeddings.hintNewProvider": "Define un modelo de embeddings para este proveedor nuevo y guarda.",
   "settings.connectorsCardTitle": "Conectores",
   "settings.connectorsCardIntro":
     "Casi siempre tu mánager te guiará para conectar Gmail, Outlook o Google Drive desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.",

@@ -25,6 +25,12 @@ class UserAISettingsRead(BaseModel):
     embedding_model: str
     chat_model: str
     classify_model: str | None = None
+    embedding_provider_kind: str | None = Field(
+        default=None,
+        description=(
+            "When set, agent memory embeddings use this provider's saved row instead of the active provider."
+        ),
+    )
     ai_disabled: bool
     has_api_key: bool
     extras: dict[str, Any] | None = None
@@ -40,6 +46,7 @@ class UserAISettingsUpdate(BaseModel):
     embedding_model: str | None = None
     chat_model: str | None = None
     classify_model: str | None = None
+    embedding_provider_kind: str | None = None
     ai_disabled: bool | None = None
     harness_mode: Literal["auto", "native", "prompted"] | None = None
     user_timezone: str | None = None
@@ -59,6 +66,19 @@ class UserAISettingsUpdate(BaseModel):
         normalized = resolve_known_provider_id(value)
         if normalized is None or normalized not in PROVIDER_IDS:
             raise ValueError(f"Unknown provider_kind: {value}")
+        return normalized
+
+    @field_validator("embedding_provider_kind")
+    @classmethod
+    def _normalize_embedding_provider_kind(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = str(value).strip()
+        if not stripped:
+            return None
+        normalized = resolve_known_provider_id(stripped)
+        if normalized is None or normalized not in PROVIDER_IDS:
+            raise ValueError(f"Unknown embedding_provider_kind: {value}")
         return normalized
 
 
@@ -170,6 +190,7 @@ class ProviderConfigsResponse(BaseModel):
     """Top-level shape returned by ``GET /ai/providers/configs``."""
 
     active_provider_kind: str | None = None
+    embedding_provider_kind: str | None = None
     ai_disabled: bool = False
     harness_mode: Literal["auto", "native", "prompted"] = "auto"
     user_timezone: str | None = None

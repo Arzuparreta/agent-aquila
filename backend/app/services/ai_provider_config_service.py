@@ -43,6 +43,7 @@ from app.services.ai_providers import (
     provider_kind_requires_api_key,
     resolve_known_provider_id,
 )
+from app.services.embedding_client import EmbeddingCallContext
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,43 @@ class AIProviderConfigService:
         if not kind:
             return None
         return await AIProviderConfigService.get_config(db, user, kind)
+
+    @staticmethod
+    async def resolve_embedding_runtime(
+        db: AsyncSession, user: User
+    ) -> EmbeddingCallContext | None:
+        """Build embedding HTTP context from ``embedding_provider_kind`` or the active row.
+
+        Returns ``None`` when AI is disabled, no target row exists, no embedding
+        model is set, a required API key is missing, or decryption fails.
+        """
+        prefs = await _get_or_create_prefs(db, user)
+        if prefs.ai_disabled:
+            return None
+        embed_kind = getattr(prefs, "embedding_provider_kind", None)
+        if embed_kind:
+            row = await AIProviderConfigService.get_config(db, user, embed_kind)
+        else:
+            row = await AIProviderConfigService.get_active(db, user)
+        if row is None:
+            return None
+        em = (row.embedding_model or "").strip()
+        if not em:
+            return None
+        try:
+            api_key = AIProviderConfigService.decrypt_api_key(row)
+        except KeyDecryptError:
+            return None
+        if provider_kind_requires_api_key(row.provider_kind) and not api_key:
+            return None
+        extras_dict = dict(row.extras) if row.extras else None
+        return EmbeddingCallContext(
+            provider_kind=row.provider_kind,
+            base_url=row.base_url,
+            embedding_model=em,
+            extras=extras_dict,
+            api_key=api_key,
+        )
 
     # ------------------------------------------------------------------ write
 
@@ -197,8 +235,11 @@ class AIProviderConfigService:
         was_active = row.provider_kind == (await _get_or_create_prefs(db, user)).active_provider_kind
         await db.delete(row)
         await db.flush()
+        prefs = await _get_or_create_prefs(db, user)
+        if getattr(prefs, "embedding_provider_kind", None) == row.provider_kind:
+            prefs.embedding_provider_kind = None
+            await db.flush()
         if was_active:
-            prefs = await _get_or_create_prefs(db, user)
             prefs.active_provider_kind = None
             # Clear the mirror so callers see "no provider set".
             prefs.provider_kind = ""

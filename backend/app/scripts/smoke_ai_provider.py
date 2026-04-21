@@ -51,8 +51,8 @@ from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.services.agent_harness.prompted import parse_tool_calls_from_content
 from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.ai_provider_config_service import AIProviderConfigService
-from app.services.ai_providers import get_provider, normalize_provider_id
-from app.services.embedding_client import EmbeddingClient
+from app.services.ai_providers import get_provider, normalize_provider_id, provider_kind_requires_api_key
+from app.services.embedding_client import EmbeddingCallContext, EmbeddingClient
 from app.services.llm_client import LLMClient
 from app.services.user_ai_settings_service import UserAISettingsService
 
@@ -299,14 +299,14 @@ async def _check_json_mode(api_key: str, settings_row: Any) -> bool:
     return True
 
 
-async def _check_embeddings(api_key: str, settings_row: Any) -> bool:
+async def _check_embeddings(ctx: EmbeddingCallContext | None) -> bool:
     print("Embeddings (RAG / semantic-search contract)")
-    if not settings_row.embedding_model:
+    if ctx is None:
         _warn("no embedding_model configured; skipping (set one in Settings → Modelo de IA)")
         return True
     try:
         vectors = await EmbeddingClient.embed_texts(
-            api_key, settings_row, ["hola mundo", "festival booking inquiry"]
+            ctx, ["hola mundo", "festival booking inquiry"]
         )
     except Exception as exc:
         _fail("HTTP error during embed_texts", str(exc))
@@ -418,6 +418,26 @@ def _row_as_settings_proxy(row: UserAIProviderConfig) -> Any:
     return _Proxy()
 
 
+def _embedding_ctx_from_config_row(row: UserAIProviderConfig) -> EmbeddingCallContext | None:
+    """Build embedding context from a saved provider row (``--all`` mode per provider)."""
+    em = (row.embedding_model or "").strip()
+    if not em:
+        return None
+    try:
+        api_key = AIProviderConfigService.decrypt_api_key(row)
+    except Exception:  # noqa: BLE001
+        return None
+    if provider_kind_requires_api_key(row.provider_kind) and not api_key:
+        return None
+    return EmbeddingCallContext(
+        provider_kind=row.provider_kind,
+        base_url=row.base_url,
+        embedding_model=em,
+        extras=dict(row.extras) if row.extras else None,
+        api_key=api_key,
+    )
+
+
 async def _smoke_one_config(
     row: UserAIProviderConfig, *, skipped: set[str]
 ) -> dict[str, bool | None]:
@@ -453,7 +473,8 @@ async def _smoke_one_config(
         results["json"] = await _check_json_mode(api_key, settings_row)
     if "embeddings" not in skipped:
         _section("[3/3] Embeddings")
-        results["embeddings"] = await _check_embeddings(api_key, settings_row)
+        embed_ctx = _embedding_ctx_from_config_row(row)
+        results["embeddings"] = await _check_embeddings(embed_ctx)
     return results
 
 
@@ -554,65 +575,69 @@ async def main_async(args: argparse.Namespace) -> int:
         )
         settings_row = await UserAISettingsService.get_or_create(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user) or ""
+        embed_ctx = await AIProviderConfigService.resolve_embedding_runtime(db, user)
 
         provider_id = normalize_provider_id(settings_row.provider_kind)
         definition = get_provider(provider_id)
         provider_label = definition.label if definition else provider_id
 
-    print(f"User           : {user.email} (id={user.id})")
-    print(f"Provider       : {provider_label}  ({provider_id})")
-    print(f"Base URL       : {settings_row.base_url or (definition.default_base_url if definition else '?')}")
-    print(f"Chat model     : {settings_row.chat_model or '(unset)'}")
-    print(f"Classify model : {settings_row.classify_model or '(falls back to chat_model)'}")
-    print(f"Embedding model: {settings_row.embedding_model or '(unset)'}")
-    print(f"AI disabled    : {settings_row.ai_disabled}")
-    hm = getattr(settings_row, "harness_mode", None) or "auto"
-    print(f"Harness pref   : {hm}")
-    print(
-        "Harness effective: "
-        f"{resolve_effective_mode(hm, settings_row.provider_kind, settings_row.chat_model)}"
-    )
+        print(f"User           : {user.email} (id={user.id})")
+        print(f"Provider       : {provider_label}  ({provider_id})")
+        print(f"Base URL       : {settings_row.base_url or (definition.default_base_url if definition else '?')}")
+        print(f"Chat model     : {settings_row.chat_model or '(unset)'}")
+        print(f"Classify model : {settings_row.classify_model or '(falls back to chat_model)'}")
+        print(
+            f"Embedding model: {embed_ctx.embedding_model if embed_ctx else settings_row.embedding_model or '(unset)'} "
+            f"(source: {embed_ctx.provider_kind if embed_ctx else '—'})"
+        )
+        print(f"AI disabled    : {settings_row.ai_disabled}")
+        hm = getattr(settings_row, "harness_mode", None) or "auto"
+        print(f"Harness pref   : {hm}")
+        print(
+            "Harness effective: "
+            f"{resolve_effective_mode(hm, settings_row.provider_kind, settings_row.chat_model)}"
+        )
 
-    if settings_row.ai_disabled:
-        print(f"\n{_RED}AI is disabled for this user — flip the toggle in Settings → Modelo de IA.{_RESET}")
-        return 2
+        if settings_row.ai_disabled:
+            print(f"\n{_RED}AI is disabled for this user — flip the toggle in Settings → Modelo de IA.{_RESET}")
+            return 2
 
-    if (
-        definition is not None
-        and definition.auth_kind != "none"
-        and not api_key
-    ):
-        print(f"\n{_RED}No API key on file for this provider.{_RESET}")
-        return 2
+        if (
+            definition is not None
+            and definition.auth_kind != "none"
+            and not api_key
+        ):
+            print(f"\n{_RED}No API key on file for this provider.{_RESET}")
+            return 2
 
-    results: dict[str, bool | None] = {"tools": None, "json": None, "embeddings": None}
+        results: dict[str, bool | None] = {"tools": None, "json": None, "embeddings": None}
 
-    if "tools" not in skipped:
-        _section("[1/3] Tool calling")
-        native_ok = await _check_tool_calling_native(api_key, settings_row)
-        prompted_ok = False
-        if provider_id == "ollama":
-            _section("[1b/3] Tool calling (Ollama prompted path)")
-            prompted_ok = await _check_tool_calling_prompted(api_key, settings_row)
-        results["tools"] = native_ok or prompted_ok
-        if not results["tools"]:
-            _fail("tool calling failed")
-        elif provider_id == "ollama" and not native_ok and prompted_ok:
-            _warn("native failed, prompted passed — typical for qwen3:8b on Ollama")
-    if "json" not in skipped:
-        _section("[2/3] JSON mode")
-        results["json"] = await _check_json_mode(api_key, settings_row)
-    if "embeddings" not in skipped:
-        _section("[3/3] Embeddings")
-        results["embeddings"] = await _check_embeddings(api_key, settings_row)
+        if "tools" not in skipped:
+            _section("[1/3] Tool calling")
+            native_ok = await _check_tool_calling_native(api_key, settings_row)
+            prompted_ok = False
+            if provider_id == "ollama":
+                _section("[1b/3] Tool calling (Ollama prompted path)")
+                prompted_ok = await _check_tool_calling_prompted(api_key, settings_row)
+            results["tools"] = native_ok or prompted_ok
+            if not results["tools"]:
+                _fail("tool calling failed")
+            elif provider_id == "ollama" and not native_ok and prompted_ok:
+                _warn("native failed, prompted passed — typical for qwen3:8b on Ollama")
+        if "json" not in skipped:
+            _section("[2/3] JSON mode")
+            results["json"] = await _check_json_mode(api_key, settings_row)
+        if "embeddings" not in skipped:
+            _section("[3/3] Embeddings")
+            results["embeddings"] = await _check_embeddings(embed_ctx)
 
-    print()
-    failures = [k for k, v in results.items() if v is False]
-    if failures:
-        print(f"{_RED}Smoke test FAILED{_RESET}: {', '.join(failures)}")
-        return 1
-    print(f"{_GREEN}Smoke test PASSED{_RESET} — provider is fully wired for the agent harness.")
-    return 0
+        print()
+        failures = [k for k, v in results.items() if v is False]
+        if failures:
+            print(f"{_RED}Smoke test FAILED{_RESET}: {', '.join(failures)}")
+            return 1
+        print(f"{_GREEN}Smoke test PASSED{_RESET} — provider is fully wired for the agent harness.")
+        return 0
 
 
 def main() -> None:

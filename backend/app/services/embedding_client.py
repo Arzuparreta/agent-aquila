@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 import httpx
 
-from app.models.user_ai_settings import UserAISettings
 from app.services.ai_providers import get_provider, normalize_provider_id
 from app.services.llm_errors import (
     LLMProviderError,
@@ -13,8 +13,32 @@ from app.services.llm_errors import (
 )
 
 
-def _api_root(settings_row: UserAISettings) -> str:
-    """Resolve the OpenAI-compatible base URL for this user's provider.
+@dataclass(frozen=True)
+class EmbeddingCallContext:
+    """HTTP + model fields for OpenAI-compatible ``/embeddings`` calls.
+
+    Built from a :class:`~app.models.user_ai_provider_config.UserAIProviderConfig`
+    row (see :func:`resolve_embedding_runtime`); not tied to the legacy
+    ``user_ai_settings`` mirror so chat and embeddings can use different rows.
+    """
+
+    provider_kind: str
+    base_url: str | None
+    embedding_model: str
+    extras: dict[str, Any] | None
+    api_key: str | None
+
+
+class _ProviderHttpLike(Protocol):
+    """Shared shape for :class:`~app.models.user_ai_settings.UserAISettings` (chat) and :class:`EmbeddingCallContext` (embed)."""
+
+    provider_kind: str
+    base_url: str | None
+    extras: dict[str, Any] | None
+
+
+def _api_root(settings_row: _ProviderHttpLike) -> str:
+    """Resolve the OpenAI-compatible base URL for this provider.
 
     The registry owns provider-default URLs; ``base_url`` on the row always
     wins when non-empty. Ollama exposes the OpenAI-compatible API under
@@ -33,7 +57,7 @@ def _api_root(settings_row: UserAISettings) -> str:
     return base
 
 
-def _extra_headers(settings_row: UserAISettings) -> dict[str, str]:
+def _extra_headers(settings_row: _ProviderHttpLike) -> dict[str, str]:
     extras = settings_row.extras or {}
     headers: dict[str, str] = {}
     for key in ("openrouter_referer", "http_referer", "referer"):
@@ -44,12 +68,8 @@ def _extra_headers(settings_row: UserAISettings) -> dict[str, str]:
     return headers
 
 
-def _auth_headers(api_key: str, settings_row: UserAISettings) -> dict[str, str]:
-    """Build the auth header for the provider.
-
-    Azure OpenAI uses the ``api-key`` header; everything else here is
-    OpenAI-compatible and takes a bearer token.
-    """
+def _auth_headers(api_key: str, settings_row: _ProviderHttpLike) -> dict[str, str]:
+    """Build the auth header for the provider."""
     definition = get_provider(normalize_provider_id(settings_row.provider_kind))
     if definition and definition.auth_kind == "api-key-header":
         return {"api-key": api_key} if api_key else {}
@@ -58,12 +78,13 @@ def _auth_headers(api_key: str, settings_row: UserAISettings) -> dict[str, str]:
 
 class EmbeddingClient:
     @staticmethod
-    async def embed_texts(api_key: str, settings_row: UserAISettings, texts: list[str]) -> list[list[float]]:
-        root = _api_root(settings_row)
+    async def embed_texts(ctx: EmbeddingCallContext, texts: list[str]) -> list[list[float]]:
+        root = _api_root(ctx)
         url = f"{root}/embeddings"
-        headers: dict[str, str] = {**_auth_headers(api_key, settings_row), **_extra_headers(settings_row)}
-        provider = normalize_provider_id(settings_row.provider_kind)
-        model = settings_row.embedding_model
+        api_key = ctx.api_key or ""
+        headers: dict[str, str] = {**_auth_headers(api_key, ctx), **_extra_headers(ctx)}
+        provider = normalize_provider_id(ctx.provider_kind)
+        model = ctx.embedding_model
         payload = {"model": model, "input": texts}
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:

@@ -152,6 +152,8 @@ export type ProviderConfig = {
 
 export type ProviderConfigsResponse = {
   active_provider_kind: string | null;
+  /** When set, agent-memory embeddings use this saved provider row instead of the active chat provider. */
+  embedding_provider_kind: string | null;
   ai_disabled: boolean;
   harness_mode: HarnessMode;
   user_timezone: string | null;

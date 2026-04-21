@@ -79,10 +79,13 @@ function draftFromConfig(cfg: ProviderConfig | null, provider: AIProvider | null
 }
 
 export type UseProviderConfigsApi = {
+  providers: AIProvider[];
   loading: boolean;
   loadError: string | null;
   configs: ProviderConfig[];
   activeKind: string | null;
+  /** When set, embeddings use this provider row; null means same as active chat provider. */
+  embeddingProviderKind: string | null;
   aiDisabled: boolean;
   harnessMode: HarnessMode;
   userTimezone: string;
@@ -117,6 +120,12 @@ export type UseProviderConfigsApi = {
   setUserTimezone: (tz: string | null) => Promise<void>;
   applyBrowserTimeZone: () => Promise<void>;
   setTimeFormat: (tf: TimeFormatPreference) => Promise<void>;
+  setEmbeddingProviderKind: (kind: string | null) => Promise<void>;
+  /** Models advertised for embedding capability for a saved provider kind (memory UI). */
+  embeddingModels: ModelInfo[];
+  loadingEmbeddingModels: boolean;
+  refreshEmbeddingModels: (kind: string) => Promise<void>;
+  updateEmbeddingModelForKind: (kind: string, embedding_model: string) => Promise<void>;
   refreshModels: () => Promise<void>;
   reload: () => Promise<void>;
 };
@@ -140,6 +149,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   const [loadError, setLoadError] = useState<string | null>(null);
   const [configs, setConfigs] = useState<ProviderConfig[]>([]);
   const [activeKind, setActiveKind] = useState<string | null>(null);
+  const [embeddingProviderKind, setEmbeddingProviderKindState] = useState<string | null>(null);
   const [aiDisabled, setAIDisabledState] = useState<boolean>(false);
   const [harnessMode, setHarnessModeState] = useState<HarnessMode>("auto");
   const [userTimezone, setUserTimezoneState] = useState<string>("");
@@ -154,6 +164,8 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
 
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [embeddingModels, setEmbeddingModels] = useState<ModelInfo[]>([]);
+  const [loadingEmbeddingModels, setLoadingEmbeddingModels] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [saving, setSaving] = useState(false);
@@ -209,6 +221,7 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
       const data = await apiFetch<ProviderConfigsResponse>("/ai/providers/configs");
       setConfigs(data.configs);
       setActiveKind(data.active_provider_kind);
+      setEmbeddingProviderKindState(data.embedding_provider_kind ?? null);
       setAIDisabledState(data.ai_disabled);
       setHarnessModeState(data.harness_mode ?? "auto");
       setUserTimezoneState(data.user_timezone ?? "");
@@ -478,6 +491,51 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     setTimeFormatState(tf);
   }, []);
 
+  const setEmbeddingProviderKind = useCallback(async (kind: string | null) => {
+    await apiFetch<unknown>("/ai/settings", {
+      method: "PATCH",
+      body: JSON.stringify({ embedding_provider_kind: kind })
+    });
+    await reload();
+  }, [reload]);
+
+  const refreshEmbeddingModels = useCallback(
+    async (kind: string) => {
+      const cfg = configs.find((c) => c.provider_kind === kind);
+      if (!cfg) {
+        setEmbeddingModels([]);
+        return;
+      }
+      setLoadingEmbeddingModels(true);
+      try {
+        const payload = {
+          provider_id: kind,
+          api_key: cfg.has_api_key ? STORED_API_KEY_SENTINEL : null,
+          base_url: cfg.base_url || null,
+          extras: (cfg.extras as Record<string, unknown>) ?? {}
+        };
+        const response = await apiFetch<ListModelsResponse>("/ai/providers/models?capability=embedding", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        setEmbeddingModels(response.ok ? response.models : []);
+      } catch {
+        setEmbeddingModels([]);
+      } finally {
+        setLoadingEmbeddingModels(false);
+      }
+    },
+    [configs]
+  );
+
+  const updateEmbeddingModelForKind = useCallback(async (kind: string, embedding_model: string) => {
+    await apiFetch<ProviderConfig>(`/ai/providers/configs/${kind}`, {
+      method: "PUT",
+      body: JSON.stringify({ embedding_model })
+    });
+    await reload();
+  }, [reload]);
+
   const refreshModels = useCallback(async () => {
     if (!selectedKind) return;
     setLoadingModels(true);
@@ -515,10 +573,12 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
   }, [selectedKind, isDirty, draft, selectedConfig]);
 
   return {
+    providers,
     loading: loading || providersLoading,
     loadError,
     configs,
     activeKind,
+    embeddingProviderKind,
     aiDisabled,
     harnessMode,
     userTimezone,
@@ -550,6 +610,11 @@ export function useProviderConfigs({ providers, providersLoading }: Options): Us
     setUserTimezone,
     applyBrowserTimeZone,
     setTimeFormat,
+    setEmbeddingProviderKind,
+    embeddingModels,
+    loadingEmbeddingModels,
+    refreshEmbeddingModels,
+    updateEmbeddingModelForKind,
     refreshModels,
     reload
   };

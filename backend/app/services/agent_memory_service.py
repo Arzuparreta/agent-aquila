@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_memory import AgentMemory
 from app.models.user import User
-from app.services.ai_providers import provider_kind_requires_api_key
+from app.services.ai_provider_config_service import AIProviderConfigService
 from app.services.embedding_client import EmbeddingClient
 from app.services.embedding_vector import pad_embedding
 from app.services.user_ai_settings_service import UserAISettingsService
@@ -47,19 +47,19 @@ async def _embed_one(db: AsyncSession, user: User, text: str) -> tuple[list[floa
     embedding provider is down. Recall just falls back to recency.
     """
     settings_row = await UserAISettingsService.get_or_create(db, user)
-    if settings_row.ai_disabled or not settings_row.embedding_model:
+    if settings_row.ai_disabled:
         return None, None
-    api_key = await UserAISettingsService.get_api_key(db, user)
-    if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
+    ctx = await AIProviderConfigService.resolve_embedding_runtime(db, user)
+    if ctx is None:
         return None, None
     try:
-        vectors = await EmbeddingClient.embed_texts(api_key or "", settings_row, [text])
+        vectors = await EmbeddingClient.embed_texts(ctx, [text])
     except Exception:  # noqa: BLE001 — best-effort
         logger.warning("agent_memory: embedding call failed, falling back to no-vector", exc_info=True)
         return None, None
     if not vectors:
         return None, None
-    return pad_embedding(vectors[0], 1536), settings_row.embedding_model
+    return pad_embedding(vectors[0], 1536), ctx.embedding_model
 
 
 class AgentMemoryService:

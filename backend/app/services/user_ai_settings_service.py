@@ -81,6 +81,7 @@ class UserAISettingsService:
             embedding_model=row.embedding_model,
             chat_model=row.chat_model,
             classify_model=row.classify_model,
+            embedding_provider_kind=getattr(row, "embedding_provider_kind", None),
             ai_disabled=row.ai_disabled,
             has_api_key=False,  # Filled in by callers that have access to db; safe default.
             extras=row.extras,
@@ -100,6 +101,7 @@ class UserAISettingsService:
             embedding_model=row.embedding_model,
             chat_model=row.chat_model,
             classify_model=row.classify_model,
+            embedding_provider_kind=getattr(row, "embedding_provider_kind", None),
             ai_disabled=row.ai_disabled,
             has_api_key=bool(active and active.has_api_key),
             extras=row.extras,
@@ -151,40 +153,72 @@ class UserAISettingsService:
         if "agent_processing_paused" in data and data["agent_processing_paused"] is not None:
             prefs.agent_processing_paused = bool(data["agent_processing_paused"])
 
-        # Pick the target provider for this update. When the client doesn't
-        # name one, we keep operating on the currently-active one (or fall
-        # back to the legacy mirror's column for the very first save on a
-        # fresh install).
-        target_kind_raw = data.get("provider_kind") or prefs.active_provider_kind or prefs.provider_kind
-        target_kind = normalize_provider_id(target_kind_raw)
+        if "embedding_provider_kind" in data:
+            embed_raw = data["embedding_provider_kind"]
+            if embed_raw is None:
+                prefs.embedding_provider_kind = None
+            else:
+                embed_kind = normalize_provider_id(str(embed_raw))
+                embed_row = await AIProviderConfigService.get_config(db, user, embed_kind)
+                if embed_row is None:
+                    raise ValueError(
+                        f"No saved configuration for provider {embed_kind!r}; save that provider first."
+                    )
+                active_raw = prefs.active_provider_kind or prefs.provider_kind
+                active_norm = normalize_provider_id(active_raw) if active_raw else None
+                if active_norm and embed_kind == active_norm:
+                    prefs.embedding_provider_kind = None
+                else:
+                    prefs.embedding_provider_kind = embed_kind
+            await db.flush()
 
-        upsert = ProviderConfigUpsert(
-            base_url=data.get("base_url"),
-            chat_model=data.get("chat_model"),
-            embedding_model=data.get("embedding_model"),
-            classify_model=data.get("classify_model") if "classify_model" in data else None,
-            extras=data.get("extras") if "extras" in data else None,
-            api_key=data.get("api_key") if "api_key" in data else None,
+        # Per-provider row updates: skip when the payload only touches user-level
+        # fields (e.g. ``embedding_provider_kind``) so we do not create a stray
+        # ``user_ai_provider_configs`` row via upsert.
+        provider_patch_keys = (
+            "provider_kind",
+            "base_url",
+            "embedding_model",
+            "chat_model",
+            "classify_model",
+            "extras",
+            "api_key",
         )
-        # Treat empty-string classify_model as "clear" to mirror the prior behaviour.
-        if "classify_model" in data and data["classify_model"] == "":
+        if any(k in data for k in provider_patch_keys):
+            # Pick the target provider for this update. When the client doesn't
+            # name one, we keep operating on the currently-active one (or fall
+            # back to the legacy mirror's column for the very first save on a
+            # fresh install).
+            target_kind_raw = data.get("provider_kind") or prefs.active_provider_kind or prefs.provider_kind
+            target_kind = normalize_provider_id(target_kind_raw)
+
             upsert = ProviderConfigUpsert(
-                base_url=upsert.base_url,
-                chat_model=upsert.chat_model,
-                embedding_model=upsert.embedding_model,
-                classify_model="",
-                extras=upsert.extras,
-                api_key=upsert.api_key,
+                base_url=data.get("base_url"),
+                chat_model=data.get("chat_model"),
+                embedding_model=data.get("embedding_model"),
+                classify_model=data.get("classify_model") if "classify_model" in data else None,
+                extras=data.get("extras") if "extras" in data else None,
+                api_key=data.get("api_key") if "api_key" in data else None,
             )
+            # Treat empty-string classify_model as "clear" to mirror the prior behaviour.
+            if "classify_model" in data and data["classify_model"] == "":
+                upsert = ProviderConfigUpsert(
+                    base_url=upsert.base_url,
+                    chat_model=upsert.chat_model,
+                    embedding_model=upsert.embedding_model,
+                    classify_model="",
+                    extras=upsert.extras,
+                    api_key=upsert.api_key,
+                )
 
-        # Save the per-provider config (creates the row on first touch).
-        await AIProviderConfigService.upsert_config(db, user, target_kind, upsert)
+            # Save the per-provider config (creates the row on first touch).
+            await AIProviderConfigService.upsert_config(db, user, target_kind, upsert)
 
-        # If the client switched provider, flip the active pointer (this also
-        # refreshes the legacy mirror).
-        active = prefs.active_provider_kind or prefs.provider_kind
-        if normalize_provider_id(active) != target_kind:
-            await AIProviderConfigService.set_active(db, user, target_kind)
+            # If the client switched provider, flip the active pointer (this also
+            # refreshes the legacy mirror).
+            active = prefs.active_provider_kind or prefs.provider_kind
+            if normalize_provider_id(active) != target_kind:
+                await AIProviderConfigService.set_active(db, user, target_kind)
 
         await db.commit()
         await db.refresh(prefs)

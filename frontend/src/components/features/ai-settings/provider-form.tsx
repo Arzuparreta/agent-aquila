@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { AIProvider, ProviderConfig } from "@/types/api";
+import type { AIProvider } from "@/types/api";
 
 import { ModelSelector } from "./model-selector";
 import { StatusPill } from "./status-pill";
@@ -20,18 +20,25 @@ type ProviderFormProps = {
 /**
  * Right pane editing one provider's saved config.
  *
- * Renders provider-specific fields from the registry, two model selectors
- * (chat + embedding), an "advanced" disclosure with the optional classify
- * model + clear-key affordance, and a sticky footer with the three primary
- * actions: probar, guardar, usar como activo.
+ * Renders provider-specific fields, chat model, then (when saved) agent-memory
+ * embedding source (same as active vs other provider) and embedding model,
+ * advanced classify/key/delete, and footer actions.
  */
 export function ProviderForm({ api }: ProviderFormProps) {
   const { t } = useTranslation();
   const {
+    providers,
+    configs,
     selectedKind,
     selectedConfig,
     selectedProvider,
     activeKind,
+    embeddingProviderKind,
+    setEmbeddingProviderKind,
+    refreshEmbeddingModels,
+    updateEmbeddingModelForKind,
+    embeddingModels,
+    loadingEmbeddingModels,
     draft,
     isDirty,
     isNew,
@@ -50,6 +57,19 @@ export function ProviderForm({ api }: ProviderFormProps) {
     refreshModels
   } = api;
 
+  const providersById = useMemo(() => new Map(providers.map((p) => [p.id, p])), [providers]);
+
+  const useSeparateEmbeddingProvider = Boolean(
+    embeddingProviderKind && activeKind && embeddingProviderKind !== activeKind
+  );
+  const memorySourceKind = useSeparateEmbeddingProvider
+    ? (embeddingProviderKind as string)
+    : activeKind;
+
+  const canPickOtherProvider = Boolean(
+    activeKind && configs.some((c) => c.provider_kind !== activeKind)
+  );
+
   // Auto-load models the first time we land on a saved config that has
   // never been listed before (or after the user explicitly tests).
   useEffect(() => {
@@ -60,6 +80,26 @@ export function ProviderForm({ api }: ProviderFormProps) {
     // We intentionally only re-run when the selection changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKind]);
+
+  useEffect(() => {
+    if (!memorySourceKind) return;
+    void refreshEmbeddingModels(memorySourceKind);
+  }, [selectedConfig?.provider_kind, memorySourceKind, refreshEmbeddingModels]);
+
+  const editingMemoryRow = Boolean(
+    selectedKind && memorySourceKind && selectedKind === memorySourceKind
+  );
+
+  const embeddingFieldValue = editingMemoryRow
+    ? draft.embeddingModel
+    : (configs.find((c) => c.provider_kind === memorySourceKind)?.embedding_model ?? "");
+
+  const embeddingHelpRemote =
+    selectedConfig && !editingMemoryRow && memorySourceKind
+      ? t("settings.embeddings.editOnProviderHint", {
+          label: providersById.get(memorySourceKind)?.label ?? memorySourceKind
+        })
+      : undefined;
 
   if (!selectedKind || !selectedProvider) {
     return (
@@ -120,15 +160,102 @@ export function ProviderForm({ api }: ProviderFormProps) {
           capability="chat"
           helpText={modelHelpText(t, selectedProvider, models, loadingModels)}
         />
-        <ModelSelector
-          label={t("settings.embeddingModel")}
-          required
-          value={draft.embeddingModel}
-          onChange={(v) => updateDraft({ embeddingModel: v })}
-          models={models}
-          loading={loadingModels}
-          capability="embedding"
-        />
+        {selectedConfig ? (
+          <div className="rounded-lg border border-border bg-surface-muted/35 p-3">
+            <div className="text-sm font-semibold text-fg">{t("settings.embeddings.memoryBlockTitle")}</div>
+            <p className="mt-1 text-xs text-fg-subtle">{t("settings.embeddings.memoryBlockIntro")}</p>
+            <fieldset className="mt-3 flex flex-col gap-2">
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-fg">
+                <input
+                  type="radio"
+                  name="memory-embed-source"
+                  className="mt-0.5"
+                  checked={!useSeparateEmbeddingProvider}
+                  onChange={() => void setEmbeddingProviderKind(null)}
+                />
+                <span>{t("settings.embeddings.sameAsActive")}</span>
+              </label>
+              <label
+                className={cn(
+                  "flex items-start gap-2 text-sm",
+                  canPickOtherProvider ? "cursor-pointer text-fg" : "cursor-not-allowed text-fg-muted"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="memory-embed-source"
+                  className="mt-0.5"
+                  checked={useSeparateEmbeddingProvider}
+                  disabled={!canPickOtherProvider}
+                  onChange={() => {
+                    const first = configs.find((c) => c.provider_kind !== activeKind)?.provider_kind;
+                    if (first) void setEmbeddingProviderKind(first);
+                  }}
+                />
+                <span>{t("settings.embeddings.useOther")}</span>
+              </label>
+            </fieldset>
+            {!canPickOtherProvider ? (
+              <p className="mt-2 text-xs text-fg-muted">{t("settings.embeddings.needTwoProviders")}</p>
+            ) : null}
+
+            {useSeparateEmbeddingProvider ? (
+              <div className="mt-3 grid gap-1">
+                <label htmlFor="memory-embed-provider" className="text-sm font-medium text-fg-muted">
+                  {t("settings.embeddings.selectProvider")}
+                </label>
+                <select
+                  id="memory-embed-provider"
+                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
+                  value={embeddingProviderKind ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) void setEmbeddingProviderKind(v);
+                  }}
+                >
+                  {configs
+                    .filter((c) => c.provider_kind !== activeKind)
+                    .map((c) => (
+                      <option key={c.provider_kind} value={c.provider_kind}>
+                        {providersById.get(c.provider_kind)?.label ?? c.provider_kind}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : null}
+
+            <div className="mt-3">
+              <ModelSelector
+                label={t("settings.embeddingModel")}
+                required
+                value={embeddingFieldValue}
+                onChange={(v) => {
+                  if (editingMemoryRow) {
+                    updateDraft({ embeddingModel: v });
+                  } else if (memorySourceKind) {
+                    void updateEmbeddingModelForKind(memorySourceKind, v);
+                  }
+                }}
+                models={embeddingModels}
+                loading={loadingEmbeddingModels}
+                capability="embedding"
+                helpText={embeddingHelpRemote}
+                emptyHint={t("settings.embeddings.pressTestEmbedding")}
+              />
+            </div>
+          </div>
+        ) : (
+          <ModelSelector
+            label={t("settings.embeddingModel")}
+            required
+            value={draft.embeddingModel}
+            onChange={(v) => updateDraft({ embeddingModel: v })}
+            models={models}
+            loading={loadingModels}
+            capability="embedding"
+            helpText={t("settings.embeddings.hintNewProvider")}
+          />
+        )}
 
         <details className="rounded-md border border-border bg-surface-muted/40 p-3">
           <summary className="cursor-pointer text-sm font-medium text-fg-muted">{t("advanced.summary")}</summary>

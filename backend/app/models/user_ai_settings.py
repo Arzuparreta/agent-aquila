@@ -13,6 +13,8 @@ The new fields are:
 
 - ``active_provider_kind`` — the pointer the agent loop reads. ``NULL``
   means "no provider selected" and the chat composer is disabled.
+- ``embedding_provider_kind`` — optional pointer for embedding calls (agent
+  memory). ``NULL`` means use the same row as ``active_provider_kind``.
 - ``ai_disabled`` — kill-switch unchanged.
 
 The mirror columns are kept in sync by
@@ -46,6 +48,9 @@ class UserAISettings(Base, TimestampMixin):
     time_format: Mapped[str] = mapped_column(String(8), default="auto", nullable=False)
     # When true, new agent turns fail fast with a friendly message (dashboard "pause").
     agent_processing_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When set, agent memory embeddings use this user_ai_provider_configs row
+    # instead of the active one. NULL = same as active_provider_kind.
+    embedding_provider_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror
