@@ -9,7 +9,8 @@ After the OpenClaw refactor the data model is intentionally tiny:
 No CRM (contacts/deals/events), no email/calendar/drive mirrors, no
 push subscriptions, no automations, no rag_chunks, no executed_actions.
 All of those have been removed in favor of live API calls + the agent
-memory table. Email sends/replies are still gated through PendingProposal,
+memory table. Email, WhatsApp, and YouTube upload proposals are still gated
+through PendingProposal,
 but every other tool runs auto-applied against the live provider API.
 """
 from app.models.agent_memory import AgentMemory
@@ -26,6 +27,7 @@ from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_ai_settings import UserAISettings
 from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
+from app.models.user_device_file_ingest import UserDeviceFileIngest
 
 __all__ = [
     "AgentMemory",
@@ -45,4 +47,5 @@ __all__ = [
     "UserAISettings",
     "TelegramAccountLink",
     "TelegramPairingCode",
+    "UserDeviceFileIngest",
 ]

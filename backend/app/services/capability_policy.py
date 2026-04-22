@@ -17,6 +17,8 @@ RiskTier = Literal["read", "external_write"]
 KIND_RISK: dict[str, RiskTier] = {
     "email_send": "external_write",
     "email_reply": "external_write",
+    "whatsapp_send": "external_write",
+    "youtube_upload": "external_write",
 }
 
 
@@ -25,8 +27,8 @@ def risk_tier_for_kind(kind: str) -> RiskTier:
 
 
 def kind_is_auto_apply(kind: str) -> bool:
-    # Nothing in the proposal pipeline auto-applies — by design proposals only
-    # exist for outbound email, which always needs the user to click approve.
+    # Nothing in the proposal pipeline auto-applies — by design every proposal
+    # (email, WhatsApp, YouTube upload) needs the user to click approve.
     del kind
     return False
 

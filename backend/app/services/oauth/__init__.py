@@ -1,9 +1,18 @@
 """OAuth 2.0 flows for external connector providers (Google Workspace, Microsoft Graph, ...)."""
 
-from app.services.oauth import google_oauth, microsoft_oauth
-from app.services.oauth.base import OAuthProvider, get_provider, register_provider
-from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
-from app.services.oauth.token_manager import TokenManager
+# Use relative imports and lazy ``TokenManager`` to avoid a circular import:
+# ``oauth`` → ``token_manager`` → ``connector_service`` → ``oauth`` (incomplete).
+from . import google_oauth, microsoft_oauth
+from .base import OAuthProvider, get_provider, register_provider
+from .errors import ConnectorNeedsReauth, OAuthError
+
+
+def __getattr__(name: str):
+    if name == "TokenManager":
+        from .token_manager import TokenManager
+
+        return TokenManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 register_provider(
     OAuthProvider(

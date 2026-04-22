@@ -3,14 +3,15 @@
 After the refactor the agent has a small, opinionated palette:
 
 - **Live read tools** for every connector (Gmail / Calendar / Drive /
-  Outlook / Teams). Nothing reads from a local mirror because none
+  YouTube / Tasks / People / iCloud CalDAV / Outlook / Teams). Nothing reads
+  from a local mirror because none
   exists — every call goes straight to the upstream API.
 - **Live write tools** for everything *except* outbound email/Teams
-  sends. Label / trash / mute / filter / calendar / drive uploads run
+  sends and high-risk outbound (email, WhatsApp text, YouTube upload). Label / trash / mute / filter / calendar / drive uploads run
   immediately because the user explicitly opted into ``send_only_gated``
-  approval policy.
-- **Proposal tools** for the two operations that *do* still require
-  a human nod: ``propose_email_send`` and ``propose_email_reply``.
+  approval policy for those channels.
+- **Proposal tools** for operations that require
+  a human nod: ``propose_email_send``, ``propose_email_reply``, ``propose_whatsapp_send``, ``propose_youtube_upload``.
   These create a ``PendingProposal`` row that the user approves from
   the chat UI before it actually goes out.
 - **Memory tools** (``upsert_memory`` / ``recall_memory`` / ``memory_search`` /
@@ -205,6 +206,160 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
             "page_token": {"type": "string"},
             "page_size": {"type": "integer", "minimum": 1, "maximum": 200},
         },
+    ),
+    _fn(
+        "youtube_list_my_channels",
+        "List the authenticated user's YouTube channels (mine=true). "
+        "Use before searching or listing videos when the channel id is unknown. "
+        "Optional ``connection_id``, ``page_token``.",
+        {**_CONNECTION_ID, "page_token": {"type": "string"}},
+    ),
+    _fn(
+        "youtube_search_videos",
+        "Search YouTube videos in a channel or by free-text query. "
+        "Pass at least one of ``channel_id`` or ``q``. Optional ``page_token``, "
+        "``max_results`` (1-50), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "channel_id": {"type": "string"},
+            "q": {"type": "string"},
+            "page_token": {"type": "string"},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+    ),
+    _fn(
+        "youtube_get_video",
+        "Fetch metadata for one or more YouTube videos by id (comma-separated or array). "
+        "``video_id`` required. Optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "video_id": {
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "array", "items": {"type": "string"}},
+                ]
+            },
+        },
+        required=["video_id"],
+    ),
+    _fn(
+        "youtube_list_playlists",
+        "List playlists for a YouTube **channel_id** (from ``youtube_list_my_channels`` "
+        "or ``contentDetails``). Optional ``page_token``, ``max_results`` (1-50), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "channel_id": {"type": "string", "description": "YouTube channel id (not @handle)."},
+            "page_token": {"type": "string"},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+        required=["channel_id"],
+    ),
+    _fn(
+        "youtube_list_playlist_items",
+        "List videos in a YouTube **playlist_id** (from channel playlists or upload playlist). "
+        "Optional ``page_token``, ``max_results`` (1-50), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "playlist_id": {"type": "string"},
+            "page_token": {"type": "string"},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+        required=["playlist_id"],
+    ),
+    _fn(
+        "tasks_list_tasklists",
+        "List Google Task lists for the user. Optional ``connection_id``, ``page_token``.",
+        {**_CONNECTION_ID, "page_token": {"type": "string"}},
+    ),
+    _fn(
+        "tasks_list_tasks",
+        "List tasks in a Google Task list. ``tasklist_id`` required. "
+        "Optional ``show_completed``, ``due_min`` / ``due_max`` (RFC3339), "
+        "``page_token``, ``max_results``, ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "tasklist_id": {"type": "string"},
+            "show_completed": {"type": "boolean"},
+            "due_min": {"type": "string"},
+            "due_max": {"type": "string"},
+            "page_token": {"type": "string"},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+        required=["tasklist_id"],
+    ),
+    _fn(
+        "people_search_contacts",
+        "Search Google Contacts (People API, read-only). "
+        "Use to resolve names to email or phone hints. ``query`` required. "
+        "Optional ``page_token``, ``page_size`` (1-30), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "query": {"type": "string"},
+            "page_token": {"type": "string"},
+            "page_size": {"type": "integer", "minimum": 1, "maximum": 30},
+        },
+        required=["query"],
+    ),
+    _fn(
+        "github_list_my_repos",
+        "List GitHub repositories for the linked PAT (sorted by last update). "
+        "Optional ``page``, ``per_page`` (1-100), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "page": {"type": "integer", "minimum": 1},
+            "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+    ),
+    _fn(
+        "github_list_repo_issues",
+        "List issues for ``owner`` / ``repo`` (pass owner and name only, e.g. ``octocat`` + ``Hello-World``). "
+        "``state`` is ``open`` (default), ``closed``, or ``all``. "
+        "Optional ``page``, ``per_page``, ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "owner": {"type": "string"},
+            "repo": {"type": "string"},
+            "state": {"type": "string", "enum": ["open", "closed", "all"]},
+            "page": {"type": "integer", "minimum": 1},
+            "per_page": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+        required=["owner", "repo"],
+    ),
+    _fn(
+        "device_list_ingested_files",
+        "List files previously uploaded via the **device bridge** (e.g. iOS Shortcuts → "
+        "``POST /api/v1/device-files/ingest``). Newest first. No cloud connector. "
+        "Optional ``limit`` (1-200, default 50).",
+        {"limit": {"type": "integer", "minimum": 1, "maximum": 200}},
+    ),
+    _fn(
+        "device_get_ingested_file",
+        "Fetch one ingested file by **ingest_id** (from ``device_list_ingested_files``). "
+        "Returns ``content_base64`` for small files; large files return metadata and a short note. "
+        "``ingest_id`` required.",
+        {"ingest_id": {"type": "integer", "minimum": 1}},
+        required=["ingest_id"],
+    ),
+    _fn(
+        "icloud_calendar_list_calendars",
+        "List iCloud calendars (CalDAV) using an **app-specific password** (not your Apple ID password). "
+        "Returns calendar names and **calendar_url** values — copy the URL for "
+        "``icloud_calendar_list_events`` / create. Re-run if URLs look stale. "
+        "Optional ``connection_id``.",
+        {**_CONNECTION_ID},
+    ),
+    _fn(
+        "icloud_calendar_list_events",
+        "List events in an iCloud calendar between ``start_date`` and ``end_date`` "
+        "(ISO dates). ``calendar_url`` must be the CalDAV URL from "
+        "``icloud_calendar_list_calendars``. Optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "calendar_url": {"type": "string"},
+            "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "YYYY-MM-DD"},
+        },
+        required=["calendar_url"],
     ),
     _fn(
         "outlook_list_messages",
@@ -477,6 +632,107 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         },
         required=["file_id", "email"],
     ),
+    _fn(
+        "youtube_update_video",
+        "Update YouTube video metadata (title, description, tags, category). "
+        "``video_id`` required. Auto-applies. Optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "video_id": {"type": "string"},
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "category_id": {"type": "string"},
+        },
+        required=["video_id"],
+    ),
+    _fn(
+        "tasks_create_task",
+        "Create a task in a Google Task list. ``tasklist_id`` and ``title`` required. "
+        "Optional ``notes``, ``due`` (RFC3339), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "tasklist_id": {"type": "string"},
+            "title": {"type": "string"},
+            "notes": {"type": "string"},
+            "due": {"type": "string"},
+        },
+        required=["tasklist_id", "title"],
+    ),
+    _fn(
+        "tasks_update_task",
+        "Patch a Google Task. ``tasklist_id``, ``task_id`` required. "
+        "Optional ``title``, ``notes``, ``status`` (needsAction/completed), ``due``, "
+        "``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "tasklist_id": {"type": "string"},
+            "task_id": {"type": "string"},
+            "title": {"type": "string"},
+            "notes": {"type": "string"},
+            "status": {"type": "string", "enum": ["needsAction", "completed"]},
+            "due": {"type": "string"},
+        },
+        required=["tasklist_id", "task_id"],
+    ),
+    _fn(
+        "tasks_delete_task",
+        "Delete a task from a Google Task list. ``tasklist_id`` and ``task_id`` required.",
+        {
+            **_CONNECTION_ID,
+            "tasklist_id": {"type": "string"},
+            "task_id": {"type": "string"},
+        },
+        required=["tasklist_id", "task_id"],
+    ),
+    _fn(
+        "icloud_calendar_create_event",
+        "Create an all-day style timed event on an iCloud calendar (CalDAV). "
+        "``calendar_url``, ``summary``, ``start_iso``, ``end_iso`` (RFC3339 UTC) required. "
+        "Optional ``description``, ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "calendar_url": {"type": "string"},
+            "summary": {"type": "string", "maxLength": 500},
+            "start_iso": {"type": "string"},
+            "end_iso": {"type": "string"},
+            "description": {"type": "string"},
+        },
+        required=["calendar_url", "summary", "start_iso", "end_iso"],
+    ),
+    _fn(
+        "submit_whatsapp_credentials",
+        "After ``start_connector_setup`` for WhatsApp, persist Meta **access token** and "
+        "**phone_number_id** from the WhatsApp Cloud API setup. Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "access_token": {"type": "string"},
+            "phone_number_id": {"type": "string"},
+            "graph_api_version": {"type": "string"},
+        },
+        required=["setup_token", "access_token", "phone_number_id"],
+    ),
+    _fn(
+        "submit_github_credentials",
+        "After ``start_connector_setup`` for GitHub, persist a **personal access token** (PAT). "
+        "Auto-applies. Minimum scope: repo read or public read for issues.",
+        {
+            "setup_token": {"type": "string"},
+            "access_token": {"type": "string"},
+        },
+        required=["setup_token", "access_token"],
+    ),
+    _fn(
+        "submit_icloud_caldav_credentials",
+        "After ``start_connector_setup`` for iCloud CalDAV, save **Apple ID** + "
+        "**app-specific password**. Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "apple_id": {"type": "string"},
+            "app_password": {"type": "string"},
+        },
+        required=["setup_token", "apple_id", "app_password"],
+    ),
     # ---- Teams mutations ------------------------------------------------
     _fn(
         "teams_post_message",
@@ -583,10 +839,16 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     _fn(
         "start_connector_setup",
         "Use when the user asks to connect a new account — e.g. 'connect "
-        "my Gmail', 'vincúlame Outlook'. Renders the in-chat setup card so "
-        "the user can paste their OAuth client credentials. "
-        "Inputs: ``provider`` (``google`` or ``microsoft``).",
-        {"provider": {"type": "string", "enum": ["google", "microsoft"]}},
+        "my Gmail', 'vincúlame Outlook', WhatsApp Business, iCloud calendar, or GitHub. "
+        "Renders the in-chat setup card so "
+        "the user can paste OAuth client credentials, Meta/Apple secrets, or a GitHub PAT. "
+        "Inputs: ``provider`` (``google``, ``microsoft``, ``whatsapp``, ``icloud_caldav``, ``github``).",
+        {
+            "provider": {
+                "type": "string",
+                "enum": ["google", "microsoft", "whatsapp", "icloud_caldav", "github"],
+            }
+        },
         required=["provider"],
     ),
     _fn(
@@ -606,12 +868,22 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         "start_oauth_flow",
         "Return the OAuth consent URL for a configured provider/service. "
         "Inputs: ``provider`` (google / microsoft), ``service`` (gmail / "
-        "calendar / drive / outlook / teams).",
+        "calendar / drive / youtube / tasks / people / outlook / teams / all).",
         {
             "provider": {"type": "string", "enum": ["google", "microsoft"]},
             "service": {
                 "type": "string",
-                "enum": ["gmail", "calendar", "drive", "outlook", "teams"],
+                "enum": [
+                    "gmail",
+                    "calendar",
+                    "drive",
+                    "youtube",
+                    "tasks",
+                    "people",
+                    "outlook",
+                    "teams",
+                    "all",
+                ],
             },
         },
         required=["provider", "service"],
@@ -620,7 +892,7 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
-# Approval-required (proposal) tools — only outbound EMAIL is gated.
+# Approval-required (proposal) tools — outbound email / WhatsApp / YouTube upload.
 # ---------------------------------------------------------------------------
 
 _PROPOSAL_TOOLS: list[dict[str, Any]] = [
@@ -673,6 +945,47 @@ _PROPOSAL_TOOLS: list[dict[str, Any]] = [
             **_IDEMPOTENCY,
         },
         required=["connection_id", "thread_id", "body"],
+    ),
+    _fn(
+        "propose_whatsapp_send",
+        "Queue an outbound WhatsApp **Business** message (Meta Cloud API). Creates an "
+        "approval card; nothing is sent until the user approves. "
+        "Aligns with [Meta's policies](https://developers.facebook.com/docs/whatsapp/overview): "
+        "recipients should have opted in to your business; free-form ``body`` is for the "
+        "customer care **24h window** after they messaged you; **cold outreach** outside that "
+        "window typically needs pre-approved **template** messages (``template_name`` + "
+        "``template_language``). For contacts like 'my mother' resolve a phone with "
+        "``people_search_contacts`` or explicit digits — never guess numbers. "
+        "``to_e164`` is E.164 (e.g. +34600111222). "
+        "Inputs: ``connection_id``, ``to_e164``, "
+        "``body`` (session text) **or** ``template_name`` + optional ``template_language``.",
+        {
+            "connection_id": {"type": "integer"},
+            "to_e164": {"type": "string"},
+            "body": {"type": "string"},
+            "template_name": {"type": "string"},
+            "template_language": {"type": "string"},
+            **_IDEMPOTENCY,
+        },
+        required=["connection_id", "to_e164"],
+    ),
+    _fn(
+        "propose_youtube_upload",
+        "Queue a YouTube video upload from raw bytes (base64). Creates an approval card. "
+        "Keep payloads small; large files should be uploaded outside the agent. "
+        "``content_base64`` max ~12 MiB decoded. "
+        "Inputs: ``connection_id``, ``title``, ``content_base64``, ``mime_type`` (e.g. video/mp4), "
+        "optional ``description``, ``privacy_status`` (private/unlisted/public).",
+        {
+            "connection_id": {"type": "integer"},
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "content_base64": {"type": "string"},
+            "mime_type": {"type": "string"},
+            "privacy_status": {"type": "string", "enum": ["private", "unlisted", "public"]},
+            **_IDEMPOTENCY,
+        },
+        required=["connection_id", "title", "content_base64", "mime_type"],
     ),
 ]
 
@@ -837,6 +1150,18 @@ def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:
         return frozenset({"google_calendar", "gcal"})
     if n.startswith("drive_"):
         return frozenset({"google_drive", "gdrive"})
+    if n.startswith("youtube_") or n == "propose_youtube_upload":
+        return frozenset({"google_youtube"})
+    if n.startswith("tasks_"):
+        return frozenset({"google_tasks"})
+    if n.startswith("people_"):
+        return frozenset({"google_people"})
+    if n.startswith("icloud_calendar_"):
+        return frozenset({"icloud_caldav"})
+    if n == "propose_whatsapp_send":
+        return frozenset({"whatsapp_business"})
+    if n.startswith("github_"):
+        return frozenset({"github"})
     if n.startswith("outlook_"):
         return frozenset({"graph_mail"})
     if n.startswith("teams_"):

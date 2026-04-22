@@ -2,9 +2,10 @@
 
 After the refactor the agent has *no* local mirrors to read from — every
 read tool talks straight to the upstream provider (Gmail, Calendar,
-Drive, Outlook, Teams). Most writes auto-execute; only outbound email
-(send + reply) goes through the human-approval ``PendingProposal``
-flow. Memory and skills are the agent's own state.
+Drive, Outlook, Teams). Most writes auto-execute; outbound email
+(send + reply), WhatsApp session/template messages, and YouTube uploads go
+through the human-approval ``PendingProposal`` flow. Memory and skills are
+the agent's own state.
 
 Harness contract:
 
@@ -97,7 +98,13 @@ from app.services.connectors.file_adapters import share_file, upload_file
 from app.services.connectors.gcal_client import CalendarAPIError, GoogleCalendarClient
 from app.services.connectors.gmail_client import GmailAPIError, GmailClient
 from app.services.connectors.drive_client import DriveAPIError, GoogleDriveClient
+from app.services.connectors.google_people_client import GooglePeopleAPIError, GooglePeopleClient
+from app.services.connectors.google_tasks_client import GoogleTasksAPIError, GoogleTasksClient
 from app.services.connectors.graph_client import GraphAPIError, GraphClient
+from app.services.connectors.icloud_caldav_client import ICloudCalDAVError, ICloudCalDAVClient
+from app.services.connectors.whatsapp_client import WhatsAppAPIError, WhatsAppClient
+from app.services.connectors.youtube_client import YoutubeAPIError, YoutubeClient
+from app.services.connectors.github_client import GitHubAPIError, GitHubClient
 from app.services.gmail_metadata_cache import (
     get_message_metadata,
     get_thread as gmail_cache_get_thread,
@@ -108,6 +115,13 @@ from app.services.gmail_metadata_cache import (
 )
 from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
+from app.services.connector_setup_service import (
+    submit_github_credentials as submit_github_credentials_service,
+    submit_icloud_caldav_credentials as submit_icloud_caldav_credentials_service,
+    submit_whatsapp_credentials as submit_whatsapp_credentials_service,
+)
+from app.services.device_ingest_service import DeviceIngestService
+from app.services.connector_service import ConnectorService
 from app.services.oauth import TokenManager
 from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
 from app.services.proposal_service import proposal_to_read
@@ -127,6 +141,12 @@ _CAL_PROVIDERS = ("google_calendar", "gcal")
 _DRIVE_PROVIDERS = ("google_drive", "gdrive")
 _OUTLOOK_PROVIDERS = ("graph_mail",)
 _TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
+_YOUTUBE_PROVIDERS = ("google_youtube",)
+_TASKS_PROVIDERS = ("google_tasks",)
+_PEOPLE_PROVIDERS = ("google_people",)
+_WHATSAPP_PROVIDERS = ("whatsapp_business",)
+_ICLOUD_CAL_PROVIDERS = ("icloud_caldav",)
+_GITHUB_PROVIDERS = ("github",)
 
 _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
 
@@ -324,9 +344,36 @@ async def _drive_client(db: AsyncSession, row: ConnectorConnection) -> GoogleDri
     return GoogleDriveClient(token)
 
 
+async def _youtube_client(db: AsyncSession, row: ConnectorConnection) -> YoutubeClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return YoutubeClient(token)
+
+
+async def _tasks_client(db: AsyncSession, row: ConnectorConnection) -> GoogleTasksClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GoogleTasksClient(token)
+
+
+async def _people_client(db: AsyncSession, row: ConnectorConnection) -> GooglePeopleClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GooglePeopleClient(token)
+
+
+def _icloud_caldav_client(row: ConnectorConnection) -> ICloudCalDAVClient:
+    creds = ConnectorService.decrypt_credentials(row)
+    user = str(creds.get("username") or "").strip()
+    pw = str(creds.get("password") or "")
+    return ICloudCalDAVClient(user, pw)
+
+
 async def _graph_client(db: AsyncSession, row: ConnectorConnection) -> GraphClient:
     token = await TokenManager.get_valid_access_token(db, row)
     return GraphClient(token)
+
+
+async def _github_client(db: AsyncSession, row: ConnectorConnection) -> GitHubClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GitHubClient(token)
 
 
 class AgentService:
@@ -721,6 +768,297 @@ class AgentService:
         )
 
     # ------------------------------------------------------------------
+    # YouTube, Tasks, People, iCloud CalDAV
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_youtube_list_my_channels(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        client = await _youtube_client(db, row)
+        return await client.list_my_channels(page_token=args.get("page_token"))
+
+    @staticmethod
+    async def _tool_youtube_search_videos(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        cid = args.get("channel_id")
+        q = args.get("q")
+        if not cid and not q:
+            return {"error": "pass channel_id and/or q"}
+        client = await _youtube_client(db, row)
+        return await client.search_videos(
+            channel_id=str(cid) if cid else None,
+            q=str(q) if q else None,
+            page_token=args.get("page_token"),
+            max_results=int(args.get("max_results") or 25),
+        )
+
+    @staticmethod
+    async def _tool_youtube_get_video(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        raw = args.get("video_id")
+        if isinstance(raw, list):
+            ids = [str(x).strip() for x in raw if str(x).strip()]
+        else:
+            ids = [s.strip() for s in str(raw or "").split(",") if s.strip()]
+        if not ids:
+            return {"error": "video_id required"}
+        client = await _youtube_client(db, row)
+        return await client.list_videos(ids)
+
+    @staticmethod
+    async def _tool_youtube_list_playlists(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        cid = str(args.get("channel_id") or "").strip()
+        if not cid:
+            return {
+                "error": "channel_id is required. Call youtube_list_my_channels first, then pass id.",
+            }
+        client = await _youtube_client(db, row)
+        return await client.list_playlists(
+            cid,
+            page_token=args.get("page_token"),
+            max_results=int(args.get("max_results") or 50),
+        )
+
+    @staticmethod
+    async def _tool_youtube_list_playlist_items(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        pid = str(args.get("playlist_id") or "").strip()
+        if not pid:
+            return {"error": "playlist_id is required (from youtube_list_playlists or channel contentDetails)."}
+        client = await _youtube_client(db, row)
+        return await client.list_playlist_items(
+            pid,
+            page_token=args.get("page_token"),
+            max_results=int(args.get("max_results") or 50),
+        )
+
+    @staticmethod
+    async def _tool_youtube_update_video(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        client = await _youtube_client(db, row)
+        tags = args.get("tags")
+        tlist = [str(x) for x in tags] if isinstance(tags, list) else None
+        return await client.update_video_snippet(
+            str(args["video_id"]),
+            title=str(args["title"]) if args.get("title") is not None else None,
+            description=str(args["description"]) if args.get("description") is not None else None,
+            tags=tlist,
+            category_id=str(args["category_id"]) if args.get("category_id") is not None else None,
+        )
+
+    @staticmethod
+    async def _tool_tasks_list_tasklists(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        client = await _tasks_client(db, row)
+        return await client.list_tasklists(page_token=args.get("page_token"))
+
+    @staticmethod
+    async def _tool_tasks_list_tasks(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        client = await _tasks_client(db, row)
+        sc = args.get("show_completed")
+        return await client.list_tasks(
+            str(args["tasklist_id"]),
+            page_token=args.get("page_token"),
+            show_completed=bool(sc) if sc is not None else None,
+            due_min=args.get("due_min"),
+            due_max=args.get("due_max"),
+            max_results=int(args.get("max_results") or 100),
+        )
+
+    @staticmethod
+    async def _tool_tasks_create_task(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        client = await _tasks_client(db, row)
+        body: dict[str, Any] = {"title": str(args["title"])}
+        if args.get("notes") is not None:
+            body["notes"] = str(args["notes"])
+        if args.get("due"):
+            body["due"] = str(args["due"])
+        return await client.insert_task(str(args["tasklist_id"]), body)
+
+    @staticmethod
+    async def _tool_tasks_update_task(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        client = await _tasks_client(db, row)
+        body: dict[str, Any] = {}
+        if args.get("title") is not None:
+            body["title"] = str(args["title"])
+        if args.get("notes") is not None:
+            body["notes"] = str(args["notes"])
+        if args.get("status"):
+            body["status"] = str(args["status"])
+        if args.get("due"):
+            body["due"] = str(args["due"])
+        return await client.patch_task(str(args["tasklist_id"]), str(args["task_id"]), body)
+
+    @staticmethod
+    async def _tool_tasks_delete_task(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        client = await _tasks_client(db, row)
+        return await client.delete_task(str(args["tasklist_id"]), str(args["task_id"]))
+
+    @staticmethod
+    async def _tool_people_search_contacts(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _PEOPLE_PROVIDERS, label="Google Contacts")
+        client = await _people_client(db, row)
+        return await client.search_contacts(
+            str(args["query"]),
+            page_token=args.get("page_token"),
+            page_size=int(args.get("page_size") or 20),
+        )
+
+    @staticmethod
+    async def _tool_github_list_my_repos(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GITHUB_PROVIDERS, label="GitHub")
+        client = await _github_client(db, row)
+        items = await client.list_user_repos(
+            page=int(args.get("page") or 1),
+            per_page=int(args.get("per_page") or 30),
+        )
+        return {"repos": items}
+
+    @staticmethod
+    async def _tool_github_list_repo_issues(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _GITHUB_PROVIDERS, label="GitHub")
+        client = await _github_client(db, row)
+        st = str(args.get("state") or "open")
+        if st not in ("open", "closed", "all"):
+            st = "open"
+        items = await client.list_repo_issues(
+            str(args["owner"]),
+            str(args["repo"]),
+            state=st,
+            page=int(args.get("page") or 1),
+            per_page=int(args.get("per_page") or 30),
+        )
+        return {"issues": items}
+
+    @staticmethod
+    async def _tool_device_list_ingested_files(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "items": await DeviceIngestService.list_recent(
+                db, user, limit=int(args.get("limit") or 50)
+            )
+        }
+
+    @staticmethod
+    async def _tool_device_get_ingested_file(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await DeviceIngestService.get_for_agent(
+            db, user, int(args.get("ingest_id") or 0)
+        )
+
+    @staticmethod
+    async def _tool_icloud_calendar_list_calendars(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud Calendar")
+        client = _icloud_caldav_client(row)
+        return {"calendars": await client.list_calendars()}
+
+    @staticmethod
+    async def _tool_icloud_calendar_list_events(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from datetime import date as date_cls
+
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud Calendar")
+        client = _icloud_caldav_client(row)
+        start_s = str(args.get("start_date") or "").strip()
+        end_s = str(args.get("end_date") or "").strip()
+        try:
+            sd = date_cls.fromisoformat(start_s) if start_s else date_cls.today()
+            ed = date_cls.fromisoformat(end_s) if end_s else sd
+        except ValueError:
+            return {"error": "start_date and end_date must be YYYY-MM-DD when provided"}
+        events = await client.list_events(str(args["calendar_url"]), start=sd, end=ed)
+        return {"events": events, "calendar_url": str(args["calendar_url"])}
+
+    @staticmethod
+    async def _tool_icloud_calendar_create_event(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud Calendar")
+        client = _icloud_caldav_client(row)
+        start = datetime.fromisoformat(str(args["start_iso"]).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(args["end_iso"]).replace("Z", "+00:00"))
+        return await client.create_event(
+            str(args["calendar_url"]),
+            summary=str(args["summary"]),
+            start=start,
+            end=end,
+            description=str(args["description"]) if args.get("description") else None,
+        )
+
+    @staticmethod
+    async def _tool_submit_whatsapp_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_whatsapp_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            access_token=str(args.get("access_token") or ""),
+            phone_number_id=str(args.get("phone_number_id") or ""),
+            graph_api_version=args.get("graph_api_version"),
+        )
+
+    @staticmethod
+    async def _tool_submit_github_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_github_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            access_token=str(args.get("access_token") or ""),
+        )
+
+    @staticmethod
+    async def _tool_submit_icloud_caldav_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_icloud_caldav_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            apple_id=str(args.get("apple_id") or ""),
+            app_password=str(args.get("app_password") or ""),
+        )
+
+    # ------------------------------------------------------------------
     # Outlook + Teams tools
     # ------------------------------------------------------------------
     @staticmethod
@@ -1044,7 +1382,7 @@ class AgentService:
         )
 
     # ------------------------------------------------------------------
-    # Proposal tools (only outbound EMAIL is gated)
+    # Proposal tools (email / WhatsApp / YouTube upload — human approval)
     # ------------------------------------------------------------------
     @staticmethod
     async def _insert_proposal(
@@ -1159,6 +1497,69 @@ class AgentService:
             idempotency_key=AgentService._idem(args),
         )
 
+    @staticmethod
+    async def _tool_propose_whatsapp_send(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        to_e164 = str(args.get("to_e164") or "").strip()
+        if not to_e164:
+            return {"error": "to_e164 is required (E.164, e.g. +34600111222)."}
+        tname = (args.get("template_name") or "").strip() or None
+        tlang = str(args.get("template_language") or "en")
+        body = str(args.get("body") or "")
+        if not tname and not body.strip():
+            return {
+                "error": "Provide `body` for session text, or `template_name` for outside the 24h window.",
+            }
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "to_e164": to_e164,
+            "body": body if not tname else "",
+            "template_name": tname,
+            "template_language": tlang,
+        }
+        return await AgentService._insert_proposal(
+            db,
+            user,
+            run_id,
+            "whatsapp_send",
+            payload,
+            f"WhatsApp → {to_e164[:40]}",
+            idempotency_key=AgentService._idem(args),
+        )
+
+    @staticmethod
+    async def _tool_propose_youtube_upload(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        b64 = str(args.get("content_base64") or "")
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"Invalid base64: {exc}"}
+        max_bytes = 12 * 1024 * 1024
+        if len(raw) > max_bytes:
+            return {"error": f"Decoded file exceeds {max_bytes} bytes."}
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "title": str(args.get("title") or "")[:100],
+            "description": str(args.get("description") or "")[:5000],
+            "content_base64": b64,
+            "mime_type": str(args.get("mime_type") or "video/mp4"),
+            "privacy_status": str(args.get("privacy_status") or "private"),
+        }
+        if not payload["title"].strip():
+            return {"error": "title is required."}
+        return await AgentService._insert_proposal(
+            db,
+            user,
+            run_id,
+            "youtube_upload",
+            payload,
+            f"YouTube upload: {payload['title'][:60]}",
+            idempotency_key=AgentService._idem(args),
+        )
+
     # ------------------------------------------------------------------
     # Tool dispatch — single source of truth for routing model-issued
     # tool calls to the matching internal handler.
@@ -1218,7 +1619,18 @@ class AgentService:
             )
         except OAuthError as exc:
             return ({"error": f"oauth_error: {exc}"}, None)
-        except (GmailAPIError, CalendarAPIError, DriveAPIError, GraphAPIError) as exc:
+        except (
+            GmailAPIError,
+            CalendarAPIError,
+            DriveAPIError,
+            GraphAPIError,
+            YoutubeAPIError,
+            WhatsAppAPIError,
+            GoogleTasksAPIError,
+            GooglePeopleAPIError,
+            ICloudCalDAVError,
+            GitHubAPIError,
+        ) as exc:
             return ({"error": f"upstream {exc.status_code}: {exc.detail[:300]}"}, None)
         except Exception as exc:  # noqa: BLE001 — surface tool errors to the model
             return ({"error": str(exc)[:500]}, None)

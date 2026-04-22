@@ -16,7 +16,17 @@ from app.services.instance_oauth_service import get_google_runtime_config, get_m
 from app.services.oauth import google_oauth, microsoft_oauth
 from app.services.oauth.errors import ConnectorNeedsReauth, OAuthError
 
-_GOOGLE_PROVIDERS = {"google_gmail", "gmail", "google_calendar", "gcal", "google_drive", "gdrive"}
+_GOOGLE_PROVIDERS = {
+    "google_gmail",
+    "gmail",
+    "google_calendar",
+    "gcal",
+    "google_drive",
+    "gdrive",
+    "google_youtube",
+    "google_tasks",
+    "google_people",
+}
 _MICROSOFT_PROVIDERS = {"graph_mail", "graph_calendar", "graph_onedrive", "graph_teams", "ms_teams"}
 _REFRESH_SKEW = timedelta(seconds=90)
 

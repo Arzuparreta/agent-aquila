@@ -23,9 +23,14 @@ def _names(tools: list[dict]) -> set[str]:
     return {t["function"]["name"] for t in tools}
 
 
-def test_proposal_tool_set_is_email_only() -> None:
-    """Only outbound email is gated; everything else auto-applies."""
-    assert _names(_PROPOSAL_TOOLS) == {"propose_email_send", "propose_email_reply"}
+def test_proposal_tool_set_covers_outbound_kinds() -> None:
+    """Human approval for outbound email, WhatsApp, and YouTube upload."""
+    assert _names(_PROPOSAL_TOOLS) == {
+        "propose_email_send",
+        "propose_email_reply",
+        "propose_whatsapp_send",
+        "propose_youtube_upload",
+    }
 
 
 def test_every_tool_in_one_bucket() -> None:

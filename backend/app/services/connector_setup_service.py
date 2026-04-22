@@ -32,6 +32,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.schemas.connector import ConnectorConnectionCreate
+from app.services.connector_service import ConnectorService
 from app.services.instance_oauth_service import (
     get_google_app_credentials_form,
     get_google_runtime_config,
@@ -86,6 +88,9 @@ _GOOGLE_SERVICE_TO_INTENT: dict[str, str] = {
     "gmail": "gmail",
     "calendar": "calendar",
     "drive": "drive",
+    "youtube": "youtube",
+    "tasks": "tasks",
+    "people": "people",
     "all": "all",
 }
 _MICROSOFT_SERVICE_TO_INTENT: dict[str, str] = {
@@ -105,11 +110,87 @@ _MICROSOFT_SERVICE_TO_INTENT: dict[str, str] = {
 async def start_setup(db: AsyncSession, user: User, provider: str) -> dict[str, Any]:
     """Returns the structured setup card the agent emits to chat."""
     provider = (provider or "").lower().strip()
-    if provider not in ("google", "microsoft"):
-        return {"error": "provider must be 'google' or 'microsoft'"}
+    if provider not in ("google", "microsoft", "whatsapp", "icloud_caldav", "github"):
+        return {
+            "error": "provider must be 'google', 'microsoft', 'whatsapp', 'icloud_caldav', or 'github'",
+        }
 
     redirect_base = await get_redirect_base(db)
     setup_token = _create_setup_token(user, provider)
+
+    if provider == "github":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "github",
+            "setup_token": setup_token,
+            "console_url": "https://github.com/settings/tokens",
+            "steps": [
+                {
+                    "title": "Create a personal access token",
+                    "action_url": "https://github.com/settings/tokens",
+                    "instruction": (
+                        "Create a **classic** or fine-grained token with at least `repo` (private repos) "
+                        "or public-repo scope for issues. Store it like a password — it grants API access to your account."
+                    ),
+                },
+                {
+                    "title": "Paste the token",
+                    "instruction": "Send the **access_token** (PAT) when ready. It is stored encrypted.",
+                    "expects": ["access_token"],
+                },
+            ],
+        }
+
+    if provider == "whatsapp":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "whatsapp",
+            "setup_token": setup_token,
+            "console_url": "https://developers.facebook.com/",
+            "steps": [
+                {
+                    "title": "Meta for Developers — WhatsApp product",
+                    "action_url": "https://developers.facebook.com/apps/",
+                    "instruction": (
+                        "Create or open an app, add the **WhatsApp** product, and open **WhatsApp → API "
+                        "Setup**. Copy the **Temporary or System User** access token (with whatsapp_business_messaging) "
+                        "and the **Phone number ID** for your test/production number."
+                    ),
+                },
+                {
+                    "title": "Paste token + Phone number ID",
+                    "instruction": (
+                        "Send me the **access token** and **phone_number_id** when ready. "
+                        "Session messages require the user to have messaged you within 24h; "
+                        "otherwise use approved **template** messages (Meta policy)."
+                    ),
+                    "expects": ["access_token", "phone_number_id"],
+                },
+            ],
+        }
+
+    if provider == "icloud_caldav":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "icloud_caldav",
+            "setup_token": setup_token,
+            "console_url": "https://appleid.apple.com/",
+            "steps": [
+                {
+                    "title": "App-specific password",
+                    "action_url": "https://appleid.apple.com/sign-in",
+                    "instruction": (
+                        "Under **Sign-In and Security**, create an **app-specific password** for this app. "
+                        "You cannot use your normal Apple ID password with CalDAV."
+                    ),
+                },
+                {
+                    "title": "Paste Apple ID + app password",
+                    "instruction": "Send me your **Apple ID email** and the **app-specific password**.",
+                    "expects": ["apple_id", "app_password"],
+                },
+            ],
+        }
 
     if provider == "google":
         existing = await get_google_app_credentials_form(db)
@@ -144,7 +225,10 @@ async def start_setup(db: AsyncSession, user: User, provider: str) -> dict[str, 
                 },
                 {
                     "title": "Conectar",
-                    "instruction": "Te daré un enlace para autorizar a Gmail / Calendar / Drive. Solo tienes que aceptar.",
+                    "instruction": (
+                        "Te daré un enlace para autorizar Gmail, Calendar, Drive, YouTube, Tasks y "
+                        "People (según el servicio que elijas). Solo tienes que aceptar."
+                    ),
                 },
             ],
         }
@@ -231,6 +315,97 @@ async def submit_credentials(
         return {"error": str(exc)}
 
     return {"ok": True, "provider": sess.provider, "next": "ask_me_to_connect"}
+
+
+async def submit_whatsapp_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    access_token: str,
+    phone_number_id: str,
+    graph_api_version: str | None = None,
+) -> dict[str, Any]:
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "whatsapp":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for whatsapp again"}
+    pnid = str(phone_number_id).strip()
+    tok = str(access_token).strip()
+    if not pnid or not tok:
+        return {"error": "access_token and phone_number_id are required"}
+    ver = (graph_api_version or "v21.0").strip()
+    if not ver.startswith("v"):
+        ver = f"v{ver}"
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="whatsapp_business",
+            label=f"WhatsApp · {pnid}",
+            credentials={
+                "access_token": tok,
+                "phone_number_id": pnid,
+                "graph_api_version": ver,
+            },
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "whatsapp_business", "next": "connected"}
+
+
+async def submit_github_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    access_token: str,
+) -> dict[str, Any]:
+    """Persist a GitHub PAT for REST API access (read issues/repos)."""
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "github":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for github again"}
+    tok = str(access_token or "").strip()
+    if not tok:
+        return {"error": "access_token is required"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="github",
+            label="GitHub",
+            credentials={"access_token": tok},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "github", "next": "connected"}
+
+
+async def submit_icloud_caldav_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    apple_id: str,
+    app_password: str,
+) -> dict[str, Any]:
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "icloud_caldav":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for icloud_caldav again"}
+    uid = str(apple_id).strip()
+    pw = str(app_password).strip()
+    if not uid or not pw:
+        return {"error": "apple_id and app_password are required"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="icloud_caldav",
+            label=f"iCloud · {uid}",
+            credentials={"username": uid, "password": pw},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "icloud_caldav", "next": "connected"}
 
 
 async def start_oauth(

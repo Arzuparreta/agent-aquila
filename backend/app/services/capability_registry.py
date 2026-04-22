@@ -1,7 +1,8 @@
 """Registry of proposal kinds the agent can produce.
 
-After the OpenClaw refactor only outbound email is proposal-gated.
-Everything else runs auto-applied via the live provider tools.
+After the OpenClaw refactor proposal-gated: outbound email, WhatsApp
+sends, and YouTube uploads. Other writes use auto-apply on the live
+provider tools.
 """
 from __future__ import annotations
 
@@ -16,7 +17,12 @@ class ProposalKindMeta(TypedDict):
     auto_apply: bool
 
 
-PROPOSAL_KINDS: tuple[str, ...] = ("email_send", "email_reply")
+PROPOSAL_KINDS: tuple[str, ...] = (
+    "email_send",
+    "email_reply",
+    "whatsapp_send",
+    "youtube_upload",
+)
 
 
 def proposal_kind_registry() -> dict[str, ProposalKindMeta]:

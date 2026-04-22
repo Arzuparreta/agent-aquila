@@ -39,6 +39,19 @@ SCOPES_CALENDAR = [
 SCOPES_DRIVE = [
     "https://www.googleapis.com/auth/drive",
 ]
+# YouTube Data API v3 — readonly + manage + upload (upload is quota-heavy; gate uploads via proposals).
+SCOPES_YOUTUBE = [
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.upload",
+]
+SCOPES_TASKS = [
+    "https://www.googleapis.com/auth/tasks",
+]
+# People API — read-only contact search for resolution (email/phone hints).
+SCOPES_PEOPLE = [
+    "https://www.googleapis.com/auth/contacts.readonly",
+]
 SCOPES_IDENTITY = ["openid", "email", "profile"]
 
 
@@ -101,7 +114,7 @@ def scopes_for_intent(intent: str) -> list[str]:
     """Translate an `intent` string from the UI into the concrete scope list."""
     parts = {p.strip().lower() for p in (intent or "all").split(",") if p.strip()}
     if "all" in parts or not parts:
-        parts = {"gmail", "calendar", "drive"}
+        parts = {"gmail", "calendar", "drive", "youtube", "tasks", "people"}
     selected: list[str] = list(SCOPES_IDENTITY)
     if "gmail" in parts:
         selected += SCOPES_GMAIL
@@ -109,6 +122,12 @@ def scopes_for_intent(intent: str) -> list[str]:
         selected += SCOPES_CALENDAR
     if "drive" in parts:
         selected += SCOPES_DRIVE
+    if "youtube" in parts:
+        selected += SCOPES_YOUTUBE
+    if "tasks" in parts:
+        selected += SCOPES_TASKS
+    if "people" in parts:
+        selected += SCOPES_PEOPLE
     # Deduplicate while preserving order.
     seen: set[str] = set()
     out: list[str] = []
@@ -129,6 +148,12 @@ def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
         out.append("google_calendar")
     if "/auth/drive" in joined:
         out.append("google_drive")
+    if "/auth/youtube" in joined:
+        out.append("google_youtube")
+    if "/auth/tasks" in joined:
+        out.append("google_tasks")
+    if "/auth/contacts" in joined:
+        out.append("google_people")
     return out
 
 
