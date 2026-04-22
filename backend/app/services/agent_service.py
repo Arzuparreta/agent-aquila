@@ -2013,7 +2013,6 @@ class AgentService:
                     effective == "native"
                     and allow_native_fallback
                     and not response.has_tool_calls
-                    and (response.content or "").strip()
                 ):
                     effective = "prompted"
                     allow_native_fallback = False
@@ -2091,8 +2090,16 @@ class AgentService:
                 )
 
                 if not response.has_tool_calls:
-                    run.assistant_reply = (response.content or "").strip()
-                    run.status = "completed"
+                    plain_reply = (response.content or "").strip()
+                    if plain_reply:
+                        run.assistant_reply = plain_reply
+                        run.status = "completed"
+                    else:
+                        run.status = "failed"
+                        run.error = (
+                            "Model returned an empty response without tool calls. "
+                            "Try again."
+                        )
                     break
 
                 if effective == "native":

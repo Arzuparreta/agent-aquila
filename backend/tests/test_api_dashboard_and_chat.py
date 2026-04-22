@@ -181,6 +181,63 @@ async def test_chat_send_idempotency_key_deduplicates_retries(
 
 
 @pytest.mark.asyncio
+async def test_native_empty_without_tool_calls_becomes_failed_system_message(
+    db_session: AsyncSession,
+    aquila_user: User,
+    chat_thread: ChatThread,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def override_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    async def override_user() -> User:
+        return aquila_user
+
+    monkeypatch.setattr(settings, "agent_async_runs", False)
+
+    async def fake_native(*args: object, **kwargs: object) -> ChatResponse:
+        return ChatResponse(content="", tool_calls=[])
+
+    async def fake_prompted(*args: object, **kwargs: object):
+        return ("", None, {}, None)
+
+    monkeypatch.setattr("app.services.agent_service.chat_turn_native", fake_native)
+    monkeypatch.setattr(
+        "app.services.agent_service.LLMClient.chat_completion_full",
+        fake_prompted,
+    )
+    monkeypatch.setattr(
+        "app.services.agent_service.resolve_effective_mode",
+        lambda *a, **k: "native",
+    )
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            r_msg = await ac.post(
+                f"/api/v1/threads/{chat_thread.id}/messages",
+                json={"content": "Marca ese correo como spam", "references": []},
+            )
+            assert r_msg.status_code == 200, r_msg.text
+            payload = r_msg.json()
+            asst = payload.get("assistant_message") or {}
+            assert asst.get("role") == "system"
+            assert "empty response without tool calls" in str(asst.get("content") or "").lower()
+
+            run_id = asst.get("agent_run_id")
+            assert isinstance(run_id, int)
+            r_run = await ac.get(f"/api/v1/agent/runs/{run_id}")
+            assert r_run.status_code == 200, r_run.text
+            run_payload = r_run.json()
+            assert run_payload.get("status") == "failed"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
 async def test_retry_endpoint_idempotency_header_deduplicates(
     db_session: AsyncSession,
     aquila_user: User,
