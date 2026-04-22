@@ -33,8 +33,11 @@ export function ChatThreadList({
   activeId,
   loading,
   error,
+  showArchived,
+  bulkArchivePending,
   onPick,
   onThreadListChanged,
+  onArchiveAllActive,
   onRenameThread,
   onTogglePinThread,
   onToggleArchiveThread,
@@ -44,8 +47,11 @@ export function ChatThreadList({
   activeId: number | null;
   loading: boolean;
   error: string | null;
+  showArchived: boolean;
+  bulkArchivePending: boolean;
   onPick: (id: number) => void;
   onThreadListChanged: () => Promise<void> | void;
+  onArchiveAllActive: () => Promise<void> | void;
   onRenameThread: (id: number, title: string) => Promise<void> | void;
   onTogglePinThread: (id: number, next: boolean) => Promise<void> | void;
   onToggleArchiveThread: (id: number, next: boolean) => Promise<void> | void;
@@ -70,6 +76,25 @@ export function ChatThreadList({
         <div className="flex-1 text-sm font-semibold uppercase tracking-wide text-fg-subtle">
           {t("chat.threadList.title")}
         </div>
+        {!showArchived ? (
+          <button
+            type="button"
+            disabled={bulkArchivePending || threads.length === 0}
+            onClick={() => {
+              void onArchiveAllActive();
+            }}
+            className="rounded-md p-1 text-fg-muted hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={t("chat.archive.archiveAllAria")}
+            title={t("chat.archive.archiveAll")}
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M3 7h18" />
+              <path d="M5 7l1.2 12a2 2 0 0 0 2 1.8h7.6a2 2 0 0 0 2-1.8L19 7" />
+              <path d="M9.5 11.5v5M14.5 11.5v5" />
+              <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+            </svg>
+          </button>
+        ) : null}
         <button
           onClick={startNewThread}
           className="rounded-md p-1 text-fg-muted hover:bg-interactive-hover"

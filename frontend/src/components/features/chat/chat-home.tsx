@@ -48,6 +48,7 @@ export function ChatHome() {
   const [showArchived, setShowArchived] = useState(false);
   const [deleteAllArchivedOpen, setDeleteAllArchivedOpen] = useState(false);
   const [deleteAllArchivedPending, setDeleteAllArchivedPending] = useState(false);
+  const [bulkArchivePending, setBulkArchivePending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ kind: "ok" | "error"; text: string; action?: { label: string; onClick: () => void } } | null>(null);
 
   const refreshThreads = useCallback(
@@ -296,6 +297,34 @@ export function ChatHome() {
     }
   }, [refreshThreads, t]);
 
+  const onArchiveAllActive = useCallback(async () => {
+    const activeThreads = threads.filter((th) => !th.archived);
+    if (activeThreads.length === 0) return;
+    setBulkArchivePending(true);
+    try {
+      await Promise.all(
+        activeThreads.map((th) =>
+          apiFetch<ChatThread>(`/threads/${th.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ archived: true })
+          })
+        )
+      );
+      await refreshThreads(false);
+      setStatusMessage({
+        kind: "ok",
+        text: t("chat.status.allActiveArchived", { count: activeThreads.length })
+      });
+    } catch (err) {
+      setStatusMessage({
+        kind: "error",
+        text: err instanceof ApiError ? err.message : t("chat.errors.archiveAllFailed")
+      });
+    } finally {
+      setBulkArchivePending(false);
+    }
+  }, [refreshThreads, t, threads]);
+
   return (
     <div className="app-shell bg-surface-base text-fg">
       <ChatTopBar
@@ -329,7 +358,7 @@ export function ChatHome() {
           />
           <ArchivedBulkToolbar
             showArchived={showArchived}
-            disabled={loading || visibleThreads.length === 0}
+            disabled={deleteAllArchivedPending || loading || visibleThreads.length === 0}
             onRequestDeleteAll={() => setDeleteAllArchivedOpen(true)}
           />
           <ChatThreadList
@@ -337,8 +366,11 @@ export function ChatHome() {
             activeId={activeId}
             loading={loading}
             error={error}
+            showArchived={showArchived}
+            bulkArchivePending={bulkArchivePending}
             onPick={onPickThread}
             onThreadListChanged={onThreadListChanged}
+            onArchiveAllActive={onArchiveAllActive}
             onRenameThread={onRenameThread}
             onTogglePinThread={onTogglePinThread}
             onToggleArchiveThread={onToggleArchiveThread}
@@ -359,7 +391,7 @@ export function ChatHome() {
               />
               <ArchivedBulkToolbar
                 showArchived={showArchived}
-                disabled={loading || visibleThreads.length === 0}
+                disabled={deleteAllArchivedPending || loading || visibleThreads.length === 0}
                 onRequestDeleteAll={() => setDeleteAllArchivedOpen(true)}
               />
               <ChatThreadList
@@ -367,8 +399,11 @@ export function ChatHome() {
                 activeId={activeId}
                 loading={loading}
                 error={error}
+                showArchived={showArchived}
+                bulkArchivePending={bulkArchivePending}
                 onPick={onPickThread}
                 onThreadListChanged={onThreadListChanged}
+                onArchiveAllActive={onArchiveAllActive}
                 onRenameThread={onRenameThread}
                 onTogglePinThread={onTogglePinThread}
                 onToggleArchiveThread={onToggleArchiveThread}
@@ -425,15 +460,21 @@ function ArchivedBulkToolbar({
   const { t } = useTranslation();
   if (!showArchived) return null;
   return (
-    <div className="flex border-b border-border-subtle px-3 py-2">
+    <div className="flex justify-end border-b border-border-subtle px-3 py-2">
       <button
         type="button"
         disabled={disabled}
         onClick={onRequestDeleteAll}
         aria-label={t("chat.archive.deleteAllAria")}
-        className="text-xs font-medium text-rose-400 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+        title={t("chat.archive.deleteAll")}
+        className="rounded-md p-1 text-rose-400 hover:bg-interactive-hover hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {t("chat.archive.deleteAll")}
+        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M3 7h18" />
+          <path d="M5 7l1.2 12a2 2 0 0 0 2 1.8h7.6a2 2 0 0 0 2-1.8L19 7" />
+          <path d="M9.5 11.5v5M14.5 11.5v5" />
+          <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+        </svg>
       </button>
     </div>
   );
