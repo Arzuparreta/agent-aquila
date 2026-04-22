@@ -49,9 +49,10 @@ Use this before merging a new provider:
 
 | Surface | Feasibility | Notes |
 |---------|-------------|--------|
-| **iCloud Calendar / Contacts** | Medium | **CalDAV / CardDAV** with app-specific passwords; not OAuth2-in-the-browser like Google. |
-| **iCloud Drive** | Low | No first-party “Google Drive–like” REST for arbitrary files for third parties. |
-| **EventKit / File Provider (macOS/iOS)** | Medium | Requires a **local bridge** (companion app or MCP on device) — different trust and distribution model. |
+| **iCloud Calendar** | Done | **CalDAV** with app-specific passwords on provider `icloud_caldav`. |
+| **iCloud Drive** | Done (best-effort) | Same connector: **PyiCloud** (Apple web APIs), not a published first-party Drive REST. Tools: `icloud_drive_list_folder`, `icloud_drive_get_file`. May require 2FA / device approval; can break if Apple changes endpoints. |
+| **iCloud Contacts (CardDAV)** | Medium | Same password model as CalDAV; not wired yet. |
+| **EventKit / File Provider (macOS/iOS)** | Medium | Optional **device bridge** (`POST /device-files/ingest`) for files pushed from Shortcuts — complements Drive when web login is blocked. |
 
 ## Suggested phases
 
@@ -63,7 +64,7 @@ Use this before merging a new provider:
 ## iOS files vs server-side connectors (Track A / B)
 
 - **Track A — Device bridge (implemented, minimal):** Authenticated `POST /api/v1/device-files/ingest` (JSON: `filename`, `path_hint`, `mime_type`, `content_base64`, max 4 MiB decoded). The agent can list and read small ingests with **`device_list_ingested_files`** / **`device_get_ingested_file`**. A **Shortcuts** action can `Get Contents of URL` with the user’s bearer token to upload from iOS.
-- **Track B — Defer iCloud Drive parity:** There is no Google Drive–style public REST for arbitrary iCloud Drive third-party access. Until Track A exists, **Google Drive** (already integrated) is the practical cross-device file layer for this harness.
+- **Track B — iCloud Drive (implemented via PyiCloud):** There is still no Google Drive–style *official* REST for consumer iCloud Drive. This harness uses **PyiCloud** against Apple’s web APIs, sharing credentials with CalDAV on `icloud_caldav`. Prefer **Google Drive** when you need OAuth-stable, long-term server automation; use **iCloud Drive tools** when the user’s files live in iCloud and accept Apple/web-login constraints. **Health** for `icloud_caldav` verifies both CalDAV and Drive root listing.
 
 ## Related docs
 

@@ -342,9 +342,10 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
     ),
     _fn(
         "icloud_calendar_list_calendars",
-        "List iCloud calendars (CalDAV) using an **app-specific password** (not your Apple ID password). "
-        "Returns calendar names and **calendar_url** values — copy the URL for "
-        "``icloud_calendar_list_events`` / create. Re-run if URLs look stale. "
+        "List iCloud calendars (CalDAV) using the **icloud_caldav** connection (Apple ID + "
+        "**app-specific password**). The same connection enables **iCloud Drive** via "
+        "``icloud_drive_list_folder`` / ``icloud_drive_get_file``. Returns calendar names and "
+        "**calendar_url** values for ``icloud_calendar_list_events`` / create. "
         "Optional ``connection_id``.",
         {**_CONNECTION_ID},
     ),
@@ -360,6 +361,32 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
             "end_date": {"type": "string", "description": "YYYY-MM-DD"},
         },
         required=["calendar_url"],
+    ),
+    _fn(
+        "icloud_drive_list_folder",
+        "List immediate children of a folder in **iCloud Drive** (live). Uses the same "
+        "``icloud_caldav`` connector as Calendar. ``path`` is slash-separated from Drive root "
+        "(e.g. ``Documents`` or ``Keynote``); omit for root. Apple may require two-factor or "
+        "device approval for web login. Optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "path": {
+                "type": "string",
+                "description": "Folder path from Drive root; empty string = root listing.",
+            },
+        },
+    ),
+    _fn(
+        "icloud_drive_get_file",
+        "Download one file from **iCloud Drive** as ``content_base64``. ``path`` must end with "
+        "the file name (e.g. ``Notes/example.txt``). ``max_bytes`` caps size (default 4 MiB, max 32 MiB). "
+        "Optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "path": {"type": "string"},
+            "max_bytes": {"type": "integer", "minimum": 1, "maximum": 33554432},
+        },
+        required=["path"],
     ),
     _fn(
         "outlook_list_messages",
@@ -725,11 +752,13 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     _fn(
         "submit_icloud_caldav_credentials",
         "After ``start_connector_setup`` for iCloud CalDAV, save **Apple ID** + "
-        "**app-specific password**. Auto-applies.",
+        "**app-specific password** (also used for iCloud Drive in this harness). "
+        "Set ``china_mainland`` true when the Apple ID region is China mainland. Auto-applies.",
         {
             "setup_token": {"type": "string"},
             "apple_id": {"type": "string"},
             "app_password": {"type": "string"},
+            "china_mainland": {"type": "boolean"},
         },
         required=["setup_token", "apple_id", "app_password"],
     ),
@@ -1157,6 +1186,8 @@ def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:
     if n.startswith("people_"):
         return frozenset({"google_people"})
     if n.startswith("icloud_calendar_"):
+        return frozenset({"icloud_caldav"})
+    if n.startswith("icloud_drive_"):
         return frozenset({"icloud_caldav"})
     if n == "propose_whatsapp_send":
         return frozenset({"whatsapp_business"})

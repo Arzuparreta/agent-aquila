@@ -161,7 +161,7 @@ const en = {
   // ── Cockpit ──────────────────────────────────────────────────────────────
   "cockpit.title": "Agent console",
   "cockpit.intro":
-    "Ask about mail, calendar, files, and Teams in plain language. Agent Aquila uses your connected accounts and saved skills; sensitive outbound actions may need your approval first. Add or inspect connector credentials in Settings.",
+    "Ask about mail, calendar, files, Teams, WhatsApp, iCloud Calendar, or GitHub in plain language. Agent Aquila uses your connected accounts and saved skills; sensitive outbound actions may need your approval first. Add or inspect connector credentials in Settings.",
   "cockpit.example":
     'Example: "What unread emails need a reply today?" or "When is my next meeting?"',
   "cockpit.you": "You",
@@ -289,7 +289,7 @@ const en = {
   // ── Connectors ───────────────────────────────────────────────────────────
   "connectors.title": "External connectors",
   "connectors.intro":
-    "Connect your accounts with a single click. Google Workspace (Gmail, Calendar, Drive) uses OAuth 2.0 and tokens are refreshed automatically. Mirrored data lives in Postgres and is available to the agent for search and drafting. Writes (send, create event, upload) remain human-gated.",
+    "Connect your accounts here. Google Workspace and Microsoft 365 use OAuth 2.0. WhatsApp Business (Meta Cloud API), iCloud Calendar (CalDAV with an app-specific password), and GitHub (personal access token) use static credentials stored encrypted. Outbound sends and other risky actions stay human-gated where the harness requires it.",
   "connectors.publicUrlTitle": "This app's web address",
   "connectors.publicUrlIntro":
     "Use the same address people type to open this site (example: <mono>http://localhost:3002</mono> at home, or your real domain in production). No trailing slash. Google and Microsoft both use it for secure return links after sign-in.",
@@ -388,7 +388,8 @@ const en = {
     "Save the Application ID and secret above first, then these buttons open Microsoft sign-in.",
   "connectors.ms.tooltipCompleteStep2": "Complete Step 2 and save, then try again.",
 
-  "connectors.advanced.show": "Advanced: add SMTP / mock / paste-a-token",
+  "connectors.advanced.show":
+    "Advanced: SMTP, mock providers, manual JSON, or legacy token paste",
   "connectors.advanced.hide": "Hide advanced",
   "connectors.advanced.provider": "Provider",
   "connectors.advanced.label": "Label",
@@ -397,7 +398,8 @@ const en = {
   "connectors.advanced.add": "Add connection",
 
   "connectors.saved.title": "Saved connections",
-  "connectors.saved.empty": "None yet. Connect Google or Microsoft above to get started.",
+  "connectors.saved.empty":
+    "None yet. Connect Google, Microsoft, or another integration above to get started.",
   "connectors.saved.needsReauth": "needs reconnect",
   "connectors.saved.syncNow": "Sync now",
   "connectors.saved.remove": "Remove",
@@ -431,6 +433,53 @@ const en = {
   "connectors.provider.graph_onedrive": "Microsoft OneDrive / SharePoint",
   "connectors.provider.google_drive": "Google Drive (manual token — prefer Connect Google)",
   "connectors.provider.graph_teams": "Microsoft Teams (Graph)",
+  "connectors.provider.whatsapp_business": "WhatsApp Business (Meta Cloud API)",
+  "connectors.provider.icloud_caldav": "iCloud (Calendar + Drive)",
+  "connectors.provider.github": "GitHub (personal access token)",
+
+  "connectors.whatsapp.title": "WhatsApp Business (Meta Cloud API)",
+  "connectors.whatsapp.intro":
+    "Paste a <strong>System User</strong> or temporary access token and the <strong>Phone number ID</strong> from Meta for Developers → your app → WhatsApp → API Setup. Session text messages only work inside Meta’s 24h window unless you use approved templates — same rules as the Cloud API.",
+  "connectors.whatsapp.consoleLink": "Meta for Developers — apps",
+  "connectors.whatsapp.accessToken": "Access token",
+  "connectors.whatsapp.phoneNumberId": "Phone number ID",
+  "connectors.whatsapp.graphVersion": "Graph API version",
+  "connectors.whatsapp.graphVersionHint": "Default <mono>v21.0</mono>; change only if your app uses another version.",
+  "connectors.whatsapp.label": "Label",
+  "connectors.whatsapp.labelPlaceholder": "Work WhatsApp number",
+  "connectors.whatsapp.save": "Save WhatsApp connection",
+  "connectors.whatsapp.saving": "Saving…",
+  "connectors.whatsapp.saved": "WhatsApp connection saved. Use Verify access on the connection below.",
+  "connectors.whatsapp.errors.missing": "Access token, phone number ID, and label are required.",
+
+  "connectors.icloud.title": "iCloud Calendar + Drive",
+  "connectors.icloud.intro":
+    "Use your Apple ID email and an <strong>app-specific password</strong> from appleid.apple.com (not your normal Apple ID password). <strong>Calendar</strong> uses CalDAV. <strong>iCloud Drive</strong> uses the same credential via Apple’s web APIs (PyiCloud); Apple may still require two-factor or device approval for Drive. This is not an official Apple REST product — behaviour can change if Apple updates their web services.",
+  "connectors.icloud.consoleLink": "Apple ID — sign-in and security",
+  "connectors.icloud.appleId": "Apple ID email",
+  "connectors.icloud.appPassword": "App-specific password",
+  "connectors.icloud.chinaMainland": "Apple ID is for China mainland",
+  "connectors.icloud.chinaMainlandHint":
+    "Check this only if Apple documents say your account should use the mainland iCloud endpoint (PyiCloud ``china_mainland``).",
+  "connectors.icloud.label": "Label",
+  "connectors.icloud.labelPlaceholder": "Personal iCloud",
+  "connectors.icloud.save": "Save iCloud connection",
+  "connectors.icloud.saving": "Saving…",
+  "connectors.icloud.saved":
+    "iCloud connection saved. Use Verify access below — it checks both Calendar and Drive.",
+  "connectors.icloud.errors.missing": "Apple ID, app-specific password, and label are required.",
+
+  "connectors.github.title": "GitHub",
+  "connectors.github.intro":
+    "Create a <strong>classic or fine-grained</strong> personal access token with the scopes you need (for example repo read). Tokens are stored encrypted; treat them like passwords.",
+  "connectors.github.consoleLink": "GitHub — developer settings / tokens",
+  "connectors.github.pat": "Personal access token",
+  "connectors.github.label": "Label",
+  "connectors.github.labelPlaceholder": "My GitHub",
+  "connectors.github.save": "Save GitHub connection",
+  "connectors.github.saving": "Saving…",
+  "connectors.github.saved": "GitHub connection saved. Use Verify access below.",
+  "connectors.github.errors.missing": "Token and label are required.",
 
   // ── Technical settings page ───────────────────────────────────────────────
   "settings.technical.backToChat": "← Back to chat",
@@ -524,7 +573,7 @@ const en = {
   "settings.ranking.pressTestChat": "Run connection test on that provider if the list is empty.",
   "settings.connectorsCardTitle": "Connectors",
   "settings.connectorsCardIntro":
-    "Usually Agent Aquila walks you through linking Gmail, Outlook, or Google Drive from chat. This area is for inspecting or removing connections manually.",
+    "Link Google, Microsoft, WhatsApp Business, iCloud Calendar, or GitHub here (or from chat). Use this page to verify tokens, add another account, or remove a connection.",
   "settings.memorySectionTitle": "Agent memory",
   "settings.skillsSectionTitle": "Agent skills",
   "settings.maintenanceSectionTitle": "Maintenance",
@@ -986,7 +1035,7 @@ const es: Record<keyof typeof en, string> = {
   // ── Cockpit ──────────────────────────────────────────────────────────────
   "cockpit.title": "Consola del agente",
   "cockpit.intro":
-    "Pregunta sobre correo, calendario, archivos y Teams en lenguaje natural. Agent Aquila usa tus cuentas conectadas y habilidades guardadas; las acciones salientes sensibles pueden requerir tu aprobación primero. Añade o revisa credenciales de conectores en Ajustes.",
+    "Pregunta sobre correo, calendario, archivos, Teams, WhatsApp, Calendario de iCloud o GitHub en lenguaje natural. Agent Aquila usa tus cuentas conectadas y habilidades guardadas; las acciones salientes sensibles pueden requerir tu aprobación primero. Añade o revisa credenciales de conectores en Ajustes.",
   "cockpit.example":
     'Ejemplo: «¿Qué correos sin leer necesitan respuesta hoy?» o «¿Cuándo es mi próxima reunión?»',
   "cockpit.you": "Tú",
@@ -1118,7 +1167,7 @@ const es: Record<keyof typeof en, string> = {
   // ── Connectors ───────────────────────────────────────────────────────────
   "connectors.title": "Conectores externos",
   "connectors.intro":
-    "Conecta tus cuentas con un solo clic. Google Workspace (Gmail, Calendar, Drive) usa OAuth 2.0 y los tokens se renuevan automáticamente. Los datos sincronizados se almacenan en Postgres y quedan disponibles para el agente para búsquedas y borradores. Las escrituras (envíos, creación de eventos, subidas) siguen requiriendo aprobación humana.",
+    "Conecta tus cuentas aquí. Google Workspace y Microsoft 365 usan OAuth 2.0. WhatsApp Business (API en la nube de Meta), Calendario de iCloud (CalDAV con contraseña específica de app) y GitHub (token personal) usan credenciales estáticas cifradas. Los envíos y otras acciones sensibles siguen sujetos a aprobación humana cuando el harness lo exige.",
   "connectors.publicUrlTitle": "Dirección web de esta aplicación",
   "connectors.publicUrlIntro":
     "Usa la misma dirección que la gente escribe para abrir este sitio (por ejemplo: <mono>http://localhost:3002</mono> en local, o tu dominio real en producción). Sin barra final. Tanto Google como Microsoft la utilizan para los enlaces de retorno seguros tras iniciar sesión.",
@@ -1220,7 +1269,8 @@ const es: Record<keyof typeof en, string> = {
     "Guarda primero el ID de aplicación y el secreto; entonces estos botones abrirán el inicio de sesión de Microsoft.",
   "connectors.ms.tooltipCompleteStep2": "Completa el paso 2 y guarda; después vuelve a intentarlo.",
 
-  "connectors.advanced.show": "Avanzado: añadir SMTP / mock / pegar un token",
+  "connectors.advanced.show":
+    "Avanzado: SMTP, proveedores mock, JSON manual o pegado legacy de token",
   "connectors.advanced.hide": "Ocultar avanzado",
   "connectors.advanced.provider": "Proveedor",
   "connectors.advanced.label": "Etiqueta",
@@ -1229,7 +1279,8 @@ const es: Record<keyof typeof en, string> = {
   "connectors.advanced.add": "Agregar conexión",
 
   "connectors.saved.title": "Conexiones guardadas",
-  "connectors.saved.empty": "Aún no hay ninguna. Conecta Google o Microsoft arriba para empezar.",
+  "connectors.saved.empty":
+    "Aún no hay ninguna. Conecta Google, Microsoft u otra integración de arriba para empezar.",
   "connectors.saved.needsReauth": "requiere reconexión",
   "connectors.saved.syncNow": "Sincronizar ahora",
   "connectors.saved.remove": "Eliminar",
@@ -1264,6 +1315,53 @@ const es: Record<keyof typeof en, string> = {
   "connectors.provider.graph_onedrive": "Microsoft OneDrive / SharePoint",
   "connectors.provider.google_drive": "Google Drive (token manual — usa preferiblemente «Conectar Google»)",
   "connectors.provider.graph_teams": "Microsoft Teams (Graph)",
+  "connectors.provider.whatsapp_business": "WhatsApp Business (API en la nube de Meta)",
+  "connectors.provider.icloud_caldav": "iCloud (Calendario + Drive)",
+  "connectors.provider.github": "GitHub (token personal)",
+
+  "connectors.whatsapp.title": "WhatsApp Business (API en la nube de Meta)",
+  "connectors.whatsapp.intro":
+    "Pega un token de acceso de <strong>usuario del sistema</strong> o temporal y el <strong>ID del número de teléfono</strong> desde Meta for Developers → tu app → WhatsApp → Configuración de la API. Los mensajes de texto de sesión solo funcionan dentro de la ventana de 24h de Meta salvo que uses plantillas aprobadas — mismas reglas que la API en la nube.",
+  "connectors.whatsapp.consoleLink": "Meta for Developers — aplicaciones",
+  "connectors.whatsapp.accessToken": "Token de acceso",
+  "connectors.whatsapp.phoneNumberId": "ID del número de teléfono",
+  "connectors.whatsapp.graphVersion": "Versión de Graph API",
+  "connectors.whatsapp.graphVersionHint": "Por defecto <mono>v21.0</mono>; cámbiala solo si tu app usa otra versión.",
+  "connectors.whatsapp.label": "Etiqueta",
+  "connectors.whatsapp.labelPlaceholder": "WhatsApp del trabajo",
+  "connectors.whatsapp.save": "Guardar conexión de WhatsApp",
+  "connectors.whatsapp.saving": "Guardando…",
+  "connectors.whatsapp.saved": "Conexión de WhatsApp guardada. Usa «Comprobar acceso» en la lista inferior.",
+  "connectors.whatsapp.errors.missing": "Token de acceso, ID del número y etiqueta son obligatorios.",
+
+  "connectors.icloud.title": "iCloud Calendario + Drive",
+  "connectors.icloud.intro":
+    "Usa el correo de tu Apple ID y una <strong>contraseña específica de app</strong> de appleid.apple.com (no la contraseña normal del Apple ID). El <strong>Calendario</strong> usa CalDAV. <strong>iCloud Drive</strong> usa la misma credencial vía las APIs web de Apple (PyiCloud); Apple puede pedir dos factores o aprobación en dispositivo para Drive. No es un producto REST oficial de Apple — el comportamiento puede cambiar.",
+  "connectors.icloud.consoleLink": "Apple ID — inicio de sesión y seguridad",
+  "connectors.icloud.appleId": "Correo del Apple ID",
+  "connectors.icloud.appPassword": "Contraseña específica de app",
+  "connectors.icloud.chinaMainland": "Apple ID es de China continental",
+  "connectors.icloud.chinaMainlandHint":
+    "Márcalo solo si Apple indica que tu cuenta debe usar el endpoint de iCloud de China continental (PyiCloud ``china_mainland``).",
+  "connectors.icloud.label": "Etiqueta",
+  "connectors.icloud.labelPlaceholder": "iCloud personal",
+  "connectors.icloud.save": "Guardar conexión de iCloud",
+  "connectors.icloud.saving": "Guardando…",
+  "connectors.icloud.saved":
+    "Conexión de iCloud guardada. Usa «Comprobar acceso» abajo — comprueba Calendario y Drive.",
+  "connectors.icloud.errors.missing": "Apple ID, contraseña de app y etiqueta son obligatorios.",
+
+  "connectors.github.title": "GitHub",
+  "connectors.github.intro":
+    "Crea un token personal <strong>clásico o con permisos finos</strong> con los alcances que necesites (por ejemplo lectura de repos). Los tokens se guardan cifrados; trátalos como contraseñas.",
+  "connectors.github.consoleLink": "GitHub — ajustes de desarrollador / tokens",
+  "connectors.github.pat": "Token personal (PAT)",
+  "connectors.github.label": "Etiqueta",
+  "connectors.github.labelPlaceholder": "Mi GitHub",
+  "connectors.github.save": "Guardar conexión de GitHub",
+  "connectors.github.saving": "Guardando…",
+  "connectors.github.saved": "Conexión de GitHub guardada. Usa «Comprobar acceso» abajo.",
+  "connectors.github.errors.missing": "Token y etiqueta son obligatorios.",
 
   // ── Technical settings page ───────────────────────────────────────────────
   "settings.technical.backToChat": "← Volver al chat",
@@ -1357,7 +1455,7 @@ const es: Record<keyof typeof en, string> = {
   "settings.ranking.pressTestChat": "Prueba la conexión de ese proveedor si la lista está vacía.",
   "settings.connectorsCardTitle": "Conectores",
   "settings.connectorsCardIntro":
-    "Casi siempre Agent Aquila te guiará para conectar Gmail, Outlook o Google Drive desde el chat. Esta zona es para inspeccionar o quitar manualmente conexiones.",
+    "Vincula Google, Microsoft, WhatsApp Business, Calendario de iCloud o GitHub aquí (o desde el chat). Usa esta página para comprobar tokens, añadir otra cuenta o eliminar una conexión.",
   "settings.memorySectionTitle": "Memoria del agente",
   "settings.skillsSectionTitle": "Habilidades del agente",
   "settings.maintenanceSectionTitle": "Mantenimiento",

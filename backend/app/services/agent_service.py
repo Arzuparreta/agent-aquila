@@ -23,6 +23,7 @@ Mis-invoked tools return structured errors; the model is expected to retry.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -104,6 +105,12 @@ from app.services.connectors.google_people_client import GooglePeopleAPIError, G
 from app.services.connectors.google_tasks_client import GoogleTasksAPIError, GoogleTasksClient
 from app.services.connectors.graph_client import GraphAPIError, GraphClient
 from app.services.connectors.icloud_caldav_client import ICloudCalDAVError, ICloudCalDAVClient
+from app.services.connectors.icloud_drive_client import (
+    DEFAULT_DOWNLOAD_MAX_BYTES,
+    ICloudDriveError,
+    download_file_sync,
+    list_folder_sync,
+)
 from app.services.connectors.whatsapp_client import WhatsAppAPIError, WhatsAppClient
 from app.services.connectors.youtube_client import YoutubeAPIError, YoutubeClient
 from app.services.connectors.github_client import GitHubAPIError, GitHubClient
@@ -361,10 +368,16 @@ async def _people_client(db: AsyncSession, row: ConnectorConnection) -> GooglePe
     return GooglePeopleClient(token)
 
 
-def _icloud_caldav_client(row: ConnectorConnection) -> ICloudCalDAVClient:
+def _icloud_app_password_creds(row: ConnectorConnection) -> tuple[str, str, bool]:
     creds = ConnectorService.decrypt_credentials(row)
-    user = str(creds.get("username") or "").strip()
-    pw = str(creds.get("password") or "")
+    user = str(creds.get("username") or creds.get("apple_id") or "").strip()
+    pw = str(creds.get("password") or creds.get("app_password") or "")
+    china = bool(creds.get("china_mainland"))
+    return user, pw, china
+
+
+def _icloud_caldav_client(row: ConnectorConnection) -> ICloudCalDAVClient:
+    user, pw, _china = _icloud_app_password_creds(row)
     return ICloudCalDAVClient(user, pw)
 
 
@@ -1025,6 +1038,52 @@ class AgentService:
         )
 
     @staticmethod
+    async def _tool_icloud_drive_list_folder(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        path = str(args.get("path") or "")
+        try:
+            return await asyncio.to_thread(
+                list_folder_sync,
+                uid,
+                pw,
+                connection_id=row.id,
+                china_mainland=china,
+                path=path,
+            )
+        except ICloudDriveError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
+    async def _tool_icloud_drive_get_file(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        fpath = str(args.get("path") or "").strip()
+        if not fpath:
+            return {"error": "path is required (slash-separated from Drive root, e.g. Documents/notes.txt)"}
+        max_b = int(args.get("max_bytes") or DEFAULT_DOWNLOAD_MAX_BYTES)
+        try:
+            return await asyncio.to_thread(
+                download_file_sync,
+                uid,
+                pw,
+                connection_id=row.id,
+                china_mainland=china,
+                path=fpath,
+                max_bytes=max_b,
+            )
+        except ICloudDriveError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
     async def _tool_submit_whatsapp_credentials(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1058,6 +1117,7 @@ class AgentService:
             setup_token=str(args.get("setup_token") or ""),
             apple_id=str(args.get("apple_id") or ""),
             app_password=str(args.get("app_password") or ""),
+            china_mainland=bool(args.get("china_mainland")),
         )
 
     # ------------------------------------------------------------------

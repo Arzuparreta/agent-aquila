@@ -24,8 +24,18 @@ const PROVIDER_EXAMPLES: ProviderExample[] = [
   { id: "google_calendar", labelKey: "connectors.provider.google_calendar" },
   { id: "graph_onedrive", labelKey: "connectors.provider.graph_onedrive" },
   { id: "google_drive", labelKey: "connectors.provider.google_drive" },
-  { id: "graph_teams", labelKey: "connectors.provider.graph_teams" }
+  { id: "graph_teams", labelKey: "connectors.provider.graph_teams" },
+  { id: "whatsapp_business", labelKey: "connectors.provider.whatsapp_business" },
+  { id: "icloud_caldav", labelKey: "connectors.provider.icloud_caldav" },
+  { id: "github", labelKey: "connectors.provider.github" }
 ];
+
+/** Saved-connection list: human-readable provider names (raw id otherwise). */
+const CONNECTOR_PROVIDER_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
+  whatsapp_business: "connectors.provider.whatsapp_business",
+  icloud_caldav: "connectors.provider.icloud_caldav",
+  github: "connectors.provider.github"
+};
 
 type OAuthCredentialSource = "database" | "environment" | "none";
 
@@ -129,6 +139,22 @@ export function ConnectorsSection() {
     Record<number, { variant: "ok" | "err"; text: string }>
   >({});
   const [verifyLoadingId, setVerifyLoadingId] = useState<number | null>(null);
+
+  const [waAccessToken, setWaAccessToken] = useState("");
+  const [waPhoneId, setWaPhoneId] = useState("");
+  const [waGraphVer, setWaGraphVer] = useState("v21.0");
+  const [waLabel, setWaLabel] = useState("");
+  const [waSaving, setWaSaving] = useState(false);
+
+  const [icloudAppleId, setIcloudAppleId] = useState("");
+  const [icloudAppPassword, setIcloudAppPassword] = useState("");
+  const [icloudLabel, setIcloudLabel] = useState("");
+  const [icloudChinaMainland, setIcloudChinaMainland] = useState(false);
+  const [icloudSaving, setIcloudSaving] = useState(false);
+
+  const [ghPat, setGhPat] = useState("");
+  const [ghLabel, setGhLabel] = useState("");
+  const [ghSaving, setGhSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -353,6 +379,113 @@ export function ConnectorsSection() {
       setError(e instanceof Error ? e.message : t("connectors.errors.deleteFailed"));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const normalizeGraphApiVersion = (raw: string) => {
+    const s = (raw || "v21.0").trim() || "v21.0";
+    return s.startsWith("v") ? s : `v${s}`;
+  };
+
+  const saveWhatsAppConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!waAccessToken.trim() || !waPhoneId.trim() || !waLabel.trim()) {
+      setError(t("connectors.whatsapp.errors.missing"));
+      return;
+    }
+    setWaSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "whatsapp_business",
+          label: waLabel.trim(),
+          credentials: {
+            access_token: waAccessToken.trim(),
+            phone_number_id: waPhoneId.trim(),
+            graph_api_version: normalizeGraphApiVersion(waGraphVer)
+          },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setWaAccessToken("");
+      setWaPhoneId("");
+      setWaGraphVer("v21.0");
+      setWaLabel("");
+      setInfo(t("connectors.whatsapp.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setWaSaving(false);
+    }
+  };
+
+  const saveIcloudConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!icloudAppleId.trim() || !icloudAppPassword.trim() || !icloudLabel.trim()) {
+      setError(t("connectors.icloud.errors.missing"));
+      return;
+    }
+    setIcloudSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "icloud_caldav",
+          label: icloudLabel.trim(),
+          credentials: {
+            username: icloudAppleId.trim(),
+            password: icloudAppPassword.trim(),
+            ...(icloudChinaMainland ? { china_mainland: true } : {})
+          },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setIcloudAppleId("");
+      setIcloudAppPassword("");
+      setIcloudLabel("");
+      setIcloudChinaMainland(false);
+      setInfo(t("connectors.icloud.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setIcloudSaving(false);
+    }
+  };
+
+  const saveGithubConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!ghPat.trim() || !ghLabel.trim()) {
+      setError(t("connectors.github.errors.missing"));
+      return;
+    }
+    setGhSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "github",
+          label: ghLabel.trim(),
+          credentials: { access_token: ghPat.trim() },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setGhPat("");
+      setGhLabel("");
+      setInfo(t("connectors.github.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setGhSaving(false);
     }
   };
 
@@ -696,6 +829,196 @@ export function ConnectorsSection() {
         </div>
       </div>
 
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.whatsapp.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.whatsapp.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://developers.facebook.com/apps/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.whatsapp.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveWhatsAppConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.whatsapp.accessToken")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={waAccessToken}
+              onChange={(e) => setWaAccessToken(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.whatsapp.phoneNumberId")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              value={waPhoneId}
+              onChange={(e) => setWaPhoneId(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.whatsapp.graphVersion")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              value={waGraphVer}
+              onChange={(e) => setWaGraphVer(e.target.value)}
+              placeholder="v21.0"
+              autoComplete="off"
+            />
+            <span className="mt-1 block font-normal text-fg-subtle">
+              <RichText text={t("connectors.whatsapp.graphVersionHint")} />
+            </span>
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.whatsapp.label")}
+            <Input
+              className="mt-1"
+              value={waLabel}
+              onChange={(e) => setWaLabel(e.target.value)}
+              placeholder={t("connectors.whatsapp.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={waSaving}
+          >
+            {waSaving ? t("connectors.whatsapp.saving") : t("connectors.whatsapp.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.icloud.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.icloud.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://appleid.apple.com/sign-in"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.icloud.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveIcloudConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.icloud.appleId")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="email"
+              value={icloudAppleId}
+              onChange={(e) => setIcloudAppleId(e.target.value)}
+              autoComplete="username"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.icloud.appPassword")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={icloudAppPassword}
+              onChange={(e) => setIcloudAppPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="flex cursor-pointer items-start gap-2 text-xs font-medium text-fg">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-border"
+              checked={icloudChinaMainland}
+              onChange={(e) => setIcloudChinaMainland(e.target.checked)}
+            />
+            <span>
+              {t("connectors.icloud.chinaMainland")}
+              <span className="mt-0.5 block font-normal text-fg-subtle">
+                {t("connectors.icloud.chinaMainlandHint")}
+              </span>
+            </span>
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.icloud.label")}
+            <Input
+              className="mt-1"
+              value={icloudLabel}
+              onChange={(e) => setIcloudLabel(e.target.value)}
+              placeholder={t("connectors.icloud.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={icloudSaving}
+          >
+            {icloudSaving ? t("connectors.icloud.saving") : t("connectors.icloud.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.github.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.github.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://github.com/settings/tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.github.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveGithubConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.github.pat")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={ghPat}
+              onChange={(e) => setGhPat(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.github.label")}
+            <Input
+              className="mt-1"
+              value={ghLabel}
+              onChange={(e) => setGhLabel(e.target.value)}
+              placeholder={t("connectors.github.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={ghSaving}
+          >
+            {ghSaving ? t("connectors.github.saving") : t("connectors.github.save")}
+          </Button>
+        </form>
+      </div>
+
       <div className="mt-6">
         <button
           type="button"
@@ -753,6 +1076,10 @@ export function ConnectorsSection() {
         ) : (
           <ul className="space-y-2">
             {rows.map((r) => {
+              const providerPretty =
+                CONNECTOR_PROVIDER_LABEL_KEYS[r.provider] !== undefined
+                  ? t(CONNECTOR_PROVIDER_LABEL_KEYS[r.provider]!)
+                  : r.provider;
               const isGmailLike = r.provider === "google_gmail" || r.provider === "gmail";
               const reconnectTarget = (() => {
                 if (r.provider.startsWith("google_") || r.provider === "gmail") return "google";
@@ -778,7 +1105,7 @@ export function ConnectorsSection() {
                     <span>
                       <span className="font-medium">{r.label}</span>{" "}
                       <span className="text-fg-subtle">
-                        ({r.provider}) · #{r.id}
+                        ({providerPretty}) · #{r.id}
                       </span>
                       {r.needs_reauth ? (
                         <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">

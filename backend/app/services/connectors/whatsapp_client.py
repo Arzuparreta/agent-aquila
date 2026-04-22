@@ -68,6 +68,22 @@ class WhatsAppClient:
         }
         return await self._post(payload)
 
+    async def verify_phone_number(self) -> dict[str, Any]:
+        """GET phone number metadata — used for connector health checks (no message sent)."""
+        url = f"https://graph.facebook.com/{self._api_version}/{self._phone_number_id}"
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(
+                url,
+                params={"fields": "id,display_phone_number,verified_name"},
+                headers={"Authorization": f"Bearer {self._token}"},
+            )
+        if resp.status_code >= 400:
+            raise WhatsAppAPIError(resp.status_code, resp.text)
+        if not resp.content:
+            return {}
+        data = resp.json()
+        return data if isinstance(data, dict) else {}
+
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         backoff = 1.0
         for _ in range(4):

@@ -180,13 +180,18 @@ async def start_setup(db: AsyncSession, user: User, provider: str) -> dict[str, 
                     "title": "App-specific password",
                     "action_url": "https://appleid.apple.com/sign-in",
                     "instruction": (
-                        "Under **Sign-In and Security**, create an **app-specific password** for this app. "
-                        "You cannot use your normal Apple ID password with CalDAV."
+                        "Under **Sign-In and Security**, create an **app-specific password**. "
+                        "It is used for **iCloud Calendar (CalDAV)**. **iCloud Drive** in this harness "
+                        "uses the same credential via Apple’s web APIs (PyiCloud); Apple may still "
+                        "prompt for two-factor approval for Drive even when CalDAV works."
                     ),
                 },
                 {
                     "title": "Paste Apple ID + app password",
-                    "instruction": "Send me your **Apple ID email** and the **app-specific password**.",
+                    "instruction": (
+                        "Send your **Apple ID email** and **app-specific password**. "
+                        "If your Apple ID is for **China mainland**, say so — we will set ``china_mainland`` on the connection."
+                    ),
                     "expects": ["apple_id", "app_password"],
                 },
             ],
@@ -387,6 +392,7 @@ async def submit_icloud_caldav_credentials(
     setup_token: str,
     apple_id: str,
     app_password: str,
+    china_mainland: bool = False,
 ) -> dict[str, Any]:
     sess = _consume_setup_token(setup_token, expected_user_id=user.id)
     if not sess or sess.provider != "icloud_caldav":
@@ -395,13 +401,16 @@ async def submit_icloud_caldav_credentials(
     pw = str(app_password).strip()
     if not uid or not pw:
         return {"error": "apple_id and app_password are required"}
+    creds: dict[str, Any] = {"username": uid, "password": pw}
+    if china_mainland:
+        creds["china_mainland"] = True
     await ConnectorService.create_connection(
         db,
         user,
         ConnectorConnectionCreate(
             provider="icloud_caldav",
             label=f"iCloud · {uid}",
-            credentials={"username": uid, "password": pw},
+            credentials=creds,
             meta={"source": "chat_setup"},
         ),
     )

@@ -53,6 +53,8 @@ AGENT_TOOL_DISPATCH: dict[str, tuple[str, bool]] = {
     "icloud_calendar_list_calendars": ("_tool_icloud_calendar_list_calendars", False),
     "icloud_calendar_list_events": ("_tool_icloud_calendar_list_events", False),
     "icloud_calendar_create_event": ("_tool_icloud_calendar_create_event", False),
+    "icloud_drive_list_folder": ("_tool_icloud_drive_list_folder", False),
+    "icloud_drive_get_file": ("_tool_icloud_drive_get_file", False),
     "submit_whatsapp_credentials": ("_tool_submit_whatsapp_credentials", False),
     "submit_github_credentials": ("_tool_submit_github_credentials", False),
     "submit_icloud_caldav_credentials": ("_tool_submit_icloud_caldav_credentials", False),

@@ -55,6 +55,10 @@ class GitHubClient:
             return resp.text
         raise GitHubAPIError(503, "GitHub API retries exhausted")
 
+    async def get_authenticated_user(self) -> dict[str, Any]:
+        data = await self._request("GET", "/user")
+        return data if isinstance(data, dict) else {}
+
     async def list_user_repos(
         self,
         *,
