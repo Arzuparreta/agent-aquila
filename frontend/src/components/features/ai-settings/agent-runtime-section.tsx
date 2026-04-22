@@ -324,6 +324,8 @@ export function AgentRuntimeSection({
             >
               <option value="heuristic">{t("settings.agentRuntime.postTurnHeuristic")}</option>
               <option value="always">{t("settings.agentRuntime.postTurnAlways")}</option>
+              <option value="committee">{t("settings.agentRuntime.postTurnCommittee")}</option>
+              <option value="adaptive">{t("settings.agentRuntime.postTurnAdaptive")}</option>
             </select>
           </label>
         </div>

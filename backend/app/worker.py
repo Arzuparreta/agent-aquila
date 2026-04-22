@@ -15,6 +15,7 @@ surprise LLM calls.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,6 +31,8 @@ from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
 from app.services.agent_event_bus import publish_run_status_event
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.agent_skill_autogenesis import maybe_record_skill_autogenesis_candidate
+from app.services.agent_memory_consolidation import run_consolidation_for_all_active_users
 from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_runtime_config_service import resolve_for_user
@@ -237,6 +240,7 @@ async def run_chat_agent_turn(
                     assistant_message=read.assistant_reply or "",
                     run_id=run_id,
                 )
+                await maybe_record_skill_autogenesis_candidate(db, run_row)
             return {"ok": True, "run_id": run_id, "status": read.status}
     except Exception as exc:
         logger.exception("run_chat_agent_turn failed run_id=%s", run_id)
@@ -353,13 +357,25 @@ def _heartbeat_minutes() -> set[int]:
     return set(range(0, 60, step))
 
 
+async def agent_memory_consolidation_tick(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Minute-level cron: run global consolidation when the time slot matches ``AGENT_MEMORY_CONSOLIDATION_MINUTES``."""
+    del ctx
+    if not getattr(settings, "agent_memory_consolidation_enabled", True):
+        return {"skipped": True, "reason": "disabled"}
+    interval = max(1, int(getattr(settings, "agent_memory_consolidation_minutes", 360)))
+    if int(time.time() // 60) % interval != 0:
+        return {"skipped": True, "reason": "not_due"}
+    return await run_consolidation_for_all_active_users()
+
+
 class WorkerSettings:
     """ARQ discovers this class. Referenced as ``app.worker.WorkerSettings``."""
 
-    functions = [agent_heartbeat, run_chat_agent_turn, flag_stuck_agent_runs]
+    functions = [agent_heartbeat, run_chat_agent_turn, flag_stuck_agent_runs, agent_memory_consolidation_tick]
     cron_jobs = [
         cron(agent_heartbeat, minute=_heartbeat_minutes(), run_at_startup=False),
         cron(flag_stuck_agent_runs, minute=set(range(60)), run_at_startup=False),
+        cron(agent_memory_consolidation_tick, minute=set(range(60)), run_at_startup=False),
     ]
     on_startup = startup
     on_shutdown = shutdown

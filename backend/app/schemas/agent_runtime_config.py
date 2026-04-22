@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 AgentToolPalette = Literal["full", "compact"]
 AgentPromptTier = Literal["full", "minimal", "none"]
-AgentMemoryPostTurnMode = Literal["heuristic", "always"]
+AgentMemoryPostTurnMode = Literal["heuristic", "always", "committee", "adaptive"]
 
 
 class AgentRuntimeConfigPartial(BaseModel):
@@ -42,8 +42,10 @@ class AgentRuntimeConfigPartial(BaseModel):
         if v is None or isinstance(v, str) and not str(v).strip():
             return None
         m = str(v).strip().lower()
-        if m not in ("heuristic", "always"):
-            raise ValueError("agent_memory_post_turn_mode must be heuristic or always")
+        if m not in ("heuristic", "always", "committee", "adaptive"):
+            raise ValueError(
+                "agent_memory_post_turn_mode must be heuristic, always, committee, or adaptive"
+            )
         return m
 
     @field_validator("agent_tool_palette", mode="before")

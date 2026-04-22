@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     skills_dir: str = Field(default="", validation_alias="AQUILA_SKILLS_DIR")
     # OpenClaw-style workspace (SOUL.md, AGENTS.md). Default: ``backend/agent_workspace``.
     workspace_dir: str = Field(default="", validation_alias="AQUILA_WORKSPACE_DIR")
+    # Per-user canonical memory (MEMORY.md, USER.md) under ``data/users/<id>/`` by default.
+    aquila_user_data_dir: str = Field(default="", validation_alias="AQUILA_USER_DATA_DIR")
     # Heartbeat: when true, the worker runs ``agent_heartbeat`` every
     # ``agent_heartbeat_minutes`` minutes (defaults to off so freshly
     # cloned dev setups never spawn surprise LLM calls).
@@ -136,9 +138,16 @@ class Settings(BaseSettings):
     agent_memory_post_turn_enabled: bool = Field(
         default=True, validation_alias="AGENT_MEMORY_POST_TURN_ENABLED"
     )
-    # heuristic = only when name/remember/preference signals match; always = every completed turn (higher cost).
+    # heuristic | always | committee | adaptive (see agent_memory_post_turn_service).
     agent_memory_post_turn_mode: str = Field(
-        default="heuristic", validation_alias="AGENT_MEMORY_POST_TURN_MODE"
+        default="committee", validation_alias="AGENT_MEMORY_POST_TURN_MODE"
+    )
+    # Periodic consolidation: digest + reindex DB from canonical markdown (worker).
+    agent_memory_consolidation_enabled: bool = Field(
+        default=True, validation_alias="AGENT_MEMORY_CONSOLIDATION_ENABLED"
+    )
+    agent_memory_consolidation_minutes: int = Field(
+        default=360, ge=1, le=10_080, validation_alias="AGENT_MEMORY_CONSOLIDATION_MINUTES"
     )
     # Telegram bot (optional). Webhook path uses secret; leave empty to disable routes.
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")

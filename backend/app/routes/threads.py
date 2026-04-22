@@ -40,6 +40,7 @@ from app.schemas.chat import (
 )
 from app.services.agent_attachments import attachments_from_agent_run_read
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.agent_skill_autogenesis import maybe_record_skill_autogenesis_candidate
 from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_runtime_config_service import resolve_for_user
 from app.services.agent_rate_limit_service import AgentRateLimitService
@@ -94,6 +95,10 @@ async def _post_turn_memory_if_completed(
         assistant_message=assistant_text or "",
         run_id=agent_run_id,
     )
+    if agent_run_id is not None:
+        run_obj = await db.get(AgentRun, agent_run_id)
+        if run_obj and run_obj.user_id == user.id:
+            await maybe_record_skill_autogenesis_candidate(db, run_obj)
 
 
 async def _enqueue_chat_agent_turn(

@@ -1,9 +1,10 @@
-"""Structured post-turn memory extraction (OpenClaw-style durable facts).
+"""Post-turn memory: legacy heuristic pass **or** multi-judge committee + rubric adaptation.
 
-Runs after a completed agent reply: one JSON-mode chat completion, then
-``AgentMemoryService.upsert`` for each extracted row. Gated by
-``AGENT_MEMORY_POST_TURN_*`` and optional heuristics to avoid LLM cost on
-routine turns.
+- ``heuristic`` — optional keyword gate + single JSON extraction (legacy / tests).
+- ``always`` / ``committee`` — proposer + judge on each completed turn (no trivial skip).
+- ``adaptive`` — same committee, but skips *very* short greeting-only turns.
+
+Durable storage writes go through :func:`AgentMemoryService.upsert` (canonical markdown + DB).
 """
 
 from __future__ import annotations
@@ -12,12 +13,20 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.models.user_ai_settings import UserAISettings
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_run import AgentRun
 from app.models.user import User
+from app.services.agent_memory_committee import (
+    adaptive_trivial_skip,
+    maybe_adapt_rubric_after_turn,
+    run_committee_memory_extraction,
+)
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_trace import (
     EV_POST_TURN_COMPLETED,
@@ -223,9 +232,9 @@ async def maybe_ingest_post_turn_memory(
         )
         return PostTurnMemoryResult(True, "disabled", 0)
 
-    mode = (rt.agent_memory_post_turn_mode or "heuristic").strip().lower()
-    if mode not in ("heuristic", "always"):
-        mode = "heuristic"
+    mode = (rt.agent_memory_post_turn_mode or "committee").strip().lower()
+    if mode not in ("heuristic", "always", "committee", "adaptive"):
+        mode = "committee"
 
     u = (user_message or "").strip()
     a = (assistant_message or "").strip()
@@ -246,6 +255,15 @@ async def maybe_ingest_post_turn_memory(
             {"reason": "heuristic_skip", "mode": mode, "upserts": 0},
         )
         return PostTurnMemoryResult(True, "heuristic_skip", 0)
+
+    if mode == "adaptive" and adaptive_trivial_skip(u, a):
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "adaptive_trivial_skip", "mode": mode, "upserts": 0},
+        )
+        return PostTurnMemoryResult(True, "adaptive_trivial_skip", 0)
 
     settings_row = await UserAISettingsService.get_or_create(db, user)
     if getattr(settings_row, "agent_processing_paused", False) or settings_row.ai_disabled:
@@ -274,6 +292,84 @@ async def maybe_ingest_post_turn_memory(
         {"mode": mode, "user_message_chars": len(u), "assistant_message_chars": len(a)},
     )
 
+    if mode == "heuristic":
+        items = await _run_legacy_extraction(
+            user,
+            settings_row=settings_row,
+            api_key=api_key,
+            user_message=u,
+            assistant_message=a,
+        )
+    else:
+        items = await run_committee_memory_extraction(
+            db,
+            user,
+            user_message=u,
+            assistant_message=a,
+        )
+
+    if not items:
+        logger.info(
+            "post_turn_memory: no items user_id=%s mode=%s reason=empty_extraction",
+            user.id,
+            mode,
+        )
+        await _emit_post_turn_trace(
+            db,
+            run_id,
+            EV_POST_TURN_SKIPPED,
+            {"reason": "empty_extraction", "mode": mode, "upserts": 0},
+        )
+        if mode != "heuristic":
+            await maybe_adapt_rubric_after_turn(db, user, approved_count=0)
+        return PostTurnMemoryResult(True, "empty_extraction", 0)
+
+    upserts = 0
+    for it in items:
+        try:
+            await AgentMemoryService.upsert(
+                db,
+                user,
+                key=it["key"],
+                content=it["content"],
+                importance=int(it.get("importance") or 0),
+            )
+            upserts += 1
+        except Exception:
+            logger.exception(
+                "post_turn_memory: upsert failed user_id=%s key=%s",
+                user.id,
+                it.get("key"),
+            )
+
+    if mode != "heuristic":
+        await maybe_adapt_rubric_after_turn(db, user, approved_count=upserts)
+
+    logger.info(
+        "post_turn_memory: done user_id=%s mode=%s upserts=%s",
+        user.id,
+        mode,
+        upserts,
+    )
+    await _emit_post_turn_trace(
+        db,
+        run_id,
+        EV_POST_TURN_COMPLETED,
+        {"reason": "ok", "mode": mode, "upserts": upserts},
+    )
+    return PostTurnMemoryResult(False, "ok", upserts)
+
+
+async def _run_legacy_extraction(
+    user: User,
+    *,
+    settings_row: "UserAISettings",
+    api_key: str,
+    user_message: str,
+    assistant_message: str,
+) -> list[dict[str, Any]]:
+    u = (user_message or "").strip()
+    a = (assistant_message or "").strip()
     user_block = u if u else "(empty)"
     assistant_block = a if a else "(empty)"
     user_prompt = (
@@ -296,22 +392,11 @@ async def maybe_ingest_post_turn_memory(
         )
     except Exception:
         logger.exception("post_turn_memory: LLM extraction failed user_id=%s", user.id)
-        await _emit_post_turn_trace(
-            db,
-            run_id,
-            EV_POST_TURN_SKIPPED,
-            {"reason": "llm_error", "mode": mode, "upserts": 0},
-        )
-        return PostTurnMemoryResult(False, "llm_error", 0)
+        return []
 
     payload = _parse_json_object(raw)
     items = _normalize_memory_items(payload)
     if not items and heuristic_wants_post_turn_extraction(u, a):
-        logger.info(
-            "post_turn_memory: retry_after_empty user_id=%s mode=%s",
-            user.id,
-            mode,
-        )
         try:
             raw_retry = await LLMClient.chat_completion(
                 api_key,
@@ -330,58 +415,7 @@ async def maybe_ingest_post_turn_memory(
             )
         except Exception:
             logger.exception("post_turn_memory: LLM retry failed user_id=%s", user.id)
-            await _emit_post_turn_trace(
-                db,
-                run_id,
-                EV_POST_TURN_SKIPPED,
-                {"reason": "llm_error", "mode": mode, "upserts": 0},
-            )
-            return PostTurnMemoryResult(False, "llm_error", 0)
+            return []
         payload = _parse_json_object(raw_retry)
         items = _normalize_memory_items(payload)
-
-    if not items:
-        logger.info(
-            "post_turn_memory: no items user_id=%s mode=%s reason=empty_extraction",
-            user.id,
-            mode,
-        )
-        await _emit_post_turn_trace(
-            db,
-            run_id,
-            EV_POST_TURN_SKIPPED,
-            {"reason": "empty_extraction", "mode": mode, "upserts": 0},
-        )
-        return PostTurnMemoryResult(True, "empty_extraction", 0)
-
-    upserts = 0
-    for it in items:
-        try:
-            await AgentMemoryService.upsert(
-                db,
-                user,
-                key=it["key"],
-                content=it["content"],
-                importance=int(it.get("importance") or 0),
-            )
-            upserts += 1
-        except Exception:
-            logger.exception(
-                "post_turn_memory: upsert failed user_id=%s key=%s",
-                user.id,
-                it.get("key"),
-            )
-
-    logger.info(
-        "post_turn_memory: done user_id=%s mode=%s upserts=%s",
-        user.id,
-        mode,
-        upserts,
-    )
-    await _emit_post_turn_trace(
-        db,
-        run_id,
-        EV_POST_TURN_COMPLETED,
-        {"reason": "ok", "mode": mode, "upserts": upserts},
-    )
-    return PostTurnMemoryResult(False, "ok", upserts)
+    return items

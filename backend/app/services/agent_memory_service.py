@@ -1,10 +1,10 @@
 """CRUD + recall for the agent's persistent memory.
 
-The agent's "memory" is just rows in ``agent_memories`` keyed by
-``(user_id, key)``. Unlike the chat history (transcript) or connector
-mirrors (gone after the OpenClaw refactor), this table stores the
-agent's *own* notes — preferences, recurring tasks, facts the user
-asked it to remember.
+**Canonical store:** per-user OpenClaw-style markdown under
+:data:`data/users/<id>/memory_workspace/` (``MEMORY.md``, ``USER.md``,
+``memory/YYYY-MM-DD.md``). The database mirrors those keys for semantic
+``recall_memory`` / embeddings and for the Settings UI unless otherwise
+noted.
 
 Three entry points:
 - :func:`upsert` — write/update a memory by key.
@@ -22,11 +22,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_memory import AgentMemory
 from app.models.user import User
+from app.services.canonical_memory import (
+    build_markdown_memory_prompt_section,
+    read_all_kv,
+    sync_delete_key,
+    sync_upsert_line,
+)
 from app.services.ai_provider_config_service import AIProviderConfigService
 from app.services.embedding_client import EmbeddingClient
 from app.services.embedding_vector import pad_embedding
@@ -73,6 +79,7 @@ class AgentMemoryService:
         importance: int = 0,
         tags: list[str] | None = None,
         meta: dict[str, Any] | None = None,
+        sync_canonical: bool = True,
     ) -> AgentMemory:
         key = key.strip()[:200]
         if not key:
@@ -80,6 +87,11 @@ class AgentMemoryService:
         content = content.strip()
         if not content:
             raise ValueError("memory content is required")
+        if sync_canonical:
+            try:
+                sync_upsert_line(user, key=key, content=content, importance=importance)
+            except Exception:  # noqa: BLE001 — never block DB write
+                logger.warning("canonical sync failed for key=%s", key[:80], exc_info=True)
         existing = (
             await db.execute(
                 select(AgentMemory).where(
@@ -115,7 +127,14 @@ class AgentMemoryService:
         return row
 
     @staticmethod
-    async def delete(db: AsyncSession, user: User, *, key: str) -> bool:
+    async def delete(
+        db: AsyncSession, user: User, *, key: str, sync_canonical: bool = True
+    ) -> bool:
+        if sync_canonical:
+            try:
+                sync_delete_key(user, key=key)
+            except Exception:  # noqa: BLE001
+                logger.warning("canonical delete failed for key=%s", key[:80], exc_info=True)
         row = (
             await db.execute(
                 select(AgentMemory).where(
@@ -217,17 +236,17 @@ class AgentMemoryService:
     async def recent_for_prompt(
         db: AsyncSession, user: User, *, limit: int = SYSTEM_PROMPT_LIMIT
     ) -> str:
-        """Render the agent's most relevant memories as a markdown bullet list.
-
-        Used by ``agent_workspace.build_system_prompt`` to warm the chat
-        with whatever the agent has already learned about this user. We
-        sort high-importance memories first, then fill the remainder with
-        the most recently updated rows.
-        """
+        """Warm the model with **canonical** markdown (primary) and DB index (fallback)."""
+        try:
+            blob = build_markdown_memory_prompt_section(user, char_budget=12_000)
+        except Exception:  # noqa: BLE001
+            blob = ""
+        if blob and blob.strip():
+            return blob
         rows = await AgentMemoryService.list_for_user(db, user, limit=limit)
         if not rows:
             return ""
-        lines = ["## Agent persistent memory\n"]
+        lines = ["## Agent persistent memory (database index; canonical files empty)\n"]
         for m in rows:
             star = "★ " if (m.importance or 0) >= 1 else ""
             content_short = (m.content or "").strip()
@@ -236,3 +255,30 @@ class AgentMemoryService:
             lines.append(f"- {star}**{m.key}** — {content_short}")
         lines.append("")
         return "\n".join(lines)
+
+    @staticmethod
+    async def reindex_db_from_canonical(
+        db: AsyncSession, user: User, *, sync_canonical: bool = False
+    ) -> int:
+        """Sync ``agent_memories`` rows to match canonical key/value lines. Returns upsert count."""
+        rows = read_all_kv(int(user.id))
+        keyset = {k for k, _i, _c in rows}
+        stmt = delete(AgentMemory).where(AgentMemory.user_id == user.id)
+        if keyset:
+            stmt = stmt.where(AgentMemory.key.notin_(list(keyset)))
+        await db.execute(stmt)
+        await db.commit()
+        n = 0
+        for key, imp, content in rows:
+            await AgentMemoryService.upsert(
+                db,
+                user,
+                key=key,
+                content=content,
+                importance=imp,
+                tags=None,
+                meta=None,
+                sync_canonical=sync_canonical,
+            )
+            n += 1
+        return n

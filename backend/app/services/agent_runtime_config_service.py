@@ -44,7 +44,7 @@ def merge_stored_with_env(raw: dict[str, Any] | None) -> AgentRuntimeConfigResol
         "agent_memory_flush_max_transcript_chars": int(_get(s, "agent_memory_flush_max_transcript_chars", r)),
         "agent_memory_post_turn_enabled": bool(_get(s, "agent_memory_post_turn_enabled", r)),
         "agent_memory_post_turn_mode": str(_get(s, "agent_memory_post_turn_mode", r)).strip().lower()
-        or "heuristic",
+        or "committee",
         "agent_channel_gateway_enabled": bool(_get(s, "agent_channel_gateway_enabled", r)),
         "agent_email_domain_allowlist": str(_get(s, "agent_email_domain_allowlist", r) or ""),
     }

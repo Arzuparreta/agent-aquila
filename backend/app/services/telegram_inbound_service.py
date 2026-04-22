@@ -14,6 +14,7 @@ from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
 from app.models.user import User
 from app.services.agent_attachments import attachments_from_agent_run_read
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.agent_skill_autogenesis import maybe_record_skill_autogenesis_candidate
 from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_runtime_config_service import resolve_for_user
@@ -157,6 +158,9 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
                 user_message=rendered,
                 assistant_message=body or "",
             )
+            ro = await db.get(AgentRun, early.id)
+            if ro:
+                await maybe_record_skill_autogenesis_candidate(db, ro)
         await send_telegram_text(telegram_chat_id, body or "Something went wrong.")
         return
 
@@ -232,4 +236,7 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
             user_message=rendered,
             assistant_message=assistant_text or "",
         )
+        ro = await db.get(AgentRun, run.id)
+        if ro:
+            await maybe_record_skill_autogenesis_candidate(db, ro)
     await send_telegram_text(telegram_chat_id, assistant_text or run.error or "")

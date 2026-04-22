@@ -134,7 +134,7 @@ async def test_cause_post_turn_empty_extraction(
     aquila_user,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Even when heuristic matches, a bad/empty JSON extraction yields no rows."""
+    """Committee path returns no approved rows → empty_extraction."""
     import app.services.agent_memory_post_turn_service as mod
 
     base = merge_stored_with_env(None).model_copy(
@@ -144,11 +144,8 @@ async def test_cause_post_turn_empty_extraction(
         }
     )
     monkeypatch.setattr(mod, "resolve_for_user", pytest.AsyncMock(return_value=base))
-
-    async def empty_json(*_a, **_k):
-        return '{"memories":[]}'
-
-    monkeypatch.setattr(mod.LLMClient, "chat_completion", empty_json)
+    monkeypatch.setattr(mod, "run_committee_memory_extraction", pytest.AsyncMock(return_value=[]))
+    monkeypatch.setattr(mod, "maybe_adapt_rubric_after_turn", pytest.AsyncMock())
     r = await maybe_ingest_post_turn_memory(
         db_session,
         aquila_user,

@@ -12,12 +12,15 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.models.agent_memory import AgentMemory
 from app.models.user import User
 from app.services.agent_memory_service import AgentMemoryService
+from app.services.canonical_memory import build_markdown_memory_prompt_section, reset_user_memory_workspace
 
 router = APIRouter(prefix="/memory", tags=["memory"], dependencies=[Depends(get_current_user)])
 
@@ -109,3 +112,30 @@ async def recall_memory(
         db, current_user, query=query, tags=tags, limit=limit
     )
     return {"hits": hits}
+
+
+@router.get("/digest")
+async def get_memory_digest(
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str | None]:
+    """Return the prompt-oriented canonical block (incl. DREAMS tail) for transparency digests."""
+    return {"canonical_excerpt": build_markdown_memory_prompt_section(current_user) or None}
+
+
+@router.post("/reset")
+async def reset_all_memory(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Hard reset: TRUNCATE DB index and delete per-user markdown workspace. Irreversible."""
+    await db.execute(delete(AgentMemory).where(AgentMemory.user_id == current_user.id))
+    await db.commit()
+    rep = reset_user_memory_workspace(current_user)
+    return {
+        "ok": True,
+        "deleted_index_rows": True,
+        "report": {
+            "deleted_files": rep.deleted_files,
+            "hint": rep.deleted_db_hint,
+        },
+    }

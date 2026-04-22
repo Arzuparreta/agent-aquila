@@ -1,6 +1,7 @@
 """Tiny ARQ enqueue helper.
 
-The worker registers ``agent_heartbeat`` and ``run_chat_agent_turn`` (see
+The worker registers ``agent_heartbeat``, ``run_chat_agent_turn``,
+``agent_memory_consolidation_tick``, and ``flag_stuck_agent_runs`` (see
 ``app.worker``). Chat enqueues ``run_chat_agent_turn`` when
 ``AGENT_ASYNC_RUNS`` is true and ``REDIS_URL`` is set so long agent turns
 do not block the HTTP request through the Next.js dev proxy.

@@ -88,7 +88,7 @@ async def test_maybe_ingest_skips_when_heuristic_no_match(
 
 
 @pytest.mark.asyncio
-async def test_maybe_ingest_upserts_from_llm_json(
+async def test_maybe_ingest_upserts_from_committee(
     db_session,
     crm_user: User,
     monkeypatch: pytest.MonkeyPatch,
@@ -101,13 +101,17 @@ async def test_maybe_ingest_upserts_from_llm_json(
     )
     monkeypatch.setattr(mod, "resolve_for_user", AsyncMock(return_value=fake_rt))
 
-    async def fake_completion(*_a, **_k):
-        return (
-            '{"memories":[{"key":"agent.identity.display_name_es",'
-            '"content":"Agente Áquila","importance":9}]}'
-        )
+    async def fake_committee(*_a, **_k):
+        return [
+            {
+                "key": "agent.identity.display_name_es",
+                "content": "Agente Áquila",
+                "importance": 9,
+            }
+        ]
 
-    monkeypatch.setattr(mod.LLMClient, "chat_completion", fake_completion)
+    monkeypatch.setattr(mod, "run_committee_memory_extraction", fake_committee)
+    monkeypatch.setattr(mod, "maybe_adapt_rubric_after_turn", AsyncMock())
 
     calls: list[dict] = []
 

@@ -52,7 +52,7 @@ export type TimeFormatPreference = "auto" | "12" | "24";
 
 export type AgentToolPalette = "full" | "compact";
 export type AgentPromptTier = "full" | "minimal" | "none";
-export type AgentMemoryPostTurnMode = "heuristic" | "always";
+export type AgentMemoryPostTurnMode = "heuristic" | "always" | "committee" | "adaptive";
 
 /** Effective agent tunables after merging server env defaults with per-user overrides. */
 export type AgentRuntimeConfigResolved = {
