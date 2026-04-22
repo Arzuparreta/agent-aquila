@@ -20,12 +20,14 @@ export function MessageBubble({
   message,
   onMessageUpdate,
   onRetryFailedMessage,
-  retryDisabled
+  retryDisabled,
+  pendingLabel
 }: {
   message: ChatMessage;
   onMessageUpdate: (m: ChatMessage) => void;
   onRetryFailedMessage?: (messageId: number) => void;
   retryDisabled?: boolean;
+  pendingLabel?: string | null;
 }) {
   const { t, locale } = useTranslation();
   const localeTag = intlLocaleTag(locale);
@@ -56,7 +58,7 @@ export function MessageBubble({
       <div className="flex max-w-[85%] flex-col gap-2">
         {isAssistantPlaceholder ? (
           <div className="animate-pulse rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted shadow-sm">
-            {t("chat.threadView.thinking")}
+            {pendingLabel || t("chat.threadView.thinking")}
           </div>
         ) : message.content ? (
           <div

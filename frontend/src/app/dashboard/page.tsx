@@ -28,6 +28,7 @@ type DashboardMetrics = {
   agent_runs_last_24h: number;
   agent_runs_completed_last_24h: number;
   agent_runs_failed_last_24h: number;
+  agent_runs_needs_attention_last_24h: number;
 };
 
 type AgentRunSummary = {
@@ -175,6 +176,7 @@ export default function DashboardPage() {
               <li>Runs: {metrics.agent_runs_last_24h}</li>
               <li>Completed: {metrics.agent_runs_completed_last_24h}</li>
               <li>Failed: {metrics.agent_runs_failed_last_24h}</li>
+              <li>Needs attention: {metrics.agent_runs_needs_attention_last_24h}</li>
             </ul>
           ) : (
             <p className="text-sm text-fg-muted">Loading…</p>

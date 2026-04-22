@@ -39,6 +39,7 @@ async def publish_run_status_event(
     chat_thread_id: int | None = None,
     terminal: bool = False,
     persist_outbox: bool = True,
+    attention: dict[str, Any] | None = None,
 ) -> None:
     """Emit a versioned JSON event to Redis and append ``agent_user_events`` (when enabled).
 
@@ -55,6 +56,8 @@ async def publish_run_status_event(
         "chat_thread_id": chat_thread_id,
         "terminal": terminal,
     }
+    if attention is not None:
+        payload["attention"] = attention
     if persist_outbox:
         try:
             async with AsyncSessionLocal() as db:

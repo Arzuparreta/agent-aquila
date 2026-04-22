@@ -318,6 +318,11 @@ export type AgentRun = {
   /** W3C-style trace id for observability / eval correlation */
   root_trace_id?: string | null;
   chat_thread_id?: number | null;
+  attention?: {
+    stage: string;
+    last_event_at: string | null;
+    hint: string | null;
+  } | null;
   steps: AgentStep[];
   pending_proposals: PendingProposal[];
 };

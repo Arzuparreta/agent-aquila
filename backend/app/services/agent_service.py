@@ -42,6 +42,7 @@ from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
 from app.models.user import User
 from app.schemas.agent import (
+    AgentRunAttentionRead,
     AgentRunRead,
     AgentRunSummaryRead,
     AgentStepRead,
@@ -59,6 +60,7 @@ from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
 from app.services.agent_memory_post_turn_service import heuristic_wants_post_turn_extraction
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_runtime_config_service import merge_stored_with_env, resolve_for_user
+from app.services.agent_run_attention import build_attention_snapshot
 from app.services.agent_replay import AgentReplayContext
 from app.services.agent_tools import (
     AGENT_TOOL_NAMES,
@@ -2305,6 +2307,8 @@ class AgentService:
         run: AgentRun,
         steps: list[AgentStepRead],
         proposals: list[PendingProposalRead],
+        *,
+        attention: AgentRunAttentionRead | None = None,
     ) -> AgentRunRead:
         return AgentRunRead(
             id=run.id,
@@ -2314,6 +2318,7 @@ class AgentService:
             error=run.error,
             root_trace_id=run.root_trace_id,
             chat_thread_id=run.chat_thread_id,
+            attention=attention,
             steps=steps,
             pending_proposals=proposals,
         )
@@ -2393,4 +2398,12 @@ class AgentService:
             )
         )
         props = [proposal_to_read(p) for p in pr.scalars().all()]
-        return AgentService._to_read(run, steps, props)
+        attention = None
+        if run.status in {"pending", "running", "needs_attention"}:
+            snap = await build_attention_snapshot(db, run)
+            attention = AgentRunAttentionRead(
+                stage=snap.stage,
+                last_event_at=snap.last_event_at,
+                hint=snap.hint,
+            )
+        return AgentService._to_read(run, steps, props, attention=attention)

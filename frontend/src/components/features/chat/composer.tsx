@@ -31,10 +31,12 @@ const ENTITY_LABEL: Record<string, string> = {
  */
 export function ChatComposer({
   onSend,
-  disabled
+  disabled,
+  busyLabel
 }: {
   onSend: (content: string, references: EntityRef[]) => Promise<void> | void;
   disabled?: boolean;
+  busyLabel?: string | null;
 }) {
   const { t } = useTranslation();
   const refs = useChatReferences();
@@ -95,7 +97,7 @@ export function ChatComposer({
             }}
             rows={1}
             disabled={disabled}
-            placeholder={t("chat.composer.placeholder")}
+            placeholder={disabled ? busyLabel || t("chat.composer.placeholderBusy") : t("chat.composer.placeholder")}
             className="min-h-[48px] flex-1 resize-none rounded-2xl border border-border bg-surface-muted px-4 py-3 text-base leading-snug text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
           <button

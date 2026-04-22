@@ -57,6 +57,12 @@ class PendingOperationPreviewRead(BaseModel):
 PendingOperationRead = PendingProposalRead
 
 
+class AgentRunAttentionRead(BaseModel):
+    stage: str
+    last_event_at: datetime | None = None
+    hint: str | None = None
+
+
 class AgentRunRead(BaseModel):
     id: int
     status: str
@@ -65,6 +71,7 @@ class AgentRunRead(BaseModel):
     error: str | None = None
     root_trace_id: str | None = None
     chat_thread_id: int | None = None
+    attention: AgentRunAttentionRead | None = None
     steps: list[AgentStepRead]
     pending_proposals: list[PendingProposalRead]
 

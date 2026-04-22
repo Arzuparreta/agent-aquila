@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.main import app
+from app.models.agent_run import AgentTraceEvent
 from app.models.chat_thread import ChatThread
 from app.models.user import User
 from app.schemas.agent import AgentRunRead
@@ -86,6 +87,8 @@ async def test_dashboard_endpoints_and_chat_message(
 
             r_d2 = await ac.get("/api/v1/dashboard/metrics")
             assert r_d2.status_code == 200, r_d2.text
+            metrics_payload = r_d2.json()
+            assert "agent_runs_needs_attention_last_24h" in metrics_payload
 
             r_runs = await ac.get("/api/v1/agent/runs?limit=5")
             assert r_runs.status_code == 200, r_runs.text
@@ -102,6 +105,49 @@ async def test_dashboard_endpoints_and_chat_message(
             asst = payload.get("assistant_message") or {}
             content = str(asst.get("content") or "")
             assert "Integration test reply" in content
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_get_run_returns_attention_metadata_for_needs_attention(
+    db_session: AsyncSession,
+    aquila_user: User,
+    agent_run,
+) -> None:
+    async def override_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    async def override_user() -> User:
+        return aquila_user
+
+    agent_run.status = "needs_attention"
+    agent_run.error = "Run requires attention."
+    agent_run.root_trace_id = "0123456789abcdef0123456789abcdef"
+    db_session.add(
+        AgentTraceEvent(
+            run_id=agent_run.id,
+            schema_version=1,
+            event_type="tool.started",
+            trace_id=agent_run.root_trace_id,
+            payload={"tool": "gmail_list_messages"},
+        )
+    )
+    await db_session.commit()
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            r_run = await ac.get(f"/api/v1/agent/runs/{agent_run.id}")
+            assert r_run.status_code == 200, r_run.text
+            payload = r_run.json()
+            assert payload.get("status") == "needs_attention"
+            attention = payload.get("attention") or {}
+            assert attention.get("stage") == "waiting_tool"
+            assert isinstance(attention.get("hint"), str) and attention.get("hint")
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user, None)

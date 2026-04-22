@@ -15,6 +15,7 @@ surprise LLM calls.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from arq import cron  # type: ignore[import-not-found]
@@ -32,6 +33,12 @@ from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_m
 from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_runtime_config_service import resolve_for_user
+from app.services.agent_run_attention import (
+    build_attention_reason,
+    build_attention_snapshot,
+    should_mark_needs_attention,
+    stage_age_seconds,
+)
 from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.llm_client import aclose_llm_http_client
@@ -263,6 +270,84 @@ async def run_chat_agent_turn(
         return {"ok": False, "run_id": run_id, "error": str(exc)[:200]}
 
 
+async def flag_stuck_agent_runs(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Mark long-silent pending/running runs as needs_attention and publish updates."""
+    del ctx
+    if not settings.agent_run_attention_enabled:
+        return {"skipped": True, "reason": "AGENT_RUN_ATTENTION_ENABLED=false"}
+
+    now = datetime.now(UTC)
+    touched = 0
+    touched_run_ids: list[int] = []
+    async with AsyncSessionLocal() as db:
+        rows = list(
+            (
+                await db.execute(
+                    select(AgentRun).where(AgentRun.status.in_(("pending", "running"))).order_by(AgentRun.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for run in rows:
+            snap = await build_attention_snapshot(db, run)
+            age_s = stage_age_seconds(now=now, run=run, last_event_at=snap.last_event_at)
+            if not should_mark_needs_attention(
+                run=run,
+                stage=snap.stage,
+                age_seconds=age_s,
+                pending_sla_seconds=settings.agent_run_attention_pending_seconds,
+                stage_sla_seconds=settings.agent_run_attention_stage_seconds,
+                silence_seconds=settings.agent_run_attention_silence_seconds,
+            ):
+                continue
+
+            run.status = "needs_attention"
+            run.error = build_attention_reason(stage=snap.stage, age_seconds=age_s)
+            run.updated_at = now
+            touched += 1
+            touched_run_ids.append(run.id)
+            if run.chat_thread_id is not None:
+                thread = await db.get(ChatThread, run.chat_thread_id)
+                if thread and thread.user_id == run.user_id:
+                    user = await db.get(User, run.user_id)
+                    if user is not None:
+                        read = await AgentService.get_run(db, user, run.id)
+                        if read is not None:
+                            await apply_agent_run_to_placeholder(
+                                db, thread, agent_run_id=run.id, run_read=read
+                            )
+        if touched:
+            await db.commit()
+        else:
+            await db.rollback()
+
+    if not touched:
+        return {"ok": True, "updated": 0}
+
+    async with AsyncSessionLocal() as db:
+        runs = list(
+            (await db.execute(select(AgentRun).where(AgentRun.id.in_(touched_run_ids)))).scalars().all()
+        )
+        for run in runs:
+            snap = await build_attention_snapshot(db, run)
+            await publish_run_status_event(
+                user_id=run.user_id,
+                run_id=run.id,
+                status=run.status,
+                error=run.error,
+                step_count=0,
+                chat_thread_id=run.chat_thread_id,
+                terminal=False,
+                attention={
+                    "stage": snap.stage,
+                    "last_event_at": snap.last_event_at.isoformat() if snap.last_event_at else None,
+                    "hint": snap.hint,
+                },
+            )
+    return {"ok": True, "updated": touched}
+
+
 def _heartbeat_minutes() -> set[int]:
     step = max(1, min(60, settings.agent_heartbeat_minutes))
     return set(range(0, 60, step))
@@ -271,9 +356,10 @@ def _heartbeat_minutes() -> set[int]:
 class WorkerSettings:
     """ARQ discovers this class. Referenced as ``app.worker.WorkerSettings``."""
 
-    functions = [agent_heartbeat, run_chat_agent_turn]
+    functions = [agent_heartbeat, run_chat_agent_turn, flag_stuck_agent_runs]
     cron_jobs = [
         cron(agent_heartbeat, minute=_heartbeat_minutes(), run_at_startup=False),
+        cron(flag_stuck_agent_runs, minute=set(range(60)), run_at_startup=False),
     ]
     on_startup = startup
     on_shutdown = shutdown

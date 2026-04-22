@@ -20,6 +20,17 @@ import { useChatReferences } from "./reference-context";
 /** Matches backend ``_AGENT_REPLY_PLACEHOLDER`` (single Unicode ellipsis). */
 const AGENT_REPLY_PLACEHOLDER = "\u2026";
 
+type PendingRunSnapshot = {
+  id: number;
+  status: string;
+  error: string | null;
+  attention?: {
+    stage: string;
+    last_event_at: string | null;
+    hint: string | null;
+  } | null;
+};
+
 function findPendingAgentRunId(rows: ChatMessage[]): number | null {
   for (let i = rows.length - 1; i >= 0; i--) {
     const m = rows[i];
@@ -57,6 +68,7 @@ export function ChatThreadView({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRunSnapshot, setPendingRunSnapshot] = useState<PendingRunSnapshot | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const optimisticIdRef = useRef(0);
   const refs = useChatReferences();
@@ -97,8 +109,25 @@ export function ChatThreadView({
   }, [reload]);
 
   const pendingRunId = useMemo(() => findPendingAgentRunId(messages), [messages]);
-  const composerBusy = sending || pendingRunId != null;
+  const composerBusy = sending;
   const showEphemeralThinking = sending && pendingRunId == null;
+
+  const pendingLabel = useMemo(() => {
+    if (sending && pendingRunSnapshot == null) {
+      return t("chat.threadView.state.queued");
+    }
+    const snapshot = pendingRunSnapshot;
+    if (!snapshot) return t("chat.threadView.thinking");
+    if (snapshot.status === "pending") return t("chat.threadView.state.queued");
+    if (snapshot.status === "running") {
+      const stage = snapshot.attention?.stage;
+      if (stage === "waiting_tool") return t("chat.threadView.state.waitingTool");
+      if (stage === "waiting_llm") return t("chat.threadView.state.waitingLlm");
+      return t("chat.threadView.state.running");
+    }
+    if (snapshot.status === "needs_attention") return t("chat.threadView.state.needsAttention");
+    return t("chat.threadView.thinking");
+  }, [pendingRunSnapshot, sending, t]);
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
@@ -108,7 +137,13 @@ export function ChatThreadView({
     async (runId: number) => {
       setError(null);
       try {
-        const run = await waitForRunTerminal(runId);
+        const run = await waitForRunTerminal(runId, {
+          onProgress: (snapshot) => setPendingRunSnapshot(snapshot)
+        });
+        setPendingRunSnapshot(run);
+        if (run.status === "needs_attention") {
+          setError(run.attention?.hint || run.error || t("chat.threadView.needsAttention"));
+        }
         if (run.status === "failed") {
           recordTelemetryAgentRunFailed({ runId: run.id, error: run.error });
         }
@@ -127,6 +162,7 @@ export function ChatThreadView({
           }
         }
       } catch (err) {
+        setPendingRunSnapshot(null);
         const rows = await reload({ silent: true });
         if (err instanceof ApiError) {
           if (err.status === 408) {
@@ -155,6 +191,7 @@ export function ChatThreadView({
           }
         }
       }
+      setPendingRunSnapshot(null);
     },
     [onThreadUpdated, reload, t, thread.id]
   );
@@ -195,6 +232,12 @@ export function ChatThreadView({
         });
         onThreadUpdated(result.thread);
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
+          setPendingRunSnapshot({
+            id: result.assistant_message.agent_run_id,
+            status: "pending",
+            error: null,
+            attention: null
+          });
           setSending(false);
           await runAgentRunFollowUp(result.assistant_message.agent_run_id);
           return;
@@ -236,6 +279,12 @@ export function ChatThreadView({
         });
         onThreadUpdated(result.thread);
         if (result.agent_run_pending && result.assistant_message.agent_run_id != null) {
+          setPendingRunSnapshot({
+            id: result.assistant_message.agent_run_id,
+            status: "pending",
+            error: null,
+            attention: null
+          });
           setSending(false);
           refs.clear();
           await runAgentRunFollowUp(result.assistant_message.agent_run_id);
@@ -307,6 +356,20 @@ export function ChatThreadView({
             </div>
           </div>
         ) : null}
+        {pendingRunId != null && pendingRunSnapshot?.status === "needs_attention" ? (
+          <div className="mx-auto mb-3 max-w-md rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+            <div className="flex items-center justify-between gap-3">
+              <span>{pendingRunSnapshot.attention?.hint || t("chat.threadView.needsAttention")}</span>
+              <button
+                type="button"
+                className="rounded-md bg-amber-200/20 px-3 py-1 text-xs font-semibold hover:bg-amber-200/30"
+                onClick={() => void reload({ silent: true })}
+              >
+                {t("chat.threadView.refreshState")}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {!loading && messages.length === 0 ? (
           <div className="mx-auto mt-12 max-w-sm text-center text-base text-fg-subtle">
             {t("chat.threadView.emptyHint")}
@@ -320,16 +383,28 @@ export function ChatThreadView({
               onMessageUpdate={updateMessage}
               onRetryFailedMessage={retryFailedMessage}
               retryDisabled={composerBusy}
+              pendingLabel={
+                m.role === "assistant" &&
+                m.content === AGENT_REPLY_PLACEHOLDER &&
+                m.agent_run_id != null &&
+                m.agent_run_id === pendingRunId
+                  ? pendingLabel
+                  : null
+              }
             />
           ))}
           {showEphemeralThinking ? (
             <div className="self-start rounded-2xl bg-surface-muted px-4 py-2 text-base text-fg-muted">
-              {t("chat.threadView.thinking")}
+              {pendingLabel}
             </div>
           ) : null}
         </div>
       </div>
-      <ChatComposer onSend={onSend} disabled={composerBusy} />
+      <ChatComposer
+        onSend={onSend}
+        disabled={composerBusy}
+        busyLabel={sending ? pendingLabel : t("chat.composer.placeholderBusy")}
+      />
     </div>
   );
 }

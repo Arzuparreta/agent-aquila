@@ -16,6 +16,7 @@ class DashboardMetricsRead(BaseModel):
     agent_runs_last_24h: int
     agent_runs_completed_last_24h: int
     agent_runs_failed_last_24h: int
+    agent_runs_needs_attention_last_24h: int
 
 
 class OnboardingStatusRead(BaseModel):

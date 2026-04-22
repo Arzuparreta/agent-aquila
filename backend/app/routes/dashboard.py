@@ -102,8 +102,23 @@ async def dashboard_metrics(
         ).scalar_one()
         or 0
     )
+    needs_attention = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(AgentRun)
+                .where(
+                    AgentRun.user_id == uid,
+                    AgentRun.created_at >= since,
+                    AgentRun.status == "needs_attention",
+                )
+            )
+        ).scalar_one()
+        or 0
+    )
     return DashboardMetricsRead(
         agent_runs_last_24h=total,
         agent_runs_completed_last_24h=done,
         agent_runs_failed_last_24h=failed,
+        agent_runs_needs_attention_last_24h=needs_attention,
     )

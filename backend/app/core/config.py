@@ -92,6 +92,22 @@ class Settings(BaseSettings):
     agent_heartbeat_check_gmail: bool = Field(
         default=False, validation_alias="AGENT_HEARTBEAT_CHECK_GMAIL"
     )
+    # Mark runs as needs_attention when they stop emitting progress.
+    agent_run_attention_enabled: bool = Field(
+        default=True, validation_alias="AGENT_RUN_ATTENTION_ENABLED"
+    )
+    # For queued/pending runs before first stage starts.
+    agent_run_attention_pending_seconds: int = Field(
+        default=300, ge=30, le=86_400, validation_alias="AGENT_RUN_ATTENTION_PENDING_SECONDS"
+    )
+    # For llm/tool stages that stop progressing.
+    agent_run_attention_stage_seconds: int = Field(
+        default=600, ge=30, le=86_400, validation_alias="AGENT_RUN_ATTENTION_STAGE_SECONDS"
+    )
+    # Global fallback when stage is unknown but run is stale.
+    agent_run_attention_silence_seconds: int = Field(
+        default=240, ge=30, le=86_400, validation_alias="AGENT_RUN_ATTENTION_SILENCE_SECONDS"
+    )
     # full = all connector tools; compact = smaller palette (see agent_tools.tools_for_palette_mode).
     agent_tool_palette: str = Field(default="full", validation_alias="AGENT_TOOL_PALETTE")
     # System prompt size: full (default) | minimal (shorter tool docs) | none (identity + rules + tools only).

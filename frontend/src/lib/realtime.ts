@@ -9,6 +9,11 @@ export type AgentRunWsSnapshot = {
   id: number;
   status: string;
   error: string | null;
+  attention?: {
+    stage: string;
+    last_event_at: string | null;
+    hint: string | null;
+  } | null;
 };
 
 const DEFAULT_MAX_WAIT_MS = 3_700_000; // just over 1h server cap
@@ -28,7 +33,7 @@ function buildRealtimeWsUrl(token: string): string {
 }
 
 function isTerminalStatus(status: string): boolean {
-  return status === "completed" || status === "failed";
+  return status === "completed" || status === "failed" || status === "needs_attention";
 }
 
 /**
@@ -38,7 +43,7 @@ function isTerminalStatus(status: string): boolean {
  */
 export function waitForRunTerminal(
   runId: number,
-  options: { maxWaitMs?: number } = {}
+  options: { maxWaitMs?: number; onProgress?: (snapshot: AgentRunWsSnapshot) => void } = {}
 ): Promise<AgentRunWsSnapshot> {
   const maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const token =
@@ -100,18 +105,31 @@ export function waitForRunTerminal(
       if (settled) return;
       try {
         const run = await apiFetch<AgentRun>(`/agent/runs/${runId}`);
+        const snapshot: AgentRunWsSnapshot = {
+          id: runId,
+          status: run.status,
+          error: run.error ?? null,
+          attention: run.attention ?? null
+        };
+        options.onProgress?.(snapshot);
         if (isTerminalStatus(run.status)) {
-          settle({
-            id: runId,
-            status: run.status,
-            error: run.error ?? null,
-          });
+          settle(snapshot);
         }
       } catch (err) {
         if (settled) return;
-        if (err instanceof ApiError && err.status === 404) {
+        if (err instanceof ApiError) {
+          if (err.status === 404) {
+            fail(err);
+            return;
+          }
+          if (err.status >= 500 || err.status === 0) {
+            // transient upstream issue; keep polling.
+            return;
+          }
           fail(err);
+          return;
         }
+        fail(new ApiError("Could not refresh run status.", 502));
       }
     };
 
@@ -151,6 +169,23 @@ export function waitForRunTerminal(
         id: runId,
         status: String(st),
         error: data.error == null ? null : String(data.error),
+        attention:
+          data.attention && typeof data.attention === "object"
+            ? {
+                stage:
+                  typeof (data.attention as Record<string, unknown>).stage === "string"
+                    ? String((data.attention as Record<string, unknown>).stage)
+                    : "running",
+                last_event_at:
+                  typeof (data.attention as Record<string, unknown>).last_event_at === "string"
+                    ? String((data.attention as Record<string, unknown>).last_event_at)
+                    : null,
+                hint:
+                  typeof (data.attention as Record<string, unknown>).hint === "string"
+                    ? String((data.attention as Record<string, unknown>).hint)
+                    : null
+              }
+            : null
       });
     };
     ws.onerror = () => {
