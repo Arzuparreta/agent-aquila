@@ -11,6 +11,8 @@ prompt (``AGENT_HEARTBEAT_CHECK_GMAIL``) to protect quota. Heartbeat is **off by
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import time
 from datetime import UTC, datetime
@@ -44,9 +46,13 @@ from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.llm_client import aclose_llm_http_client
 from app.services.telegram_notify import notify_telegram_for_completed_run
+from app.services.telegram_poller import run_telegram_long_poll_loop
 from app.services.user_ai_settings_service import UserAISettingsService
 
 logger = logging.getLogger(__name__)
+
+_telegram_poll_task: asyncio.Task[None] | None = None
+_telegram_poll_stop: asyncio.Event | None = None
 
 
 def _redis_settings() -> RedisSettings:
@@ -128,6 +134,7 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
 
 async def startup(ctx: dict[str, Any]) -> None:
     del ctx
+    global _telegram_poll_task, _telegram_poll_stop
     await fail_fast_if_schema_stale()
     logger.info(
         "worker started; redis=%s heartbeat=%s every=%dm",
@@ -135,10 +142,25 @@ async def startup(ctx: dict[str, Any]) -> None:
         settings.agent_heartbeat_enabled,
         settings.agent_heartbeat_minutes,
     )
+    if (settings.telegram_bot_token or "").strip() and settings.telegram_polling_enabled:
+        _telegram_poll_stop = asyncio.Event()
+        _telegram_poll_task = asyncio.create_task(
+            run_telegram_long_poll_loop(_telegram_poll_stop),
+            name="telegram_long_poll",
+        )
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     del ctx
+    global _telegram_poll_task, _telegram_poll_stop
+    if _telegram_poll_stop is not None:
+        _telegram_poll_stop.set()
+    if _telegram_poll_task is not None:
+        _telegram_poll_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _telegram_poll_task
+        _telegram_poll_task = None
+        _telegram_poll_stop = None
     await aclose_llm_http_client()
     logger.info("worker shutdown")
 

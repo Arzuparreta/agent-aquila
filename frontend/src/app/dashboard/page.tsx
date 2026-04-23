@@ -251,8 +251,8 @@ export default function DashboardPage() {
             </>
           ) : (
             <p className="text-sm text-fg-muted">
-              Set TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET on the server, register the webhook, then
-              refresh this page.
+              Set TELEGRAM_BOT_TOKEN in the API/worker environment and keep the worker running — inbound
+              messages use Telegram long polling (no tunnel). Refresh this page after changing env.
             </p>
           )}
         </Card>

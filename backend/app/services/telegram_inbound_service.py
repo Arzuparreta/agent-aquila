@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import secrets
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.agent_run import AgentRun
 from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
 from app.schemas.agent_turn_profile import TURN_PROFILE_CHANNEL_INBOUND
 from app.models.user import User
@@ -79,6 +81,19 @@ async def get_user_for_telegram_chat(db: AsyncSession, telegram_chat_id: str) ->
     if not link:
         return None
     return await db.get(User, link.user_id)
+
+
+async def dispatch_telegram_bot_update(db: AsyncSession, update: dict[str, Any]) -> None:
+    """Handle one Telegram Update object (webhook body or getUpdates element)."""
+    msg = update.get("message") or update.get("edited_message")
+    if not isinstance(msg, dict):
+        return
+    chat = msg.get("chat") or {}
+    cid = str(chat.get("id") or "")
+    if not cid:
+        return
+    text = str(msg.get("text") or msg.get("caption") or "")
+    await handle_telegram_text_message(db, telegram_chat_id=cid, text=text)
 
 
 async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: str, text: str) -> None:

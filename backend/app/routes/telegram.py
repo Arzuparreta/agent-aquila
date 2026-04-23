@@ -11,7 +11,7 @@ from app.core.deps import get_current_user
 from app.models.user import User
 from app.schemas.cockpit import TelegramLinkStatusRead, TelegramPairingRead
 from app.services.telegram_inbound_service import (
-    handle_telegram_text_message,
+    dispatch_telegram_bot_update,
     issue_pairing_code,
     user_has_telegram_link,
 )
@@ -54,11 +54,5 @@ async def telegram_webhook(
     if not expected or secret != expected:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     body = await request.json()
-    msg = body.get("message") or body.get("edited_message")
-    if isinstance(msg, dict):
-        chat = msg.get("chat") or {}
-        cid = str(chat.get("id") or "")
-        text = str(msg.get("text") or "")
-        if cid:
-            await handle_telegram_text_message(db, telegram_chat_id=cid, text=text)
+    await dispatch_telegram_bot_update(db, body)
     return {"ok": True}

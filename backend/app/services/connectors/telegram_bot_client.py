@@ -22,11 +22,25 @@ class TelegramBotClient:
         self._base = f"https://api.telegram.org/bot{tok}/"
         self._timeout = timeout
 
-    async def _get(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _get(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        request_timeout: float | None = None,
+    ) -> dict[str, Any]:
+        timeout = self._timeout if request_timeout is None else request_timeout
         backoff = 1.0
         for _ in range(4):
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.get(self._base + method, params=params or {})
+            if resp.status_code == 409:
+                try:
+                    data = resp.json()
+                    desc = str(data.get("description") or resp.text)[:400]
+                except Exception:  # noqa: BLE001
+                    desc = resp.text[:300]
+                raise TelegramAPIError(409, desc)
             if resp.status_code == 429 or resp.status_code >= 500:
                 wait = float(resp.headers.get("Retry-After") or 0) or backoff + random.uniform(0, 0.5)
                 await asyncio.sleep(min(wait, 20.0))
@@ -63,11 +77,25 @@ class TelegramBotClient:
     async def get_me(self) -> dict[str, Any]:
         return await self._get("getMe")
 
-    async def get_updates(self, *, offset: int | None = None, limit: int = 40) -> dict[str, Any]:
+    async def delete_webhook(self, *, drop_pending_updates: bool = False) -> dict[str, Any]:
+        return await self._post("deleteWebhook", {"drop_pending_updates": drop_pending_updates})
+
+    async def get_updates(
+        self,
+        *,
+        offset: int | None = None,
+        limit: int = 40,
+        long_poll_timeout: int | None = None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {"limit": max(1, min(limit, 100))}
         if offset is not None:
             params["offset"] = offset
-        return await self._get("getUpdates", params)
+        req_timeout = self._timeout
+        if long_poll_timeout is not None:
+            lp = max(0, min(int(long_poll_timeout), 50))
+            params["timeout"] = lp
+            req_timeout = float(lp) + 10.0
+        return await self._get("getUpdates", params, request_timeout=req_timeout)
 
     async def send_message(self, chat_id: int | str, text: str) -> dict[str, Any]:
         return await self._post(

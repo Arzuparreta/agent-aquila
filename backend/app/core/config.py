@@ -160,6 +160,11 @@ class Settings(BaseSettings):
     # Telegram bot (optional). Webhook path uses secret; leave empty to disable routes.
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str = Field(default="", validation_alias="TELEGRAM_WEBHOOK_SECRET")
+    # Long polling in the ARQ worker (OpenClaw-style): no public URL / tunnel for inbound DMs.
+    telegram_polling_enabled: bool = Field(default=True, validation_alias="TELEGRAM_POLLING_ENABLED")
+    telegram_poll_timeout: int = Field(
+        default=45, ge=0, le=50, validation_alias="TELEGRAM_POLL_TIMEOUT"
+    )
     # When true, HTTP channel stub and binding helpers are enabled (gateway integration).
     agent_channel_gateway_enabled: bool = Field(
         default=False, validation_alias="AGENT_CHANNEL_GATEWAY_ENABLED"
