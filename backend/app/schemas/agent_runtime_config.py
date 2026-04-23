@@ -29,6 +29,7 @@ class AgentRuntimeConfigPartial(BaseModel):
     dynamic_model_limits: bool | None = None
     agent_connector_gated_tools: bool | None = None
     agent_prompted_compact_json: bool | None = None
+    agent_tool_choice_required: bool | None = None
     agent_history_turns: int | None = Field(default=None, ge=1, le=64)
     agent_thread_compact_after_pairs: int | None = Field(default=None, ge=0, le=500)
     agent_memory_flush_enabled: bool | None = None
@@ -100,6 +101,7 @@ class AgentRuntimeConfigResolved(BaseModel):
     dynamic_model_limits: bool
     agent_connector_gated_tools: bool
     agent_prompted_compact_json: bool
+    agent_tool_choice_required: bool
     agent_history_turns: int = Field(ge=1, le=64)
     agent_thread_compact_after_pairs: int = Field(ge=0, le=500)
     agent_memory_flush_enabled: bool

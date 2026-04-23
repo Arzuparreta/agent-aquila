@@ -68,6 +68,7 @@ export type AgentRuntimeConfigResolved = {
   agent_include_harness_facts: boolean;
   agent_connector_gated_tools: boolean;
   agent_prompted_compact_json: boolean;
+  agent_tool_choice_required: boolean;
   agent_history_turns: number;
   agent_thread_compact_after_pairs: number;
   agent_memory_flush_enabled: boolean;
@@ -100,6 +101,7 @@ export type AgentRuntimeConfigPartial = {
   agent_include_harness_facts?: boolean | null;
   agent_connector_gated_tools?: boolean | null;
   agent_prompted_compact_json?: boolean | null;
+  agent_tool_choice_required?: boolean | null;
   agent_history_turns?: number | null;
   agent_thread_compact_after_pairs?: number | null;
   agent_memory_flush_enabled?: boolean | null;

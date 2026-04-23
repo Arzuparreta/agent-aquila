@@ -11,8 +11,9 @@ Harness contract:
 1. Send the FULL tool palette + the conversation to the LLM (native
    ``tools=`` parameter when the **native** harness is active; embedded JSON +
    ``<tool_call>`` tags when **prompted** — see ``agent_harness``).
-2. Native path uses ``tool_choice="required"`` (honoured by cloud providers;
-   Ollama may ignore it — we auto-fallback to prompted once per run).
+2. Native path may use ``tool_choice="required"`` when enabled in runtime
+   settings; otherwise ``auto`` is used (better compatibility with routed providers).
+   Ollama may still ignore tool calling — we auto-fallback to prompted once per run.
 3. Execute every tool call, feed results back (``role:"tool"`` for native;
    ``role:"user"`` + ``<tool_response>`` for prompted).
 4. Stop when the model calls ``final_answer`` OR when ``settings.agent_max_tool_steps``.
@@ -204,7 +205,8 @@ _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", 
 _logger_memory_tools = logging.getLogger(__name__)
 
 # When the user turn looks like naming / “remember this” / durable prefs, bias the model toward
-# `upsert_memory` before `final_answer` (native `tool_choice="required"` allows final_answer alone).
+# `upsert_memory` before `final_answer` (when tool-choice-required is on, the model can still emit
+# `final_answer` directly, so this reminder nudges memory writes first).
 _IDENTITY_AND_MEMORY_TOOL_NUDGE = """
 ## Host reminder (this user message)
 This turn likely assigns or confirms your display name, or asks you to remember something durable. Before calling `final_answer`, call `upsert_memory` with appropriate keys (for names: `agent.identity.display_name_es` / `agent.identity.display_name_en`). If you tell the user you will remember or save it, you need a successful `upsert_memory` in this same turn — natural language alone does not persist.
@@ -2717,6 +2719,7 @@ class AgentService:
                             settings_row,
                             messages=conversation,
                             tools=turn_tools,
+                            require_tool_choice=rt.agent_tool_choice_required,
                             temperature=0.15,
                             max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
                         )

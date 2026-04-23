@@ -12,6 +12,7 @@ async def chat_turn_native(
     *,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
+    require_tool_choice: bool,
     temperature: float,
     max_tokens: int | None = None,
 ) -> ChatResponse:
@@ -20,7 +21,7 @@ async def chat_turn_native(
         settings_row,
         messages=messages,
         tools=tools,
-        tool_choice="required",
+        tool_choice="required" if require_tool_choice else "auto",
         temperature=temperature,
         max_tokens=max_tokens,
     )

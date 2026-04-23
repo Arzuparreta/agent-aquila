@@ -126,6 +126,8 @@ class Settings(BaseSettings):
     agent_connector_gated_tools: bool = Field(default=False, validation_alias="AGENT_CONNECTOR_GATED_TOOLS")
     # In prompted harness mode, use shorter JSON (tighter descriptions, no indent) for tool embed.
     agent_prompted_compact_json: bool = Field(default=True, validation_alias="AGENT_PROMPTED_COMPACT_JSON")
+    # Native harness: when true, request ``tool_choice="required"`` (some routed providers reject this).
+    agent_tool_choice_required: bool = Field(default=False, validation_alias="AGENT_TOOL_CHOICE_REQUIRED")
     # Prior chat turns sent to the agent (default 8). Lower = fewer tokens.
     agent_history_turns: int = Field(default=8, ge=1, le=64, validation_alias="AGENT_HISTORY_TURNS")
     # When > 0 and thread history exceeds this many user+assistant pairs, older turns are dropped from context.

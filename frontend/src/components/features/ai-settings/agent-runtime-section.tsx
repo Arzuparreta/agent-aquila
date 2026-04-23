@@ -234,6 +234,15 @@ export function AgentRuntimeSection({
             />
             {t("settings.agentRuntime.promptedCompactJson")}
           </label>
+          <label className="inline-flex items-center gap-2 text-sm text-fg">
+            <input
+              type="checkbox"
+              checked={agentRuntime.agent_tool_choice_required}
+              disabled={saving}
+              onChange={(e) => void patchAgentRuntime({ agent_tool_choice_required: e.target.checked })}
+            />
+            {t("settings.agentRuntime.toolChoiceRequired")}
+          </label>
         </div>
       </section>
 

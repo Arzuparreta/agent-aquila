@@ -20,6 +20,7 @@ from app.services.agent_runtime_config_service import merge_patch_into_stored, m
 def test_merge_stored_with_env_uses_defaults_when_no_overrides() -> None:
     r = merge_stored_with_env(None)
     assert r.agent_max_tool_steps == int(settings.agent_max_tool_steps)
+    assert r.agent_tool_choice_required is bool(settings.agent_tool_choice_required)
     assert isinstance(r.agent_async_runs, bool)
     assert isinstance(r.context_budget_v2, bool)
     assert isinstance(r.token_aware_history, bool)
@@ -72,17 +73,19 @@ async def test_patch_agent_runtime_roundtrip(
 
             r1 = await ac.patch(
                 "/api/v1/ai/settings",
-                json={"agent_runtime": {"agent_max_tool_steps": 9}},
+                json={"agent_runtime": {"agent_max_tool_steps": 9, "agent_tool_choice_required": True}},
             )
             assert r1.status_code == 200, r1.text
             assert r1.json()["agent_runtime"]["agent_max_tool_steps"] == 9
+            assert r1.json()["agent_runtime"]["agent_tool_choice_required"] is True
 
             r2 = await ac.patch(
                 "/api/v1/ai/settings",
-                json={"agent_runtime": {"agent_max_tool_steps": None}},
+                json={"agent_runtime": {"agent_max_tool_steps": None, "agent_tool_choice_required": None}},
             )
             assert r2.status_code == 200, r2.text
             assert r2.json()["agent_runtime"]["agent_max_tool_steps"] == base_steps
+            assert r2.json()["agent_runtime"]["agent_tool_choice_required"] is bool(settings.agent_tool_choice_required)
 
             r3 = await ac.patch("/api/v1/ai/settings", json={"agent_runtime": None})
             assert r3.status_code == 200, r3.text
