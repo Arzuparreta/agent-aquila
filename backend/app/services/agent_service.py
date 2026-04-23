@@ -1723,6 +1723,9 @@ class AgentService:
         rt = await resolve_for_user(db, user)
         provs = await linked_connector_providers(db, user.id)
         palette = await resolve_turn_tool_palette(db, user)
+        hbm = max(1, min(60, int(getattr(settings, "agent_heartbeat_minutes", 15) or 15)))
+        minute_marks = sorted({m for m in range(0, 60, hbm)})
+
         return {
             "harness": "agent-aquila",
             "harness_mode_configured": coerce_harness_mode(prefs),
@@ -1735,6 +1738,26 @@ class AgentService:
             "connector_gated_tools": rt.agent_connector_gated_tools,
             "agent_processing_paused": bool(getattr(prefs, "agent_processing_paused", False)),
             "capabilities": describe_capabilities(),
+            "background_automation": {
+                "heartbeat": {
+                    "server_master_enabled": bool(settings.agent_heartbeat_enabled),
+                    "worker_cron_fires_at_minute_marks_each_hour": minute_marks,
+                    "worker_uses_instance_env_heartbeat_minutes": hbm,
+                    "per_user_heartbeat_enabled": bool(rt.agent_heartbeat_enabled),
+                    "per_user_check_gmail_on_heartbeat": bool(rt.agent_heartbeat_check_gmail),
+                    "per_user_heartbeat_burst_per_hour": int(rt.agent_heartbeat_burst_per_hour),
+                },
+                "how_it_works": (
+                    "When the ARQ worker and Redis are running and the instance has "
+                    "AGENT_HEARTBEAT_ENABLED=true, the worker wakes the agent on a cron that fires "
+                    "at the listed minute marks every hour. Each participating user (heartbeat "
+                    "enabled in AI settings) gets a background turn that can use tools — e.g. Gmail "
+                    "when 'Check Gmail on heartbeat' is on. It is not a single 'once daily at 9:30' "
+                    "product toggle; exact wall-clock scheduling may need deployment tuning. "
+                    "Gmail watch / Pub/Sub push (event-driven) is optional in some installs — see "
+                    "docs. Outbound email still requires user approval; reads and digests are fine."
+                ),
+            },
         }
 
     # ------------------------------------------------------------------

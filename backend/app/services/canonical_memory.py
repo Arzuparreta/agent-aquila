@@ -229,8 +229,10 @@ def build_markdown_memory_prompt_section(user: User, *, char_budget: int = 12_00
     root = memory_workspace_dir(int(user.id))
     parts: list[str] = [
         "# Canonical memory (OpenClaw-style)\n",
-        "Structured rows in MEMORY.md, USER.md, and memory/YYYY-MM-DD.md are the source of truth. "
-        "The key/value index in the database mirrors these files for search.\n",
+        "Structured rows in MEMORY.md, USER.md, and memory/YYYY-MM-DD.md are the **source of truth for user-stored notes and preferences** "
+        "(what the user or agent chose to persist). They are **not** authoritative for **harness capabilities** — what tools exist, "
+        "which connectors are linked, background automation, or server limits. For that, the model must use **`describe_harness`** and "
+        "tool results (see **## Epistemic priority (host)** in the system message). The database index mirrors these files for search.\n",
     ]
     for label, relp in (
         ("MEMORY.md", "MEMORY.md"),

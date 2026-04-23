@@ -1342,8 +1342,9 @@ _INTROSPECTION_TOOLS: list[dict[str, Any]] = [
     _fn(
         "describe_harness",
         "Return structured information about this deployment: tool palette size, "
-        "harness settings, linked connectors, and capability policy summary. "
-        "Use when the user asks what you can do or how you are configured.",
+        "harness settings, linked connectors, background heartbeat/automation state, and "
+        "capability policy. Use when the user asks what you can do, how you are configured, or "
+        "whether recurring/scheduled/background work (e.g. daily inbox digests) is available.",
         {},
     ),
 ]

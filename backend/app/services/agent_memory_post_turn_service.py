@@ -92,6 +92,7 @@ Rules:
 - Content: short plain text; one main fact per entry.
 - importance: integer 0-10 (use 8-10 when the user explicitly asked to remember, or for stable identity).
 - Do NOT store passwords, API keys, tokens, or full third-party message bodies.
+- Do NOT assert that "scheduled" or "automatic" or "background" help is impossible — the stack supports **heartbeat** (scheduled agent turns) when configured; if the user only stated a wish (e.g. daily digest), store the wish without a false limitation.
 - **Identity (required when applicable):** If the user assigns, confirms, or agrees on what the assistant
   should be called, or the assistant states or accepts a display name in the reply (e.g. "Agente Áquila",
   "Agent Aquila"), you MUST emit at least one row under agent.identity.* (e.g. agent.identity.display_name_es,
@@ -107,7 +108,8 @@ Return ONLY JSON: {"memories":[{"key":"string","content":"string","importance":0
 
 If the USER or ASSISTANT assigns, confirms, or states the assistant's name (including nicknames like
 "Agente Áquila"), you MUST include at least one agent.identity.* row with importance 8-10 unless there is
-literally no name or preference in the text. Otherwise return {"memories":[]}."""
+literally no name or preference in the text. Otherwise return {"memories":[]}. Do not invent claims that
+background or scheduled help is impossible — omit that."""
 
 
 @dataclass(frozen=True)
