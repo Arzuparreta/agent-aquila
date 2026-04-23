@@ -71,6 +71,7 @@ class AgentRunRead(BaseModel):
     error: str | None = None
     root_trace_id: str | None = None
     chat_thread_id: int | None = None
+    turn_profile: str = "user_chat"
     attention: AgentRunAttentionRead | None = None
     steps: list[AgentStepRead]
     pending_proposals: list[PendingProposalRead]

@@ -20,6 +20,20 @@ def _get(defaults: Settings, key: str, raw: dict[str, Any]) -> Any:
     return getattr(defaults, key)
 
 
+def _opt_int(v: Any) -> int | None:
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+
 def merge_stored_with_env(raw: dict[str, Any] | None) -> AgentRuntimeConfigResolved:
     """Build effective runtime config. ``raw`` is the JSON column (partial overrides)."""
     s = settings
@@ -47,6 +61,11 @@ def merge_stored_with_env(raw: dict[str, Any] | None) -> AgentRuntimeConfigResol
         or "committee",
         "agent_channel_gateway_enabled": bool(_get(s, "agent_channel_gateway_enabled", r)),
         "agent_email_domain_allowlist": str(_get(s, "agent_email_domain_allowlist", r) or ""),
+        "agent_non_chat_uses_compact_palette": bool(_get(s, "agent_non_chat_uses_compact_palette", r)),
+        "agent_heartbeat_max_tool_steps": _opt_int(_get(s, "agent_heartbeat_max_tool_steps", r)),
+        "agent_channel_inbound_max_tool_steps": _opt_int(_get(s, "agent_channel_inbound_max_tool_steps", r)),
+        "agent_automation_max_tool_steps": _opt_int(_get(s, "agent_automation_max_tool_steps", r)),
+        "agent_inject_user_context_in_chat": bool(_get(s, "agent_inject_user_context_in_chat", r)),
     }
     return AgentRuntimeConfigResolved.model_validate(payload)
 

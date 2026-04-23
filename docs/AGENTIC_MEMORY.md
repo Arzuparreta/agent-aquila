@@ -1,8 +1,8 @@
 # Agentic memory (V1) — design reference
 
-This document describes the post–OpenClaw-reform **canonical markdown memory**, **committee
-routing**, **adaptive consolidation**, **skill autogenesis policy**, and **adapter sandbox
-contract**. It is the implementation companion to the agentic memory plan.
+Product context: [VISION.md](./VISION.md). This document is the **implementation reference** for
+**canonical markdown memory**, **committee routing**, **adaptive consolidation**, **skill
+autogenesis policy**, and the **adapter sandbox contract** (V1 design).
 
 ## Canonical memory (source of truth)
 

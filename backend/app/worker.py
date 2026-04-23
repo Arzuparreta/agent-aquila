@@ -1,16 +1,13 @@
-"""ARQ worker entrypoint — OpenClaw-style heartbeat only.
+"""ARQ worker entrypoint — scheduled jobs (heartbeat, memory consolidation, etc.).
 
 Run with::
 
     arq app.worker.WorkerSettings
 
-After the OpenClaw refactor we no longer ingest Gmail / Calendar / Drive
-mirrors. The worker exists solely to give the agent a periodic
-heartbeat — a tiny prompt that wakes the agent on a schedule. Gmail is
-**not** part of the default prompt (see ``AGENT_HEARTBEAT_CHECK_GMAIL``);
-that avoids burning Gmail API quota in the background. The heartbeat is
-**off by default** (``AGENT_HEARTBEAT_ENABLED``) so dev setups never spawn
-surprise LLM calls.
+The worker does not mirror Gmail/Calendar/Drive locally. The optional **heartbeat** cron wakes the
+agent with ``turn_profile=heartbeat`` (compact palette by default). Gmail is not in the default
+prompt (``AGENT_HEARTBEAT_CHECK_GMAIL``) to protect quota. Heartbeat is **off by default**
+(``AGENT_HEARTBEAT_ENABLED``) so local clones do not spawn surprise LLM calls.
 """
 from __future__ import annotations
 
@@ -42,6 +39,7 @@ from app.services.agent_run_attention import (
     should_mark_needs_attention,
     stage_age_seconds,
 )
+from app.schemas.agent_turn_profile import TURN_PROFILE_HEARTBEAT
 from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.llm_client import aclose_llm_http_client
@@ -110,7 +108,10 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
                 continue
             try:
                 run = await AgentService.run_agent(
-                    db, user, _heartbeat_prompt(check_gmail=rt.agent_heartbeat_check_gmail)
+                    db,
+                    user,
+                    _heartbeat_prompt(check_gmail=rt.agent_heartbeat_check_gmail),
+                    turn_profile=TURN_PROFILE_HEARTBEAT,
                 )
                 summaries.append(
                     {

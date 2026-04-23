@@ -156,6 +156,28 @@ class Settings(BaseSettings):
     agent_channel_gateway_enabled: bool = Field(
         default=False, validation_alias="AGENT_CHANNEL_GATEWAY_ENABLED"
     )
+    # Non-chat agent turns (channels, heartbeats, automation-class) use compact tool palette.
+    agent_non_chat_uses_compact_palette: bool = Field(
+        default=True, validation_alias="AGENT_NON_CHAT_USES_COMPACT_PALETTE"
+    )
+    agent_heartbeat_max_tool_steps: int | None = Field(
+        default=None, validation_alias="AGENT_HEARTBEAT_MAX_TOOL_STEPS"
+    )
+    agent_channel_inbound_max_tool_steps: int | None = Field(
+        default=None, validation_alias="AGENT_CHANNEL_INBOUND_MAX_TOOL_STEPS"
+    )
+    agent_automation_max_tool_steps: int | None = Field(
+        default=None, validation_alias="AGENT_AUTOMATION_MAX_TOOL_STEPS"
+    )
+    agent_inject_user_context_in_chat: bool = Field(
+        default=False, validation_alias="AGENT_INJECT_USER_CONTEXT_IN_CHAT"
+    )
+    agent_user_context_overview_llm_enabled: bool = Field(
+        default=True, validation_alias="AGENT_USER_CONTEXT_OVERVIEW_LLM_ENABLED"
+    )
+    agent_user_context_refresh_min_minutes: int = Field(
+        default=180, ge=5, le=10_080, validation_alias="AGENT_USER_CONTEXT_REFRESH_MIN_MINUTES"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

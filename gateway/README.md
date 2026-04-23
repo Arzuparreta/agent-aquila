@@ -9,8 +9,9 @@ This directory is a **thin control-plane stub** that mirrors the OpenClaw-style 
 2. **Deliver a message** (when `AGENT_CHANNEL_GATEWAY_ENABLED=true` on the server):
 
    - `POST /api/v1/channels/gateway/deliver`
-   - JSON body: `{ "channel": "gateway_stub", "external_key": "<stable-conversation-id>", "text": "..." }`
-   - Response: `{ "run_id", "chat_thread_id", "root_trace_id", "status" }`
+   - JSON body: `{ "channel": "gateway_stub" | "telegram" | "slack" | "discord" | "whatsapp" | "matrix" | "web", "external_key": "<stable-conversation-id>", "text": "..." }`  
+     (`channel` must match a value from the API enum; the agent run is tagged with `turn_profile=channel_inbound` for scoped tools and trace correlation.)
+   - Response: `{ "run_id", "chat_thread_id", "root_trace_id", "status", "turn_profile" }`
 
 3. **Trace events** (evals / observability):
 

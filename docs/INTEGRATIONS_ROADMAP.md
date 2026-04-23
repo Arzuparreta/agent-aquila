@@ -1,6 +1,10 @@
-# Integrations roadmap (OpenClaw-style)
+# Integrations roadmap (backlog)
 
-This project follows an **OpenClaw-like** shape: a broad **tool catalogue** backed by **thin REST clients**, **OAuth** via `TokenManager`, optional **skills** (markdown recipes), and **live provider proxies** under `/api/v1` so the UI and the agent share one implementation.
+**Status:** ideas and near-term work — **not** a release commitment. The live product story is
+[VISION.md](./VISION.md). This file tracks how new connectors should be added: a broad **tool
+catalogue** backed by **thin REST clients**, **OAuth** via `TokenManager`, optional **skills**
+(markdown recipes), and **live provider proxies** under `/api/v1` so the UI and the agent share
+one implementation.
 
 ## Principles
 

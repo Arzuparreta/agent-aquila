@@ -21,9 +21,9 @@
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀   ⠀⠀⠀     ⠀⠀⠀⠀     ⠀⠀⠀⠀         ⠀⠀⣿⠇⠀⢻⣇⠙⠣⣌⣻⣏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ```
 
-Your self-hosted personal operations assistant.
+Your self-hosted personal operations assistant: **broad connector surface**, **context-first** automated wakes, and a **lean harness** (scoped tool palettes and user context snapshot) so you are not paying the full tool catalogue on every background ping.
 
-Agent Aquila helps you manage inbox and calendar workflows across **Gmail, Calendar, Drive, Outlook, and Teams** while keeping control where it belongs: **your accounts, your keys, your machine**.
+Agent Aquila helps you manage mail, calendar, files, and more across **Gmail, Calendar, Drive, Outlook, Teams**, and many other linked providers while keeping control where it belongs: **your accounts, your keys, your machine**. Multi-channel is a first-class goal (web UI plus gateway and channel adapters). See [`docs/VISION.md`](docs/VISION.md) for how this compares to the OpenClaw *shape* and what Aquila optimizes for.
 
 Persistent **memory** and reusable **skills** (markdown playbooks in `backend/skills/`) keep behavior consistent across sessions. An optional heartbeat scheduler can wake the agent on a cadence; by default it does **not** scan Gmail (`AGENT_HEARTBEAT_CHECK_GMAIL=false`) to avoid background quota burn (details in [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md)).
 
@@ -89,11 +89,14 @@ You can tune this policy in [`backend/app/services/agent_tools.py`](backend/app/
 
 ## Documentation
 
+- [`docs/VISION.md`](docs/VISION.md) — product direction, harness goals, and doc map  
 - [`docs/PROVIDERS.md`](docs/PROVIDERS.md) — models and provider setup  
 - [`docs/MEMORY.md`](docs/MEMORY.md) — persistent memory  
+- [`docs/AGENT_SETTINGS.md`](docs/AGENT_SETTINGS.md) — agent runtime tunables (env + per-user)  
 - [`docs/SKILLS.md`](docs/SKILLS.md) — authoring skills  
 - [`docs/testing.md`](docs/testing.md) — tests  
 - [`docs/MANUAL_QA.md`](docs/MANUAL_QA.md) — manual checks  
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — startup and runtime failure patterns  
 - [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md) — Gmail API usage, heartbeat, SQL to audit tool calls  
-- [`docs/GMAIL_WATCH.md`](docs/GMAIL_WATCH.md) — design: Gmail Pub/Sub / `users.watch` (Phase B)  
+- [`docs/GMAIL_WATCH.md`](docs/GMAIL_WATCH.md) — design: Gmail Pub/Sub / `users.watch` (automation)  
+- [`docs/INTEGRATIONS_ROADMAP.md`](docs/INTEGRATIONS_ROADMAP.md) — integration backlog (not a release promise)  

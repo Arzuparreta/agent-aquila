@@ -1,11 +1,16 @@
 # Agent persistent memory
 
+Start with [VISION.md](./VISION.md) for *why* memory and harness pieces exist, then use this file for **storage mechanics** and [AGENTIC_MEMORY.md](./AGENTIC_MEMORY.md) for committee / consolidation details.
+
 Aquila uses a **hybrid** design:
 
-1. **Canonical (OpenClaw-style) markdown** per user — source of truth for what the *model* sees in
-   the system prompt: `MEMORY.md`, `USER.md`, `memory/YYYY-MM-DD.md`, optional `DREAMS.md` digest
-   and `rubric.json` for dynamic importance routing.
-2. **Postgres** (`agent_memories`) as an **index** for Settings UI, semantic recall, and
+1. **Canonical markdown** per user — source of truth for what the *model* sees in the system
+   prompt: `MEMORY.md`, `USER.md`, `memory/YYYY-MM-DD.md`, optional `DREAMS.md` digest and
+   `rubric.json` for dynamic importance routing.
+2. A short **user context snapshot** (`user_ai_settings.agent_context_overview`) updated after
+   consolidation and throttled post-turn upserts: a compressed “TL;DR” for **non-chat** agent
+   turns (see [VISION.md](./VISION.md)), distinct from the full memory blob in chat.
+3. **Postgres** (`agent_memories`) as an **index** for Settings UI, semantic recall, and
    `memory_search` / `recall_memory` when embeddings are configured.
 
 See **[AGENTIC_MEMORY.md](./AGENTIC_MEMORY.md)** for the full V1 design (committee, consolidation,
@@ -16,6 +21,7 @@ autogenesis, adapter contract).
 | Layer | Location |
 | ----- | -------- |
 | Canonical root | `data/users/<user_id>/memory_workspace/` (or `AQUILA_USER_DATA_DIR`) — see [AGENTIC_MEMORY.md](./AGENTIC_MEMORY.md) |
+| User context snapshot | `user_ai_settings.agent_context_overview` — see `agent_user_context.py` |
 | Service | `backend/app/services/canonical_memory.py`, `agent_memory_service.py` |
 | Database (index) | `agent_memories` table |
 | HTTP API | `GET/POST/DELETE /api/v1/memory`, `GET /api/v1/memory/digest`, `POST /api/v1/memory/reset` |

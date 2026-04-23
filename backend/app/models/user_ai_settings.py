@@ -26,9 +26,10 @@ The mirror columns are kept in sync by
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -58,6 +59,11 @@ class UserAISettings(Base, TimestampMixin):
 
     # Partial overrides for ``config.settings`` agent_* keys (merged server-side).
     agent_runtime_config: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Short async-maintained summary for “user TL;DR” injection (context-first harness).
+    agent_context_overview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_context_overview_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror

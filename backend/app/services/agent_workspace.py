@@ -1,4 +1,4 @@
-"""File-backed workspace prompts (OpenClaw-style SOUL + AGENTS) + tool docs.
+"""File-backed workspace prompts (SOUL + AGENTS) and runtime tool documentation.
 
 ``SOUL.md`` and ``AGENTS.md`` live under ``backend/agent_workspace/`` by default
 (or ``AQUILA_WORKSPACE_DIR``). The tool catalog is generated at runtime from the
@@ -213,13 +213,18 @@ def build_harness_facts_markdown(
     connector_gated: bool,
     linked_providers: list[str],
     agent_paused: bool,
+    turn_profile: str | None = None,
 ) -> str:
     prov = ", ".join(sorted(linked_providers)) if linked_providers else "(none linked)"
-    return "\n".join(
+    lines: list[str] = [
+        "# Harness (runtime facts)",
+        f"- Tools offered this turn: **{tool_count}**",
+    ]
+    if turn_profile:
+        lines.append(f"- Turn profile: **{turn_profile}**")
+    lines.extend(
         [
-            "# Harness (runtime facts)",
-            f"- Tools offered this turn: **{tool_count}**",
-            f"- Max tool steps per turn: **{max_tool_steps}**",
+            f"- Max tool steps this turn: **{max_tool_steps}**",
             f"- Harness mode (effective): **{harness_mode}**",
             f"- Prompt tier: **{prompt_tier}**",
             f"- Tool palette setting: **{tool_palette_mode}**",
@@ -229,6 +234,7 @@ def build_harness_facts_markdown(
             "",
         ]
     )
+    return "\n".join(lines)
 
 
 async def linked_connector_providers(db: AsyncSession, user_id: int) -> list[str]:
@@ -296,6 +302,9 @@ async def build_system_prompt(
     prompt_tier: str | None = None,
     agent_processing_paused: bool = False,
     runtime: AgentRuntimeConfigResolved | None = None,
+    turn_profile: str | None = None,
+    injected_user_context: str | None = None,
+    max_tool_steps_effective: int | None = None,
 ) -> str:
     """Assemble system prompt: SOUL + AGENTS + optional facts + tools + memory + clock + thread hint."""
     del tenant_hint
@@ -303,6 +312,8 @@ async def build_system_prompt(
     tier = (prompt_tier or rt.agent_prompt_tier or "full").strip().lower()
     if tier not in ("full", "minimal", "none"):
         tier = "full"
+    mxs = int(max_tool_steps_effective) if max_tool_steps_effective is not None else int(rt.agent_max_tool_steps)
+    tprof = (turn_profile or "user_chat").strip().lower()
 
     soul = _read_file("SOUL.md", _DEFAULT_SOUL) if tier != "none" else ""
     agents = _read_file("AGENTS.md", _DEFAULT_AGENTS)
@@ -317,18 +328,27 @@ async def build_system_prompt(
     if soul:
         parts.append(soul)
     parts.append(agents)
+    if tprof not in ("user_chat", "memory_flush"):
+        parts.append(
+            "## Context-first (automated turn)\n"
+            "Situate the incoming signal in the user snapshot and memory before using many tools. "
+            "Prefer a concise `final_answer` unless deeper actions are clearly needed."
+        )
+    if injected_user_context and str(injected_user_context).strip():
+        parts.append(str(injected_user_context).strip())
     if rt.agent_include_harness_facts:
         provs = await linked_connector_providers(db, user.id)
         parts.append(
             build_harness_facts_markdown(
                 tool_count=len(tool_palette),
-                max_tool_steps=rt.agent_max_tool_steps,
+                max_tool_steps=mxs,
                 harness_mode=str(harness_mode),
                 prompt_tier=tier,
                 tool_palette_mode=rt.agent_tool_palette,
                 connector_gated=rt.agent_connector_gated_tools,
                 linked_providers=provs,
                 agent_paused=agent_processing_paused,
+                turn_profile=tprof,
             )
         )
     parts.append(tools)

@@ -357,6 +357,13 @@ async def maybe_ingest_post_turn_memory(
         EV_POST_TURN_COMPLETED,
         {"reason": "ok", "mode": mode, "upserts": upserts},
     )
+    if upserts > 0:
+        try:
+            from app.services.agent_user_context import maybe_refresh_after_post_turn
+
+            await maybe_refresh_after_post_turn(db, user)
+        except Exception:  # noqa: BLE001
+            logger.exception("post_turn: user context snapshot refresh failed user_id=%s", user.id)
     return PostTurnMemoryResult(False, "ok", upserts)
 
 

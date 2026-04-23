@@ -587,6 +587,11 @@ const en = {
   "settings.agentRuntime.heartbeatMinutes": "Heartbeat interval (minutes)",
   "settings.agentRuntime.heartbeatCheckGmail": "Check Gmail on heartbeat",
   "settings.agentRuntime.sectionPromptTools": "Prompt and tools",
+  "settings.agentRuntime.sectionHarness": "Harness (channels and background)",
+  "settings.agentRuntime.harnessHint":
+    "Non-web turns (gateway, heartbeat, future automation) can use a smaller tool set and a cached user snapshot to save tokens.",
+  "settings.agentRuntime.nonChatCompactPalette": "Use compact tool palette for non-chat turns (recommended)",
+  "settings.agentRuntime.injectContextInChat": "Also inject the user context snapshot in web chat (uses more tokens)",
   "settings.agentRuntime.toolPalette": "Tool palette",
   "settings.agentRuntime.paletteFull": "Full",
   "settings.agentRuntime.paletteCompact": "Compact",
@@ -1536,6 +1541,11 @@ const es: Record<keyof typeof en, string> = {
   "settings.agentRuntime.heartbeatMinutes": "Intervalo de heartbeat (minutos)",
   "settings.agentRuntime.heartbeatCheckGmail": "Comprobar Gmail en el heartbeat",
   "settings.agentRuntime.sectionPromptTools": "Prompt y herramientas",
+  "settings.agentRuntime.sectionHarness": "Motor del agente: canales y segundo plano",
+  "settings.agentRuntime.harnessHint":
+    "Los turnos que no son el chat web (gateway, heartbeat, futura automatización) pueden usar un conjunto de herramientas más pequeño y un resumen en caché del usuario para ahorrar tokens.",
+  "settings.agentRuntime.nonChatCompactPalette": "Usar paleta compacta de herramientas en turnos que no sean el chat (recomendado)",
+  "settings.agentRuntime.injectContextInChat": "Inyectar también el resumen de contexto del usuario en el chat web (gasta más tokens)",
   "settings.agentRuntime.toolPalette": "Paleta de herramientas",
   "settings.agentRuntime.paletteFull": "Completa",
   "settings.agentRuntime.paletteCompact": "Compacta",

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.telegram_channel import TelegramAccountLink, TelegramPairingCode
+from app.schemas.agent_turn_profile import TURN_PROFILE_CHANNEL_INBOUND
 from app.models.user import User
 from app.services.agent_attachments import attachments_from_agent_run_read
 from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
@@ -166,7 +167,9 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
 
     use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
     if use_async:
-        run_row = await AgentService.create_pending_agent_run(db, user, rendered, thread_id=thread.id)
+        run_row = await AgentService.create_pending_agent_run(
+            db, user, rendered, thread_id=thread.id, turn_profile=TURN_PROFILE_CHANNEL_INBOUND
+        )
         run_id = int(run_row.id)
         asst_msg = await append_message(
             db, thread, role="assistant", content=_PLACEHOLDER, agent_run_id=run_id
@@ -200,6 +203,7 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
+        turn_profile=TURN_PROFILE_CHANNEL_INBOUND,
     )
     cards = attachments_from_agent_run_read(run)
     has_error_card = any(

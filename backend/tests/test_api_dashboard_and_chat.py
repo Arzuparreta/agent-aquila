@@ -312,6 +312,7 @@ async def test_retry_endpoint_idempotency_header_deduplicates(
             error=None,
             root_trace_id=None,
             chat_thread_id=chat_thread.id,
+            turn_profile="user_chat",
             steps=[],
             pending_proposals=[],
         )

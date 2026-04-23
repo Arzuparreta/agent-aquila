@@ -35,6 +35,14 @@ class AgentRuntimeConfigPartial(BaseModel):
     agent_memory_post_turn_mode: AgentMemoryPostTurnMode | None = None
     agent_channel_gateway_enabled: bool | None = None
     agent_email_domain_allowlist: str | None = None
+    # Harness: non-chat turns use a compact tool palette (channels, heartbeats, automation).
+    agent_non_chat_uses_compact_palette: bool | None = None
+    # Optional per-profile step caps (default: ``agent_max_tool_steps`` / memory flush max).
+    agent_heartbeat_max_tool_steps: int | None = Field(default=None, ge=1, le=100)
+    agent_channel_inbound_max_tool_steps: int | None = Field(default=None, ge=1, le=100)
+    agent_automation_max_tool_steps: int | None = Field(default=None, ge=1, le=100)
+    # When true, inject the async user context snapshot in web chat (more tokens).
+    agent_inject_user_context_in_chat: bool | None = None
 
     @field_validator("agent_memory_post_turn_mode", mode="before")
     @classmethod
@@ -95,3 +103,8 @@ class AgentRuntimeConfigResolved(BaseModel):
     agent_memory_post_turn_mode: AgentMemoryPostTurnMode
     agent_channel_gateway_enabled: bool
     agent_email_domain_allowlist: str = ""
+    agent_non_chat_uses_compact_palette: bool
+    agent_heartbeat_max_tool_steps: int | None
+    agent_channel_inbound_max_tool_steps: int | None
+    agent_automation_max_tool_steps: int | None
+    agent_inject_user_context_in_chat: bool

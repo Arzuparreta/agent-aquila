@@ -1,11 +1,10 @@
-"""ReAct loop + tool dispatch for the OpenClaw-style agent.
+"""ReAct loop + tool dispatch: live provider tools, memory, and skills.
 
-After the refactor the agent has *no* local mirrors to read from — every
-read tool talks straight to the upstream provider (Gmail, Calendar,
-Drive, Outlook, Teams). Most writes auto-execute; outbound email
-(send + reply), WhatsApp session/template messages, and YouTube uploads go
-through the human-approval ``PendingProposal`` flow. Memory and skills are
-the agent's own state.
+There are no local mailbox mirrors: every read tool calls the upstream API (Gmail, Calendar,
+Drive, Outlook, Teams, and other linked connectors). Most writes run immediately; outbound email
+and select high-risk sends use ``PendingProposal`` for human approval. Memory and skills are
+agent-local state. ``turn_profile`` on each :class:`AgentRun` controls palette width and step
+limits for context-first **non-chat** entry points.
 
 Harness contract:
 
@@ -58,9 +57,14 @@ from app.services.agent_harness.prompted import (
 from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_dispatch_table import AGENT_TOOL_DISPATCH
 from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
+from app.services.agent_harness_effective import (
+    effective_tool_palette_mode_for_turn,
+    resolve_max_tool_steps_for_turn,
+)
 from app.services.agent_memory_post_turn_service import heuristic_wants_post_turn_extraction
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_runtime_config_service import merge_stored_with_env, resolve_for_user
+from app.schemas.agent_turn_profile import TURN_PROFILE_USER_CHAT, normalize_turn_profile
 from app.services.agent_run_attention import build_attention_snapshot
 from app.services.agent_replay import AgentReplayContext
 from app.services.agent_tools import (
@@ -84,6 +88,7 @@ from app.services.agent_trace import (
     new_span_id,
     new_trace_id,
 )
+from app.services.agent_user_context import injectable_user_context_section
 from app.services.agent_workspace import (
     build_memory_flush_system_prompt,
     build_system_prompt,
@@ -213,10 +218,16 @@ def get_tool_palette(
     return tools_for_palette_mode(mode)
 
 
-async def resolve_turn_tool_palette(db: AsyncSession, user: User) -> list[dict[str, Any]]:
+async def resolve_turn_tool_palette(
+    db: AsyncSession,
+    user: User,
+    *,
+    turn_profile: str | None = None,
+) -> list[dict[str, Any]]:
     """Tool schemas for this run, optionally omitting tools for disconnected providers."""
     rt = await resolve_for_user(db, user)
-    base = tools_for_palette_mode(rt.agent_tool_palette)
+    mode = effective_tool_palette_mode_for_turn(rt, turn_profile)
+    base = tools_for_palette_mode(mode)
     if not rt.agent_connector_gated_tools:
         return base
     filtered = await filter_tools_for_user_connectors(db, user.id, base)
@@ -2212,6 +2223,7 @@ class AgentService:
             ),
             root_trace_id=root_trace,
             chat_thread_id=thread_id,
+            turn_profile="memory_flush",
         )
         db.add(run)
         await db.flush()
@@ -2328,6 +2340,7 @@ class AgentService:
         message: str,
         *,
         thread_id: int | None = None,
+        turn_profile: str = TURN_PROFILE_USER_CHAT,
     ) -> AgentRun:
         root_trace = new_trace_id()
         run = AgentRun(
@@ -2336,6 +2349,7 @@ class AgentService:
             user_message=message,
             root_trace_id=root_trace,
             chat_thread_id=thread_id,
+            turn_profile=normalize_turn_profile(turn_profile),
         )
         db.add(run)
         await db.flush()
@@ -2351,6 +2365,7 @@ class AgentService:
         thread_id: int | None = None,
         thread_context_hint: str | None = None,
         replay: AgentReplayContext | None = None,
+        turn_profile: str | None = None,
     ) -> AgentRunRead:
         """Run one agent turn.
 
@@ -2362,18 +2377,21 @@ class AgentService:
           ``"Conversation about thread #42"``.
         ``replay``: when set, non-``final_answer`` tools consume scripted results from
           :class:`~app.services.agent_replay.AgentReplayContext` (regression tests).
+        ``turn_profile``: harness kind (``user_chat``, ``channel_inbound``, ``heartbeat``, etc.).
         """
         early = await AgentService.run_agent_invalid_preflight(db, user, message, thread_id=thread_id)
         if early is not None:
             return early
 
         root_trace = new_trace_id()
+        tpf = normalize_turn_profile(turn_profile)
         run = AgentRun(
             user_id=user.id,
             status="running",
             user_message=message,
             root_trace_id=root_trace,
             chat_thread_id=thread_id,
+            turn_profile=tpf,
         )
         db.add(run)
         await db.flush()
@@ -2404,10 +2422,21 @@ class AgentService:
         settings_row = await UserAISettingsService.get_or_create(db, user)
         rt = await resolve_for_user(db, user)
         api_key = await UserAISettingsService.get_api_key(db, user)
+        tp = normalize_turn_profile(getattr(run, "turn_profile", None) or TURN_PROFILE_USER_CHAT)
+        eff_max = resolve_max_tool_steps_for_turn(rt, tp)
+        if max_tool_steps_override is not None:
+            eff_max = int(max_tool_steps_override)
         turn_tools = (
             tool_palette_override
             if tool_palette_override is not None
-            else await resolve_turn_tool_palette(db, user)
+            else await resolve_turn_tool_palette(db, user, turn_profile=tp)
+        )
+        user_ctx_block = await injectable_user_context_section(
+            db,
+            user,
+            settings_row=settings_row,
+            turn_profile=tp,
+            inject_in_chat=rt.agent_inject_user_context_in_chat,
         )
         harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
         effective = resolve_effective_mode(
@@ -2434,24 +2463,32 @@ class AgentService:
                 "harness_mode_effective": effective,
                 "replay": replay is not None,
                 "memory_flush": tool_palette_override is not None,
+                "turn_profile": tp,
+                "max_tool_steps_effective": eff_max,
             },
         )
 
-        if system_prompt_override is not None:
-            system_prompt = system_prompt_override
-        else:
-            system_prompt = await build_system_prompt(
+        async def _assemble_system(harness_mode: object) -> str:
+            return await build_system_prompt(
                 db,
                 user,
                 tool_palette=turn_tools,
-                harness_mode=effective,
+                harness_mode=harness_mode,  # type: ignore[arg-type]
                 thread_context_hint=thread_context_hint,
                 user_timezone=getattr(settings_row, "user_timezone", None),
                 time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
                 prompt_tier=rt.agent_prompt_tier,
                 agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
                 runtime=rt,
+                turn_profile=tp,
+                injected_user_context=user_ctx_block,
+                max_tool_steps_effective=eff_max,
             )
+
+        if system_prompt_override is not None:
+            system_prompt = system_prompt_override
+        else:
+            system_prompt = await _assemble_system(effective)
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
         ]
@@ -2491,11 +2528,7 @@ class AgentService:
 
         try:
             final_answer_text: str | None = None
-            max_steps = (
-                max_tool_steps_override
-                if max_tool_steps_override is not None
-                else rt.agent_max_tool_steps
-            )
+            max_steps = eff_max
             for _ in range(max_steps):
                 parse_errors: list[str] = []
                 llm_span = new_span_id()
@@ -2510,6 +2543,8 @@ class AgentService:
                         "approx_prompt_tokens": _approx_prompt_tokens(conversation),
                         "tool_defs_count": len(turn_tools),
                         "harness_mode": effective,
+                        "turn_profile": tp,
+                        "max_tool_steps_effective": eff_max,
                     },
                 )
                 _llm_t0 = time.monotonic()
@@ -2545,18 +2580,7 @@ class AgentService:
                 ):
                     effective = "prompted"
                     allow_native_fallback = False
-                    system_prompt = await build_system_prompt(
-                        db,
-                        user,
-                        tool_palette=turn_tools,
-                        harness_mode="prompted",
-                        thread_context_hint=thread_context_hint,
-                        user_timezone=getattr(settings_row, "user_timezone", None),
-                        time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
-                        prompt_tier=rt.agent_prompt_tier,
-                        agent_processing_paused=bool(getattr(settings_row, "agent_processing_paused", False)),
-                        runtime=rt,
-                    )
+                    system_prompt = await _assemble_system("prompted")
                     conversation[0] = {"role": "system", "content": system_prompt}
                     _llm_t0_fb = time.monotonic()
                     raw_text, finish_reason, raw_msg, usage_fb = await LLMClient.chat_completion_full(
@@ -2845,6 +2869,7 @@ class AgentService:
             error=run.error,
             root_trace_id=run.root_trace_id,
             chat_thread_id=run.chat_thread_id,
+            turn_profile=getattr(run, "turn_profile", None) or TURN_PROFILE_USER_CHAT,
             attention=attention,
             steps=steps,
             pending_proposals=proposals,

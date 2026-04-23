@@ -485,6 +485,7 @@ async def send_message(
             error=None,
             root_trace_id=root_trace_snap,
             chat_thread_id=thread.id,
+            turn_profile="user_chat",
             steps=[],
             pending_proposals=[],
         )
@@ -714,6 +715,7 @@ async def retry_failed_message(
             error=None,
             root_trace_id=root_trace_snap,
             chat_thread_id=thread.id,
+            turn_profile="user_chat",
             steps=[],
             pending_proposals=[],
         )

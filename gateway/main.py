@@ -21,6 +21,8 @@ def _post_json(url: str, token: str, body: dict) -> dict:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": "AquilaGateway/1.0 (+https://github.com/)",
+            "X-Aquila-Gateway": "python-stub",
         },
         method="POST",
     )

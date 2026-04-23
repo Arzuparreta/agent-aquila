@@ -1,6 +1,7 @@
-"""OpenAI-format tool definitions for the OpenClaw-style agent.
+"""OpenAI-format tool definitions for the agent (native or prompted harness).
 
-After the refactor the agent has a small, opinionated palette:
+The palette is large and opinionated, filtered per user by connector links and by **turn profile**
+(see ``tools_for_palette_mode`` and ``AgentService.resolve_turn_tool_palette``):
 
 - **Live read tools** for every connector (Gmail / Calendar / Drive /
   YouTube / Tasks / People / iCloud CalDAV / Outlook / Teams). Nothing reads

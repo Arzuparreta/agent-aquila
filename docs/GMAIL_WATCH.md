@@ -1,6 +1,10 @@
-# Gmail push notifications (design, Phase B)
+# Gmail push notifications (automation / Phase B)
 
-This document sketches **Gmail API users.watch + Google Pub/Sub**, similar to [OpenClaw’s Gmail Pub/Sub flow](https://docs.openclaw.ai/automation/gmail-pubsub). It is **not** implemented in Aquila yet; it is the recommended direction when live polling and agent reads are still too heavy for your Google project quota.
+This document sketches **Gmail API `users.watch` + Google Pub/Sub** (compare upstream docs such as
+[OpenClaw’s Gmail Pub/Sub](https://docs.openclaw.ai/automation/gmail-pubsub)). It is **not** wired
+in Aquila yet. When implemented, **enqueue one agent run** with a tight user message and
+`turn_profile=automation` so the core applies the [context-first harness](./VISION.md) (History API
++ `gmail_get_*`) instead of inbox-wide ReAct.
 
 ## Goals
 
@@ -35,6 +39,15 @@ This document sketches **Gmail API users.watch + Google Pub/Sub**, similar to [O
 - Watch expires; renewal must run on a scheduler (same ARQ worker or API cron).
 - **Multi-instance** Aquila: only one process should renew watch per mailbox; use a Redis lock or leader election.
 - For self-hosted dev without a public URL, use a tunnel (Tailscale Funnel, ngrok, etc.) or skip push until deployed.
+
+## Implementation checklist (when you build this)
+
+1. Store `last_history_id` (and watch expiry) per Gmail connection; renew `users.watch` on a schedule.
+2. `POST` webhook: verify Pub/Sub payload; resolve `user_id` + connection.
+3. `users.history.list` from last id → at most one agent run with a **short** user message and
+   `AgentRun.turn_profile = "automation"` (enables compact tools + `resolve_max_tool_steps_for_turn` via
+   `agent_automation_max_tool_steps` in `agent_runtime_config`).
+4. Truncate observability: trace events already include `turn_profile` and `max_tool_steps_effective`.
 
 ## References
 

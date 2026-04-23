@@ -1,6 +1,10 @@
 # Agent runtime settings (env vs UI)
 
-User-facing **agent behavior** tunables (rate limits, tool loop, heartbeat participation, prompt tier, chat history windows, memory flush, post-turn extraction, channel gateway, outbound email allowlist, etc.) follow this pattern. For the **V1 agentic memory** (canonical markdown, committee, consolidation), see [AGENTIC_MEMORY.md](./AGENTIC_MEMORY.md) and [MEMORY.md](./MEMORY.md).
+User-facing **agent behavior** tunables (rate limits, tool loop, heartbeat, prompt tier, **harness
+options** such as `agent_non_chat_uses_compact_palette` and `agent_inject_user_context_in_chat`,
+chat history windows, memory flush, post-turn extraction, channel gateway, outbound email
+allowlist, etc.) follow this pattern. Product framing: [VISION.md](./VISION.md). Memory
+mechanics: [MEMORY.md](./MEMORY.md) and [AGENTIC_MEMORY.md](./AGENTIC_MEMORY.md).
 
 1. **Environment variables** on the server define **defaults** for the deployment (first boot, CI, and any user who has not set overrides).
 2. **Per-user JSON** in `user_ai_settings.agent_runtime_config` stores **partial overrides**. Missing keys mean “use the env default”.

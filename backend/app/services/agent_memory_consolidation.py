@@ -38,6 +38,12 @@ async def run_consolidation_sweep(
     line = f"consolidation: {len(rows)} keys; top {', '.join(summary_bits) if summary_bits else '—'}"
     _append_dreams_digest(int(user.id), line)
     n = await AgentMemoryService.reindex_db_from_canonical(db, user, sync_canonical=False)
+    try:
+        from app.services.agent_user_context import refresh_user_context_overview
+
+        await refresh_user_context_overview(db, user, force_llm=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("consolidation: user context snapshot refresh failed user_id=%s", user.id)
     return {"keys": len(rows), "reindexed": n, "ok": True}
 
 

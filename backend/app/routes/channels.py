@@ -13,6 +13,7 @@ from app.schemas.channel import ChannelDeliverResult, ChannelInboundMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.agent_rate_limit_service import AgentRateLimitService
+from app.schemas.agent_turn_profile import TURN_PROFILE_CHANNEL_INBOUND
 from app.services.agent_service import AgentService
 from app.services.channel_binding import get_or_create_thread_for_channel
 
@@ -47,10 +48,12 @@ async def gateway_deliver(
         payload.text,
         thread_id=thread.id,
         thread_context_hint=f"Channel {payload.channel.value} (external: {payload.external_key[:80]})",
+        turn_profile=TURN_PROFILE_CHANNEL_INBOUND,
     )
     return ChannelDeliverResult(
         run_id=run.id,
         chat_thread_id=thread.id,
         root_trace_id=run.root_trace_id,
         status=run.status,
+        turn_profile=getattr(run, "turn_profile", None) or "channel_inbound",
     )

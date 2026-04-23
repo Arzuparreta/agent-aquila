@@ -238,6 +238,35 @@ export function AgentRuntimeSection({
       </section>
 
       <section className="grid gap-3 border-t border-border-subtle pt-4">
+        <h3 className="text-sm font-medium text-fg">{t("settings.agentRuntime.sectionHarness")}</h3>
+        <p className="text-xs text-fg-subtle">{t("settings.agentRuntime.harnessHint")}</p>
+        <div className="flex flex-wrap gap-4">
+          <label className="inline-flex items-center gap-2 text-sm text-fg">
+            <input
+              type="checkbox"
+              checked={agentRuntime.agent_non_chat_uses_compact_palette}
+              disabled={saving}
+              onChange={(e) =>
+                void patchAgentRuntime({ agent_non_chat_uses_compact_palette: e.target.checked })
+              }
+            />
+            {t("settings.agentRuntime.nonChatCompactPalette")}
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm text-fg">
+            <input
+              type="checkbox"
+              checked={agentRuntime.agent_inject_user_context_in_chat}
+              disabled={saving}
+              onChange={(e) =>
+                void patchAgentRuntime({ agent_inject_user_context_in_chat: e.target.checked })
+              }
+            />
+            {t("settings.agentRuntime.injectContextInChat")}
+          </label>
+        </div>
+      </section>
+
+      <section className="grid gap-3 border-t border-border-subtle pt-4">
         <h3 className="text-sm font-medium text-fg">{t("settings.agentRuntime.sectionHistory")}</h3>
         <div className="flex flex-wrap gap-4">
           <NumField

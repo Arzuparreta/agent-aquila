@@ -14,6 +14,9 @@ class ChannelKind(str, Enum):
     gateway_stub = "gateway_stub"
     telegram = "telegram"
     slack = "slack"
+    discord = "discord"
+    whatsapp = "whatsapp"
+    matrix = "matrix"
 
 
 class ChannelInboundMessage(BaseModel):
@@ -34,3 +37,4 @@ class ChannelDeliverResult(BaseModel):
     chat_thread_id: int
     root_trace_id: str | None = None
     status: str
+    turn_profile: str = "channel_inbound"

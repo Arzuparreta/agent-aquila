@@ -77,6 +77,13 @@ export type AgentRuntimeConfigResolved = {
   agent_memory_post_turn_mode: AgentMemoryPostTurnMode;
   agent_channel_gateway_enabled: boolean;
   agent_email_domain_allowlist: string;
+  /** When true, channel/heartbeat/automation use compact tool palette (fewer tokens). */
+  agent_non_chat_uses_compact_palette: boolean;
+  agent_heartbeat_max_tool_steps: number | null;
+  agent_channel_inbound_max_tool_steps: number | null;
+  agent_automation_max_tool_steps: number | null;
+  /** Inject async user context snapshot in web chat (more tokens). */
+  agent_inject_user_context_in_chat: boolean;
 };
 
 /** PATCH payload: set a field to `null` to clear an override and fall back to env default. */
@@ -102,6 +109,11 @@ export type AgentRuntimeConfigPartial = {
   agent_memory_post_turn_mode?: AgentMemoryPostTurnMode | null;
   agent_channel_gateway_enabled?: boolean | null;
   agent_email_domain_allowlist?: string | null;
+  agent_non_chat_uses_compact_palette?: boolean | null;
+  agent_heartbeat_max_tool_steps?: number | null;
+  agent_channel_inbound_max_tool_steps?: number | null;
+  agent_automation_max_tool_steps?: number | null;
+  agent_inject_user_context_in_chat?: boolean | null;
 };
 
 export type UserAISettings = {
@@ -318,6 +330,7 @@ export type AgentRun = {
   /** W3C-style trace id for observability / eval correlation */
   root_trace_id?: string | null;
   chat_thread_id?: number | null;
+  turn_profile?: string;
   attention?: {
     stage: string;
     last_event_at: string | null;
