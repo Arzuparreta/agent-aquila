@@ -1,10 +1,12 @@
 """OpenAI-format tool definitions for the agent (native or prompted harness).
 
 The palette is large and opinionated, filtered per user by connector links and by **turn profile**
-(see ``tools_for_palette_mode`` and ``AgentService.resolve_turn_tool_palette``):
+(see ``tools_for_palette_mode``, ``AgentService.resolve_turn_tool_palette``, and
+``connector_tool_registry.required_providers_for_tool``):
 
-- **Live read tools** for every connector (Gmail / Calendar / Drive /
-  YouTube / Tasks / People / iCloud CalDAV / Outlook / Teams). Nothing reads
+- **Live read tools** for every connector (Gmail / unified ``calendar_*`` for
+  Google Calendar, Microsoft Graph, and iCloud CalDAV / Drive /
+  YouTube / Tasks / People / Outlook mail / Teams). Nothing reads
   from a local mirror because none
   exists — every call goes straight to the upstream API.
 - **Live write tools** for everything *except* outbound email/Teams
@@ -32,8 +34,9 @@ choice is biased into the decoder, so the model can't "go off-script"
 by inventing a phase name, omitting required fields, or returning a
 vague natural-language reply when it should be calling a tool.
 
-This module is the single source of truth for the schemas presented to
-the model. The actual handlers live in ``AgentService._dispatch_tool``.
+This module is the single source of truth for the **schemas** presented to
+the model. Which providers unlock which tools is defined in
+``connector_tool_registry``. Handlers live in ``AgentService._dispatch_tool``.
 """
 
 from __future__ import annotations
@@ -41,6 +44,8 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.connector_tool_registry import required_providers_for_tool
 
 
 # ---------------------------------------------------------------------------
@@ -177,19 +182,41 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
     _fn(
         "calendar_list_events",
         "Use whenever the user asks about their calendar — what's scheduled "
-        "this week, conflicts, free slots. Calls Google Calendar live. "
-        "Results are ordered by start time from ``time_min`` onward (default: now UTC). "
-        "Inputs: optional ``connection_id``, ``calendar_id`` (defaults to "
-        "``primary``), ``time_min`` / ``time_max`` (RFC3339, e.g. end of week), "
-        "``page_token``, ``max_results`` (1-250).",
+        "this week, conflicts, free slots. Works with **Google Calendar**, **Microsoft 365 / Outlook "
+        "(Graph)**, or **iCloud (CalDAV)** depending on which calendar connection is linked (see "
+        "``list_connectors`` / ``calendar_list_calendars``). "
+        "Google: ordered by start from ``time_min`` (default now UTC). "
+        "iCloud: pass ``calendar_url`` from ``calendar_list_calendars`` when not using the default "
+        "calendar; window uses ``time_min`` / ``time_max`` as RFC3339 dates (same as Google). "
+        "Microsoft Graph: uses ``time_min`` / ``time_max`` as ISO bounds on ``/me/calendarView``. "
+        "Inputs: optional ``connection_id``, ``calendar_id`` (Google calendar id, default "
+        "``primary``), ``calendar_url`` (iCloud CalDAV URL), ``time_min`` / ``time_max``, "
+        "``page_token`` (Google only), ``max_results`` (1-250).",
         {
             **_CONNECTION_ID,
             "calendar_id": {"type": "string"},
+            "calendar_url": {
+                "type": "string",
+                "description": "iCloud only: CalDAV calendar URL from calendar_list_calendars.",
+            },
             "time_min": {
                 "type": "string",
                 "description": "RFC3339 lower bound; omit to use current time (upcoming events).",
             },
             "time_max": {"type": "string", "description": "RFC3339 upper bound (optional)."},
+            "page_token": {"type": "string"},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 250},
+        },
+    ),
+    _fn(
+        "calendar_list_calendars",
+        "List calendars available on the user's linked **calendar** connection (Google Calendar "
+        "list, iCloud CalDAV calendars, or Microsoft Graph calendars). "
+        "Call before ``calendar_list_events`` when you need ``calendar_url`` (iCloud) or a "
+        "non-default Google ``calendar_id``. Optional ``connection_id``, ``page_token`` / "
+        "``max_results`` where the upstream supports paging.",
+        {
+            **_CONNECTION_ID,
             "page_token": {"type": "string"},
             "max_results": {"type": "integer", "minimum": 1, "maximum": 250},
         },
@@ -456,29 +483,6 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         "``ingest_id`` required.",
         {"ingest_id": {"type": "integer", "minimum": 1}},
         required=["ingest_id"],
-    ),
-    _fn(
-        "icloud_calendar_list_calendars",
-        "List iCloud calendars (CalDAV) using the **icloud_caldav** connection (Apple ID + "
-        "**app-specific password**). The same connection enables **iCloud Drive** and **CardDAV contacts** "
-        "(``icloud_contacts_list`` / ``icloud_contacts_search``) via "
-        "``icloud_drive_list_folder`` / ``icloud_drive_get_file``. Returns calendar names and "
-        "**calendar_url** values for ``icloud_calendar_list_events`` / create. "
-        "Optional ``connection_id``.",
-        {**_CONNECTION_ID},
-    ),
-    _fn(
-        "icloud_calendar_list_events",
-        "List events in an iCloud calendar between ``start_date`` and ``end_date`` "
-        "(ISO dates). ``calendar_url`` must be the CalDAV URL from "
-        "``icloud_calendar_list_calendars``. Optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "calendar_url": {"type": "string"},
-            "start_date": {"type": "string", "description": "YYYY-MM-DD"},
-            "end_date": {"type": "string", "description": "YYYY-MM-DD"},
-        },
-        required=["calendar_url"],
     ),
     _fn(
         "icloud_drive_list_folder",
@@ -779,14 +783,18 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     # ---- Calendar mutations --------------------------------------------
     _fn(
         "calendar_create_event",
-        "Create a new event on the user's Google Calendar. Auto-applies. "
-        "Inputs: ``summary`` (required), ``start_iso`` (required, RFC3339 "
-        "datetime — **local wall time** in ``timezone``), ``end_iso`` "
-        "(required), optional ``description``, ``timezone`` (IANA, e.g. "
-        "``Europe/Madrid``; if omitted, the user's **Agent time zone** from "
-        "Settings is used, else UTC), ``connection_id``.",
+        "Create a new calendar event. Auto-applies for **Google Calendar**, **Microsoft Graph**, "
+        "or **iCloud CalDAV** (same ``calendar_*`` tools — the host picks the API from the linked "
+        "connection). "
+        "Google / Microsoft: ``summary``, ``start_iso``, ``end_iso`` (RFC3339 wall time in "
+        "``timezone``), optional ``description``, ``timezone`` (IANA; defaults from user "
+        "settings). "
+        "iCloud: same time fields; add ``calendar_url`` from ``calendar_list_calendars`` when not "
+        "using the default calendar. "
+        "Optional ``connection_id``.",
         {
             **_CONNECTION_ID,
+            "calendar_url": {"type": "string"},
             "summary": {"type": "string", "maxLength": 500},
             "start_iso": {"type": "string"},
             "end_iso": {"type": "string"},
@@ -798,7 +806,8 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     ),
     _fn(
         "calendar_update_event",
-        "Update an existing Google Calendar event. Auto-applies. "
+        "Update an existing calendar event (Google or Microsoft Graph). Auto-applies. "
+        "Not supported for iCloud CalDAV in this deployment — returns a clear error. "
         "Inputs: ``event_id`` (required) plus any of ``summary`` / "
         "``description`` / ``start_iso`` / ``end_iso`` / ``timezone`` (same "
         "rules as ``calendar_create_event``).",
@@ -815,7 +824,8 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
     ),
     _fn(
         "calendar_delete_event",
-        "Delete (cancel) a Google Calendar event by provider id. "
+        "Delete (cancel) a calendar event by provider id (Google or Microsoft Graph). "
+        "Not supported for iCloud CalDAV in this deployment. "
         "Auto-applies. Inputs: ``event_id`` (required), optional "
         "``connection_id``.",
         {**_CONNECTION_ID, "event_id": {"type": "string"}},
@@ -929,21 +939,6 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
             "task_id": {"type": "string"},
         },
         required=["tasklist_id", "task_id"],
-    ),
-    _fn(
-        "icloud_calendar_create_event",
-        "Create an all-day style timed event on an iCloud calendar (CalDAV). "
-        "``calendar_url``, ``summary``, ``start_iso``, ``end_iso`` (RFC3339 UTC) required. "
-        "Optional ``description``, ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "calendar_url": {"type": "string"},
-            "summary": {"type": "string", "maxLength": 500},
-            "start_iso": {"type": "string"},
-            "end_iso": {"type": "string"},
-            "description": {"type": "string"},
-        },
-        required=["calendar_url", "summary", "start_iso", "end_iso"],
     ),
     _fn(
         "submit_whatsapp_credentials",
@@ -1457,6 +1452,7 @@ _COMPACT_NAMES: frozenset[str] = frozenset(
         "gmail_get_message",
         "gmail_get_thread",
         "calendar_list_events",
+        "calendar_list_calendars",
         "start_connector_setup",
         "start_oauth_flow",
         "submit_connector_credentials",
@@ -1498,52 +1494,7 @@ def memory_flush_tools() -> list[dict[str, Any]]:
 
 def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:
     """If a tool talks to a specific provider, return acceptable ``ConnectorConnection.provider`` ids."""
-    n = (tool_name or "").lower()
-    if n.startswith("gmail_") or n.startswith("propose_email"):
-        return frozenset({"google_gmail", "gmail"})
-    if n.startswith("calendar_"):
-        return frozenset({"google_calendar", "gcal"})
-    if n.startswith("drive_"):
-        return frozenset({"google_drive", "gdrive"})
-    if n.startswith("youtube_") or n == "propose_youtube_upload":
-        return frozenset({"google_youtube"})
-    if n.startswith("tasks_"):
-        return frozenset({"google_tasks"})
-    if n.startswith("people_"):
-        return frozenset({"google_people"})
-    if n.startswith("sheets_"):
-        return frozenset({"google_sheets"})
-    if n.startswith("docs_"):
-        return frozenset({"google_docs"})
-    if n.startswith("icloud_calendar_"):
-        return frozenset({"icloud_caldav"})
-    if n.startswith("icloud_drive_"):
-        return frozenset({"icloud_caldav"})
-    if n.startswith("icloud_contacts_"):
-        return frozenset({"icloud_caldav"})
-    if n in ("icloud_reminders_list", "icloud_notes_list", "icloud_photos_list"):
-        return frozenset({"icloud_caldav"})
-    if n == "propose_whatsapp_send":
-        return frozenset({"whatsapp_business"})
-    if n.startswith("github_"):
-        return frozenset({"github"})
-    if n.startswith("slack_"):
-        return frozenset({"slack_bot"})
-    if n == "propose_slack_post_message":
-        return frozenset({"slack_bot"})
-    if n.startswith("linear_") or n == "propose_linear_create_comment":
-        return frozenset({"linear"})
-    if n.startswith("notion_"):
-        return frozenset({"notion"})
-    if n.startswith("telegram_") or n == "propose_telegram_send_message":
-        return frozenset({"telegram_bot"})
-    if n.startswith("discord_") or n == "propose_discord_post_message":
-        return frozenset({"discord_bot"})
-    if n.startswith("outlook_"):
-        return frozenset({"graph_mail"})
-    if n.startswith("teams_"):
-        return frozenset({"graph_teams", "ms_teams"})
-    return None
+    return required_providers_for_tool(tool_name)
 
 
 async def filter_tools_for_user_connectors(

@@ -41,4 +41,9 @@ def proposal_kind_registry() -> dict[str, ProposalKindMeta]:
 
 
 def describe_capabilities() -> dict[str, Any]:
-    return {"proposal_kinds": proposal_kind_registry()}
+    from app.services.connector_tool_registry import connector_registry_snapshot
+
+    return {
+        "proposal_kinds": proposal_kind_registry(),
+        "connector_tool_provider_sets": connector_registry_snapshot(),
+    }

@@ -81,3 +81,9 @@ class GoogleCalendarClient:
 
     async def get_event(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
         return await self._request("GET", f"/calendars/{calendar_id}/events/{event_id}")
+
+    async def list_calendar_list(self, *, page_token: str | None = None, max_results: int = 250) -> dict[str, Any]:
+        params: dict[str, Any] = {"maxResults": max(1, min(max_results, 250))}
+        if page_token:
+            params["pageToken"] = page_token
+        return await self._request("GET", "/users/me/calendarList", params=params)

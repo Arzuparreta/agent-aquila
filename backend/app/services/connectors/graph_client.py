@@ -108,6 +108,26 @@ class GraphClient:
             params["endDateTime"] = end
         return await self._get("/me/calendarView/delta", params=params)
 
+    async def list_calendar_view(
+        self,
+        *,
+        start_datetime: str,
+        end_datetime: str,
+        top: int = 250,
+    ) -> dict[str, Any]:
+        """Paged calendar view for the signed-in user (all writable calendars in the default mailbox)."""
+        return await self._get(
+            "/me/calendarView",
+            params={
+                "startDateTime": start_datetime,
+                "endDateTime": end_datetime,
+                "$top": top,
+            },
+        )
+
+    async def list_calendars(self, *, top: int = 50) -> dict[str, Any]:
+        return await self._get("/me/calendars", params={"$top": top})
+
     # --------------------- OneDrive ---------------------
     async def drive_delta(self, *, delta_link: str | None = None) -> dict[str, Any]:
         if delta_link:

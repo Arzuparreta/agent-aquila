@@ -24,6 +24,11 @@ def test_describe_capabilities_shape() -> None:
     cap = describe_capabilities()
     assert "proposal_kinds" in cap
     assert isinstance(cap["proposal_kinds"], dict)
+    assert "connector_tool_provider_sets" in cap
+    snap = cap["connector_tool_provider_sets"]
+    assert isinstance(snap, dict)
+    assert "calendar_tools" in snap
+    assert "icloud_caldav" in snap["calendar_tools"]
 
 
 def test_preview_for_email_send() -> None:

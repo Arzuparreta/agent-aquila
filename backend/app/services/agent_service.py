@@ -29,7 +29,7 @@ import json
 import logging
 import time
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -98,6 +98,26 @@ from app.services.agent_workspace import (
     read_allowed_workspace_file,
 )
 from app.services.ai_providers import provider_kind_requires_api_key
+from app.services.connector_tool_registry import (
+    CALENDAR_TOOL_PROVIDERS,
+    DISCORD_TOOL_PROVIDERS,
+    DOCS_TOOL_PROVIDERS,
+    DRIVE_TOOL_PROVIDERS,
+    GITHUB_TOOL_PROVIDERS,
+    GMAIL_TOOL_PROVIDERS,
+    GRAPH_CALENDAR_TOOL_PROVIDERS,
+    ICLOUD_TOOL_PROVIDERS,
+    LINEAR_TOOL_PROVIDERS,
+    NOTION_TOOL_PROVIDERS,
+    OUTLOOK_MAIL_TOOL_PROVIDERS,
+    PEOPLE_TOOL_PROVIDERS,
+    SHEETS_TOOL_PROVIDERS,
+    SLACK_TOOL_PROVIDERS,
+    TASKS_TOOL_PROVIDERS,
+    TEAMS_TOOL_PROVIDERS,
+    TELEGRAM_TOOL_PROVIDERS,
+    YOUTUBE_TOOL_PROVIDERS,
+)
 from app.services.connectors.calendar_adapters import (
     create_calendar_event,
     delete_calendar_event,
@@ -179,26 +199,6 @@ from app.services.token_budget_service import (
     plan_budget,
     select_history_by_budget,
 )
-
-# Provider id sets used by ``_resolve_connection``.
-_GMAIL_PROVIDERS = ("google_gmail", "gmail")
-_CAL_PROVIDERS = ("google_calendar", "gcal")
-_DRIVE_PROVIDERS = ("google_drive", "gdrive")
-_OUTLOOK_PROVIDERS = ("graph_mail",)
-_TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
-_YOUTUBE_PROVIDERS = ("google_youtube",)
-_TASKS_PROVIDERS = ("google_tasks",)
-_PEOPLE_PROVIDERS = ("google_people",)
-_SHEETS_PROVIDERS = ("google_sheets",)
-_DOCS_PROVIDERS = ("google_docs",)
-_WHATSAPP_PROVIDERS = ("whatsapp_business",)
-_ICLOUD_CAL_PROVIDERS = ("icloud_caldav",)
-_GITHUB_PROVIDERS = ("github",)
-_SLACK_PROVIDERS = ("slack_bot",)
-_LINEAR_PROVIDERS = ("linear",)
-_NOTION_PROVIDERS = ("notion",)
-_TELEGRAM_PROVIDERS = ("telegram_bot",)
-_DISCORD_PROVIDERS = ("discord_bot",)
 
 _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
 
@@ -515,6 +515,21 @@ def _icloud_caldav_client(row: ConnectorConnection) -> ICloudCalDAVClient:
     return ICloudCalDAVClient(user, pw)
 
 
+def _parse_rfc3339_to_utc_datetime(s: str) -> datetime:
+    return datetime.fromisoformat(str(s).strip().replace("Z", "+00:00")).astimezone(UTC)
+
+
+async def _default_icloud_calendar_url(client: ICloudCalDAVClient) -> str:
+    cals = await client.list_calendars()
+    if not cals:
+        raise RuntimeError("no iCloud calendars found on this connection")
+    for cal in cals:
+        name = str(cal.get("name") or "").lower()
+        if "home" in name or name in ("calendar", "personal"):
+            return str(cal["url"])
+    return str(cals[0]["url"])
+
+
 async def _graph_client(db: AsyncSession, row: ConnectorConnection) -> GraphClient:
     token = await TokenManager.get_valid_access_token(db, row)
     return GraphClient(token)
@@ -561,7 +576,7 @@ class AgentService:
     async def _tool_gmail_list_messages(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         return await client.list_messages(
             page_token=args.get("page_token"),
@@ -574,7 +589,7 @@ class AgentService:
     async def _tool_gmail_get_message(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         mid = str(args["message_id"])
         fmt = str(args.get("format") or "full")
         if fmt == "metadata":
@@ -591,7 +606,7 @@ class AgentService:
     async def _tool_gmail_get_thread(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         tid = str(args["thread_id"])
         fmt = str(args.get("format") or "metadata")
         if fmt == "metadata":
@@ -608,7 +623,7 @@ class AgentService:
     async def _tool_gmail_list_labels(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         return await client.list_labels()
 
@@ -616,7 +631,7 @@ class AgentService:
     async def _tool_gmail_list_filters(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         return await client.list_filters()
 
@@ -624,7 +639,7 @@ class AgentService:
     async def _tool_gmail_modify_message(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         mid = str(args["message_id"])
         result = await client.modify_message(
@@ -639,7 +654,7 @@ class AgentService:
     async def _tool_gmail_modify_thread(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         result = await client.modify_thread(
             str(args["thread_id"]),
@@ -653,7 +668,7 @@ class AgentService:
     async def _tool_gmail_trash_message(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         mid = str(args["message_id"])
         result = await client.trash_message(mid)
@@ -664,7 +679,7 @@ class AgentService:
     async def _tool_gmail_untrash_message(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         mid = str(args["message_id"])
         result = await client.untrash_message(mid)
@@ -675,7 +690,7 @@ class AgentService:
     async def _tool_gmail_trash_thread(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         result = await client.trash_thread(str(args["thread_id"]))
         gmail_cache_invalidate_connection(row.id)
@@ -685,7 +700,7 @@ class AgentService:
     async def _tool_gmail_untrash_thread(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         result = await client.untrash_thread(str(args["thread_id"]))
         gmail_cache_invalidate_connection(row.id)
@@ -695,7 +710,7 @@ class AgentService:
     async def _tool_gmail_trash_bulk_query(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         q = str(args.get("q") or "in:inbox")
         cap = min(max(int(args.get("max_messages") or 50_000), 1), 250_000)
         client = await _gmail_client(db, row)
@@ -727,7 +742,7 @@ class AgentService:
     async def _tool_gmail_mark_read(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         if args.get("thread_id"):
             out = await client.modify_thread(
@@ -746,7 +761,7 @@ class AgentService:
     async def _tool_gmail_mark_unread(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         if args.get("thread_id"):
             out = await client.modify_thread(
@@ -777,7 +792,7 @@ class AgentService:
         mode = str(args.get("mode") or "mute").lower()
         if mode not in ("mute", "spam"):
             return {"error": "mode must be 'mute' or 'spam'"}
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         criteria = {"from": email}
         action: dict[str, Any] = {"removeLabelIds": ["INBOX", "UNREAD"]}
@@ -830,7 +845,7 @@ class AgentService:
     async def _tool_gmail_create_filter(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         criteria = args.get("criteria") or {}
         action = args.get("action") or {}
@@ -842,39 +857,137 @@ class AgentService:
     async def _tool_gmail_delete_filter(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GMAIL_PROVIDERS, label="Gmail")
+        row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         return await client.delete_filter(str(args["filter_id"]))
 
     # ------------------------------------------------------------------
-    # Calendar tools
+    # Calendar tools (Google Calendar, Microsoft Graph, iCloud CalDAV)
     # ------------------------------------------------------------------
+    @staticmethod
+    async def _tool_calendar_list_calendars(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, CALENDAR_TOOL_PROVIDERS, label="calendar")
+        prov = row.provider
+        if prov in ("google_calendar", "gcal"):
+            client = await _calendar_client(db, row)
+            return await client.list_calendar_list(
+                page_token=args.get("page_token"),
+                max_results=int(args.get("max_results") or 250),
+            )
+        if prov == "icloud_caldav":
+            client = _icloud_caldav_client(row)
+            cals = await client.list_calendars()
+            return {
+                "provider": prov,
+                "items": [
+                    {"summary": c.get("name"), "calendar_id": None, "calendar_url": c.get("url")}
+                    for c in cals
+                ],
+            }
+        if prov in GRAPH_CALENDAR_TOOL_PROVIDERS:
+            token = await TokenManager.get_valid_access_token(db, row)
+            g = GraphClient(token)
+            raw = await g.list_calendars(top=int(args.get("max_results") or 50))
+            items = []
+            for it in raw.get("value") or []:
+                if isinstance(it, dict):
+                    items.append(
+                        {
+                            "summary": it.get("name"),
+                            "calendar_id": it.get("id"),
+                            "calendar_url": None,
+                        }
+                    )
+            return {"provider": prov, "items": items}
+        return {"error": f"list_calendars not implemented for provider {prov}"}
+
     @staticmethod
     async def _tool_calendar_list_events(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
-        client = await _calendar_client(db, row)
-        # Without timeMin + orderBy=startTime, events.list returns an arbitrary first page
-        # (often old events); upcoming items can be missing entirely when maxResults is capped.
+        row = await _resolve_connection(db, user, args, CALENDAR_TOOL_PROVIDERS, label="calendar")
+        prov = row.provider
         time_min = args.get("time_min")
         if time_min is None:
             time_min = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         time_max = args.get("time_max")
-        return await client.list_events(
-            str(args.get("calendar_id") or "primary"),
-            page_token=args.get("page_token"),
-            max_results=int(args.get("max_results") or 50),
-            time_min=str(time_min),
-            time_max=str(time_max) if time_max else None,
-            order_by="startTime",
-        )
+        max_results = int(args.get("max_results") or 50)
+
+        if prov in ("google_calendar", "gcal"):
+            client = await _calendar_client(db, row)
+            return await client.list_events(
+                str(args.get("calendar_id") or "primary"),
+                page_token=args.get("page_token"),
+                max_results=min(max(max_results, 1), 250),
+                time_min=str(time_min),
+                time_max=str(time_max) if time_max else None,
+                order_by="startTime",
+            )
+
+        if prov == "icloud_caldav":
+            client = _icloud_caldav_client(row)
+            cal_url = str(args.get("calendar_url") or args.get("calendar_id") or "").strip()
+            if not cal_url:
+                cal_url = await _default_icloud_calendar_url(client)
+            try:
+                start_d = _parse_rfc3339_to_utc_datetime(str(time_min)).date()
+            except ValueError:
+                start_d = datetime.now(UTC).date()
+            if time_max:
+                try:
+                    end_d = _parse_rfc3339_to_utc_datetime(str(time_max)).date()
+                except ValueError:
+                    end_d = start_d
+            else:
+                end_d = start_d + timedelta(days=30)
+            events = await client.list_events(cal_url, start=start_d, end=end_d)
+            return {"provider": prov, "calendar_url": cal_url, "events": events}
+
+        if prov in GRAPH_CALENDAR_TOOL_PROVIDERS:
+            token = await TokenManager.get_valid_access_token(db, row)
+            g = GraphClient(token)
+            end_s = str(time_max) if time_max else None
+            if not end_s:
+                try:
+                    start_dt = _parse_rfc3339_to_utc_datetime(str(time_min))
+                except ValueError:
+                    start_dt = datetime.now(UTC)
+                end_dt = start_dt + timedelta(days=30)
+                end_s = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            try:
+                raw = await g.list_calendar_view(
+                    start_datetime=str(time_min),
+                    end_datetime=end_s,
+                    top=min(max(max_results, 1), 250),
+                )
+            except GraphAPIError as exc:
+                return {"provider": prov, "error": exc.detail, "status": exc.status_code}
+            return {"provider": prov, "events": raw.get("value") or [], "@odata": raw.get("@odata.nextLink")}
+
+        return {"error": f"unsupported calendar provider: {prov}"}
 
     @staticmethod
     async def _tool_calendar_create_event(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        row = await _resolve_connection(db, user, args, CALENDAR_TOOL_PROVIDERS, label="calendar")
+        prov = row.provider
+        if prov == "icloud_caldav":
+            client = _icloud_caldav_client(row)
+            cal_url = str(args.get("calendar_url") or "").strip()
+            if not cal_url:
+                cal_url = await _default_icloud_calendar_url(client)
+            start = datetime.fromisoformat(str(args["start_iso"]).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(args["end_iso"]).replace("Z", "+00:00"))
+            return await client.create_event(
+                cal_url,
+                summary=str(args["summary"]),
+                start=start,
+                end=end,
+                description=str(args["description"]) if args.get("description") else None,
+            )
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
         payload = await merge_calendar_timezone_from_user_prefs(db, user, args)
         return await create_calendar_event(provider, creds, payload)
@@ -883,7 +996,12 @@ class AgentService:
     async def _tool_calendar_update_event(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        row = await _resolve_connection(db, user, args, CALENDAR_TOOL_PROVIDERS, label="calendar")
+        if row.provider == "icloud_caldav":
+            return {
+                "ok": False,
+                "error": "iCloud calendar updates are not supported via this tool yet; delete and recreate, or use another calendar client.",
+            }
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
         payload = await merge_calendar_timezone_from_user_prefs(db, user, args)
         return await update_calendar_event(provider, creds, payload)
@@ -892,7 +1010,12 @@ class AgentService:
     async def _tool_calendar_delete_event(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _CAL_PROVIDERS, label="Google Calendar")
+        row = await _resolve_connection(db, user, args, CALENDAR_TOOL_PROVIDERS, label="calendar")
+        if row.provider == "icloud_caldav":
+            return {
+                "ok": False,
+                "error": "iCloud calendar deletes are not supported via this tool yet; remove the event in Apple Calendar or another CalDAV client.",
+            }
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
         return await delete_calendar_event(provider, creds, str(args["event_id"]))
 
@@ -903,7 +1026,7 @@ class AgentService:
     async def _tool_drive_list_files(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DRIVE_PROVIDERS, label="Google Drive")
+        row = await _resolve_connection(db, user, args, DRIVE_TOOL_PROVIDERS, label="Google Drive")
         client = await _drive_client(db, row)
         return await client.list_files(
             page_token=args.get("page_token"),
@@ -915,7 +1038,7 @@ class AgentService:
     async def _tool_drive_upload_file(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DRIVE_PROVIDERS, label="Google Drive")
+        row = await _resolve_connection(db, user, args, DRIVE_TOOL_PROVIDERS, label="Google Drive")
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
         path = str(args.get("path") or "").strip()
         mime = str(args.get("mime_type") or "application/octet-stream")
@@ -934,7 +1057,7 @@ class AgentService:
     async def _tool_drive_share_file(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DRIVE_PROVIDERS, label="Google Drive")
+        row = await _resolve_connection(db, user, args, DRIVE_TOOL_PROVIDERS, label="Google Drive")
         _token, creds, provider = await TokenManager.get_valid_creds(db, row)
         return await share_file(
             provider,
@@ -948,7 +1071,7 @@ class AgentService:
     async def _tool_sheets_read_range(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _SHEETS_PROVIDERS, label="Google Sheets")
+        row = await _resolve_connection(db, user, args, SHEETS_TOOL_PROVIDERS, label="Google Sheets")
         client = await _sheets_client(db, row)
         return await client.get_values(str(args["spreadsheet_id"]), str(args["range"]))
 
@@ -956,7 +1079,7 @@ class AgentService:
     async def _tool_sheets_append_row(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _SHEETS_PROVIDERS, label="Google Sheets")
+        row = await _resolve_connection(db, user, args, SHEETS_TOOL_PROVIDERS, label="Google Sheets")
         client = await _sheets_client(db, row)
         raw_vals = args.get("values")
         if not isinstance(raw_vals, list):
@@ -972,7 +1095,7 @@ class AgentService:
     async def _tool_docs_get_document(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DOCS_PROVIDERS, label="Google Docs")
+        row = await _resolve_connection(db, user, args, DOCS_TOOL_PROVIDERS, label="Google Docs")
         client = await _docs_client(db, row)
         return await client.get_document(str(args["document_id"]))
 
@@ -983,7 +1106,7 @@ class AgentService:
     async def _tool_youtube_list_my_channels(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
         client = await _youtube_client(db, row)
         return await client.list_my_channels(page_token=args.get("page_token"))
 
@@ -991,7 +1114,7 @@ class AgentService:
     async def _tool_youtube_search_videos(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
         cid = args.get("channel_id")
         q = args.get("q")
         if not cid and not q:
@@ -1008,7 +1131,7 @@ class AgentService:
     async def _tool_youtube_get_video(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
         raw = args.get("video_id")
         if isinstance(raw, list):
             ids = [str(x).strip() for x in raw if str(x).strip()]
@@ -1023,7 +1146,7 @@ class AgentService:
     async def _tool_youtube_list_playlists(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
         cid = str(args.get("channel_id") or "").strip()
         if not cid:
             return {
@@ -1040,7 +1163,7 @@ class AgentService:
     async def _tool_youtube_list_playlist_items(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
         pid = str(args.get("playlist_id") or "").strip()
         if not pid:
             return {"error": "playlist_id is required (from youtube_list_playlists or channel contentDetails)."}
@@ -1055,7 +1178,7 @@ class AgentService:
     async def _tool_youtube_update_video(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _YOUTUBE_PROVIDERS, label="YouTube")
+        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
         client = await _youtube_client(db, row)
         tags = args.get("tags")
         tlist = [str(x) for x in tags] if isinstance(tags, list) else None
@@ -1071,7 +1194,7 @@ class AgentService:
     async def _tool_tasks_list_tasklists(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        row = await _resolve_connection(db, user, args, TASKS_TOOL_PROVIDERS, label="Google Tasks")
         client = await _tasks_client(db, row)
         return await client.list_tasklists(page_token=args.get("page_token"))
 
@@ -1079,7 +1202,7 @@ class AgentService:
     async def _tool_tasks_list_tasks(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        row = await _resolve_connection(db, user, args, TASKS_TOOL_PROVIDERS, label="Google Tasks")
         client = await _tasks_client(db, row)
         sc = args.get("show_completed")
         return await client.list_tasks(
@@ -1095,7 +1218,7 @@ class AgentService:
     async def _tool_tasks_create_task(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        row = await _resolve_connection(db, user, args, TASKS_TOOL_PROVIDERS, label="Google Tasks")
         client = await _tasks_client(db, row)
         body: dict[str, Any] = {"title": str(args["title"])}
         if args.get("notes") is not None:
@@ -1108,7 +1231,7 @@ class AgentService:
     async def _tool_tasks_update_task(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        row = await _resolve_connection(db, user, args, TASKS_TOOL_PROVIDERS, label="Google Tasks")
         client = await _tasks_client(db, row)
         body: dict[str, Any] = {}
         if args.get("title") is not None:
@@ -1125,7 +1248,7 @@ class AgentService:
     async def _tool_tasks_delete_task(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TASKS_PROVIDERS, label="Google Tasks")
+        row = await _resolve_connection(db, user, args, TASKS_TOOL_PROVIDERS, label="Google Tasks")
         client = await _tasks_client(db, row)
         return await client.delete_task(str(args["tasklist_id"]), str(args["task_id"]))
 
@@ -1133,7 +1256,7 @@ class AgentService:
     async def _tool_people_search_contacts(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _PEOPLE_PROVIDERS, label="Google Contacts")
+        row = await _resolve_connection(db, user, args, PEOPLE_TOOL_PROVIDERS, label="Google Contacts")
         client = await _people_client(db, row)
         return await client.search_contacts(
             str(args["query"]),
@@ -1145,7 +1268,7 @@ class AgentService:
     async def _tool_github_list_my_repos(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GITHUB_PROVIDERS, label="GitHub")
+        row = await _resolve_connection(db, user, args, GITHUB_TOOL_PROVIDERS, label="GitHub")
         client = await _github_client(db, row)
         items = await client.list_user_repos(
             page=int(args.get("page") or 1),
@@ -1157,7 +1280,7 @@ class AgentService:
     async def _tool_github_list_repo_issues(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _GITHUB_PROVIDERS, label="GitHub")
+        row = await _resolve_connection(db, user, args, GITHUB_TOOL_PROVIDERS, label="GitHub")
         client = await _github_client(db, row)
         st = str(args.get("state") or "open")
         if st not in ("open", "closed", "all"):
@@ -1175,7 +1298,7 @@ class AgentService:
     async def _tool_slack_list_conversations(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _SLACK_PROVIDERS, label="Slack")
+        row = await _resolve_connection(db, user, args, SLACK_TOOL_PROVIDERS, label="Slack")
         client = await _slack_api_client(db, row)
         return await client.conversations_list(
             types=str(args.get("types") or "public_channel,private_channel"),
@@ -1187,7 +1310,7 @@ class AgentService:
     async def _tool_slack_get_conversation_history(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _SLACK_PROVIDERS, label="Slack")
+        row = await _resolve_connection(db, user, args, SLACK_TOOL_PROVIDERS, label="Slack")
         client = await _slack_api_client(db, row)
         return await client.conversations_history(
             str(args["channel_id"]),
@@ -1199,7 +1322,7 @@ class AgentService:
     async def _tool_linear_list_issues(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _LINEAR_PROVIDERS, label="Linear")
+        row = await _resolve_connection(db, user, args, LINEAR_TOOL_PROVIDERS, label="Linear")
         client = await _linear_client(db, row)
         data = await client.list_issues(first=int(args.get("first") or 25))
         return data
@@ -1208,7 +1331,7 @@ class AgentService:
     async def _tool_linear_get_issue(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _LINEAR_PROVIDERS, label="Linear")
+        row = await _resolve_connection(db, user, args, LINEAR_TOOL_PROVIDERS, label="Linear")
         client = await _linear_client(db, row)
         return await client.get_issue(str(args["issue_id"]))
 
@@ -1216,7 +1339,7 @@ class AgentService:
     async def _tool_notion_search(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _NOTION_PROVIDERS, label="Notion")
+        row = await _resolve_connection(db, user, args, NOTION_TOOL_PROVIDERS, label="Notion")
         client = await _notion_client(db, row)
         return await client.search(
             str(args.get("query") or ""),
@@ -1227,7 +1350,7 @@ class AgentService:
     async def _tool_notion_get_page(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _NOTION_PROVIDERS, label="Notion")
+        row = await _resolve_connection(db, user, args, NOTION_TOOL_PROVIDERS, label="Notion")
         client = await _notion_client(db, row)
         return await client.get_page(str(args["page_id"]))
 
@@ -1235,7 +1358,7 @@ class AgentService:
     async def _tool_telegram_get_me(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TELEGRAM_PROVIDERS, label="Telegram")
+        row = await _resolve_connection(db, user, args, TELEGRAM_TOOL_PROVIDERS, label="Telegram")
         client = await _telegram_client(db, row)
         return await client.get_me()
 
@@ -1243,7 +1366,7 @@ class AgentService:
     async def _tool_telegram_get_updates(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TELEGRAM_PROVIDERS, label="Telegram")
+        row = await _resolve_connection(db, user, args, TELEGRAM_TOOL_PROVIDERS, label="Telegram")
         client = await _telegram_client(db, row)
         off = args.get("offset")
         return await client.get_updates(
@@ -1255,7 +1378,7 @@ class AgentService:
     async def _tool_discord_list_guilds(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DISCORD_PROVIDERS, label="Discord")
+        row = await _resolve_connection(db, user, args, DISCORD_TOOL_PROVIDERS, label="Discord")
         client = await _discord_client(db, row)
         guilds = await client.list_guilds()
         return {"guilds": guilds}
@@ -1264,7 +1387,7 @@ class AgentService:
     async def _tool_discord_list_guild_channels(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DISCORD_PROVIDERS, label="Discord")
+        row = await _resolve_connection(db, user, args, DISCORD_TOOL_PROVIDERS, label="Discord")
         client = await _discord_client(db, row)
         ch = await client.list_guild_channels(str(args["guild_id"]))
         return {"channels": ch}
@@ -1273,7 +1396,7 @@ class AgentService:
     async def _tool_discord_get_channel_messages(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _DISCORD_PROVIDERS, label="Discord")
+        row = await _resolve_connection(db, user, args, DISCORD_TOOL_PROVIDERS, label="Discord")
         client = await _discord_client(db, row)
         msgs = await client.list_messages(
             str(args["channel_id"]),
@@ -1300,52 +1423,10 @@ class AgentService:
         )
 
     @staticmethod
-    async def _tool_icloud_calendar_list_calendars(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud Calendar")
-        client = _icloud_caldav_client(row)
-        return {"calendars": await client.list_calendars()}
-
-    @staticmethod
-    async def _tool_icloud_calendar_list_events(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        from datetime import date as date_cls
-
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud Calendar")
-        client = _icloud_caldav_client(row)
-        start_s = str(args.get("start_date") or "").strip()
-        end_s = str(args.get("end_date") or "").strip()
-        try:
-            sd = date_cls.fromisoformat(start_s) if start_s else date_cls.today()
-            ed = date_cls.fromisoformat(end_s) if end_s else sd
-        except ValueError:
-            return {"error": "start_date and end_date must be YYYY-MM-DD when provided"}
-        events = await client.list_events(str(args["calendar_url"]), start=sd, end=ed)
-        return {"events": events, "calendar_url": str(args["calendar_url"])}
-
-    @staticmethod
-    async def _tool_icloud_calendar_create_event(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud Calendar")
-        client = _icloud_caldav_client(row)
-        start = datetime.fromisoformat(str(args["start_iso"]).replace("Z", "+00:00"))
-        end = datetime.fromisoformat(str(args["end_iso"]).replace("Z", "+00:00"))
-        return await client.create_event(
-            str(args["calendar_url"]),
-            summary=str(args["summary"]),
-            start=start,
-            end=end,
-            description=str(args["description"]) if args.get("description") else None,
-        )
-
-    @staticmethod
     async def _tool_icloud_drive_list_folder(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1366,7 +1447,7 @@ class AgentService:
     async def _tool_icloud_drive_get_file(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1391,7 +1472,7 @@ class AgentService:
     async def _tool_icloud_contacts_list(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1409,7 +1490,7 @@ class AgentService:
     async def _tool_icloud_contacts_search(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1428,7 +1509,7 @@ class AgentService:
     async def _tool_icloud_reminders_list(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1448,7 +1529,7 @@ class AgentService:
     async def _tool_icloud_notes_list(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1467,7 +1548,7 @@ class AgentService:
     async def _tool_icloud_photos_list(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
         uid, pw, china = _icloud_app_password_creds(row)
         if not uid or not pw.strip():
             return {"error": "missing Apple ID or password on this iCloud connection"}
@@ -1582,7 +1663,7 @@ class AgentService:
     async def _tool_outlook_list_messages(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _OUTLOOK_PROVIDERS, label="Outlook")
+        row = await _resolve_connection(db, user, args, OUTLOOK_MAIL_TOOL_PROVIDERS, label="Outlook")
         client = await _graph_client(db, row)
         return await client.messages_delta(top=int(args.get("top") or 25))
 
@@ -1590,7 +1671,7 @@ class AgentService:
     async def _tool_outlook_get_message(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _OUTLOOK_PROVIDERS, label="Outlook")
+        row = await _resolve_connection(db, user, args, OUTLOOK_MAIL_TOOL_PROVIDERS, label="Outlook")
         client = await _graph_client(db, row)
         return await client.get_message(str(args["message_id"]))
 
@@ -1598,7 +1679,7 @@ class AgentService:
     async def _tool_teams_list_teams(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TEAMS_PROVIDERS, label="Microsoft Teams")
+        row = await _resolve_connection(db, user, args, TEAMS_TOOL_PROVIDERS, label="Microsoft Teams")
         client = await _graph_client(db, row)
         return await client._get("/me/joinedTeams")
 
@@ -1606,7 +1687,7 @@ class AgentService:
     async def _tool_teams_list_channels(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, _TEAMS_PROVIDERS, label="Microsoft Teams")
+        row = await _resolve_connection(db, user, args, TEAMS_TOOL_PROVIDERS, label="Microsoft Teams")
         client = await _graph_client(db, row)
         return await client._get(f"/teams/{args['team_id']}/channels")
 
@@ -1616,7 +1697,7 @@ class AgentService:
     ) -> dict[str, Any]:
         import httpx
 
-        row = await _resolve_connection(db, user, args, _TEAMS_PROVIDERS, label="Microsoft Teams")
+        row = await _resolve_connection(db, user, args, TEAMS_TOOL_PROVIDERS, label="Microsoft Teams")
         token = await TokenManager.get_valid_access_token(db, row)
         url = (
             f"https://graph.microsoft.com/v1.0/teams/{args['team_id']}"
