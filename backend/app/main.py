@@ -42,7 +42,7 @@ async def _app_lifespan(_app: FastAPI):
     await aclose_llm_http_client()
 
 
-app = FastAPI(title="CRM + AI Cockpit API", version="0.0.2", lifespan=_app_lifespan)
+app = FastAPI(title="CRM + AI Cockpit API", version="0.0.3", lifespan=_app_lifespan)
 
 
 def _is_connectivity_error(exc: SQLAlchemyError) -> bool:
