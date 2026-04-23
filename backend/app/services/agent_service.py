@@ -136,6 +136,7 @@ from app.services.connectors.notion_client import NotionAPIError, NotionClient
 from app.services.connectors.discord_bot_client import DiscordAPIError, DiscordBotClient
 from app.services.connectors.slack_client import SlackAPIError, SlackClient
 from app.services.connectors.telegram_bot_client import TelegramAPIError, TelegramBotClient
+from app.services.connectors.web_search_client import WebSearchAPIError, WebSearchClient
 from app.services.gmail_metadata_cache import (
     get_message_metadata,
     get_thread as gmail_cache_get_thread,
@@ -1819,6 +1820,12 @@ class AgentService:
             "connector_gated_tools": rt.agent_connector_gated_tools,
             "agent_processing_paused": bool(getattr(prefs, "agent_processing_paused", False)),
             "capabilities": describe_capabilities(),
+            "web_tools": {
+                "enabled": bool(settings.web_search_enabled),
+                "provider": (settings.web_search_provider or "duckduckgo").strip().lower(),
+                "default_max_results": int(settings.web_search_max_results or 8),
+                "fetch_max_chars": int(settings.web_fetch_max_chars or 12000),
+            },
             "background_automation": {
                 "heartbeat": {
                     "server_master_enabled": bool(settings.agent_heartbeat_enabled),
@@ -1875,6 +1882,38 @@ class AgentService:
             user_timezone=getattr(prefs, "user_timezone", None),
             time_format=getattr(prefs, "time_format", None) or "auto",
         )
+
+    @staticmethod
+    async def _tool_web_search(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del db, user
+        if not bool(settings.web_search_enabled):
+            return {"error": "web_search is disabled by server config"}
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return {"error": "query is required"}
+        max_results = min(
+            max(int(args.get("max_results") or settings.web_search_max_results or 8), 1),
+            20,
+        )
+        client = WebSearchClient()
+        return await client.search(query, max_results=max_results)
+
+    @staticmethod
+    async def _tool_web_fetch(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        del db, user
+        if not bool(settings.web_search_enabled):
+            return {"error": "web_search/web_fetch is disabled by server config"}
+        url = str(args.get("url") or "").strip()
+        if not url:
+            return {"error": "url is required"}
+        max_chars_raw = args.get("max_chars")
+        max_chars = int(max_chars_raw) if max_chars_raw is not None else None
+        client = WebSearchClient()
+        return await client.fetch_url(url, max_chars=max_chars)
 
     @staticmethod
     async def _tool_start_connector_setup(
@@ -2274,6 +2313,7 @@ class AgentService:
             NotionAPIError,
             TelegramAPIError,
             DiscordAPIError,
+            WebSearchAPIError,
         ) as exc:
             return ({"error": f"upstream {exc.status_code}: {exc.detail[:300]}"}, None)
         except Exception as exc:  # noqa: BLE001 — surface tool errors to the model

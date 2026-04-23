@@ -602,6 +602,29 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         "time zone (same values as the system prompt's clock block). Use when "
         "you need a fresh timestamp during a long turn or after ambiguity.",
     ),
+    _fn(
+        "web_search",
+        "Search the public internet for current information (news, docs, release notes, pricing, "
+        "status pages, etc.). Use this when the answer is likely outside the user's connected "
+        "accounts and may be newer than the model's training data. "
+        "Inputs: ``query`` (required), optional ``max_results`` (1-20).",
+        {
+            "query": {"type": "string", "description": "Search query in natural language."},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
+        },
+        required=["query"],
+    ),
+    _fn(
+        "web_fetch",
+        "Fetch and extract readable text from a public URL (http/https only). "
+        "Use after ``web_search`` when you need to read the source page content "
+        "before answering. Inputs: ``url`` (required), optional ``max_chars``.",
+        {
+            "url": {"type": "string", "description": "Public http/https URL."},
+            "max_chars": {"type": "integer", "minimum": 500, "maximum": 100000},
+        },
+        required=["url"],
+    ),
 ]
 
 
@@ -1437,6 +1460,8 @@ _COMPACT_NAMES: frozenset[str] = frozenset(
         "describe_harness",
         "list_workspace_files",
         "read_workspace_file",
+        "web_search",
+        "web_fetch",
     }
 )
 

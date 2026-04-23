@@ -184,6 +184,21 @@ class Settings(BaseSettings):
     agent_user_context_refresh_min_minutes: int = Field(
         default=180, ge=5, le=10_080, validation_alias="AGENT_USER_CONTEXT_REFRESH_MIN_MINUTES"
     )
+    # Public web search/fetch tools (used when the user asks for internet lookups).
+    web_search_enabled: bool = Field(default=True, validation_alias="WEB_SEARCH_ENABLED")
+    # "duckduckgo" (default, no key) or "serper" (requires WEB_SEARCH_API_KEY).
+    web_search_provider: str = Field(default="duckduckgo", validation_alias="WEB_SEARCH_PROVIDER")
+    web_search_api_key: str = Field(default="", validation_alias="WEB_SEARCH_API_KEY")
+    web_search_cache_ttl_seconds: int = Field(
+        default=900, ge=1, le=86_400, validation_alias="WEB_SEARCH_CACHE_TTL_SECONDS"
+    )
+    web_search_max_results: int = Field(
+        default=8, ge=1, le=20, validation_alias="WEB_SEARCH_MAX_RESULTS"
+    )
+    web_fetch_max_chars: int = Field(default=12_000, ge=500, le=100_000, validation_alias="WEB_FETCH_MAX_CHARS")
+    web_fetch_timeout_seconds: float = Field(
+        default=20.0, ge=1.0, le=120.0, validation_alias="WEB_FETCH_TIMEOUT_SECONDS"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

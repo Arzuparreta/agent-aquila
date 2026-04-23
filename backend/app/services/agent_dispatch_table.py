@@ -19,6 +19,8 @@ AGENT_TOOL_DISPATCH: dict[str, tuple[str, bool]] = {
     "teams_list_channels": ("_tool_teams_list_channels", False),
     "list_connectors": ("_tool_list_connectors", False),
     "get_session_time": ("_tool_get_session_time", False),
+    "web_search": ("_tool_web_search", False),
+    "web_fetch": ("_tool_web_fetch", False),
     "gmail_modify_message": ("_tool_gmail_modify_message", False),
     "gmail_modify_thread": ("_tool_gmail_modify_thread", False),
     "gmail_trash_message": ("_tool_gmail_trash_message", False),
