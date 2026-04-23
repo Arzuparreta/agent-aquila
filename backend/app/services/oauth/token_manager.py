@@ -26,6 +26,8 @@ _GOOGLE_PROVIDERS = {
     "google_youtube",
     "google_tasks",
     "google_people",
+    "google_sheets",
+    "google_docs",
 }
 _MICROSOFT_PROVIDERS = {"graph_mail", "graph_calendar", "graph_onedrive", "graph_teams", "ms_teams"}
 _REFRESH_SKEW = timedelta(seconds=90)
@@ -64,7 +66,13 @@ class TokenManager:
             refresher_name = "microsoft"
             ms_cfg = await get_microsoft_runtime_config(db)
         else:
-            token = str(creds.get("access_token") or creds.get("token") or "")
+            token = str(
+                creds.get("access_token")
+                or creds.get("bot_token")
+                or creds.get("api_key")
+                or creds.get("token")
+                or ""
+            )
             return token, creds, provider
 
         access_token = str(creds.get("access_token") or "")

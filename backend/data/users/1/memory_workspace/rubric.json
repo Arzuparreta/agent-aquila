@@ -9,5 +9,5 @@
   "base_bias": 0.0,
   "user_conditioned_notes": [],
   "last_adapted_at": null,
-  "total_adaptation_steps": 2
+  "total_adaptation_steps": 5
 }

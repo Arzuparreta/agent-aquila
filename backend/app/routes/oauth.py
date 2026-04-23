@@ -46,7 +46,16 @@ async def google_status(db: AsyncSession = Depends(get_db)) -> OAuthStatusRespon
     return OAuthStatusResponse(
         configured=google_oauth.is_runtime_ready(cfg),
         redirect_uri=google_oauth.redirect_uri_for(cfg),
-        providers=["google_gmail", "google_calendar", "google_drive"],
+        providers=[
+            "google_gmail",
+            "google_calendar",
+            "google_drive",
+            "google_youtube",
+            "google_tasks",
+            "google_people",
+            "google_sheets",
+            "google_docs",
+        ],
     )
 
 

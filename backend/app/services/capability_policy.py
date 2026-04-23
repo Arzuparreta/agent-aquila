@@ -19,6 +19,10 @@ KIND_RISK: dict[str, RiskTier] = {
     "email_reply": "external_write",
     "whatsapp_send": "external_write",
     "youtube_upload": "external_write",
+    "slack_post": "external_write",
+    "linear_comment": "external_write",
+    "telegram_message": "external_write",
+    "discord_message": "external_write",
 }
 
 

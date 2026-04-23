@@ -11,7 +11,7 @@ After the refactor the agent has a small, opinionated palette:
   immediately because the user explicitly opted into ``send_only_gated``
   approval policy for those channels.
 - **Proposal tools** for operations that require
-  a human nod: ``propose_email_send``, ``propose_email_reply``, ``propose_whatsapp_send``, ``propose_youtube_upload``.
+  a human nod: ``propose_email_send``, ``propose_email_reply``, ``propose_whatsapp_send``, ``propose_youtube_upload``, ``propose_slack_post_message``.
   These create a ``PendingProposal`` row that the user approves from
   the chat UI before it actually goes out.
 - **Memory tools** (``upsert_memory`` / ``recall_memory`` / ``memory_search`` /
@@ -208,6 +208,29 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         },
     ),
     _fn(
+        "sheets_read_range",
+        "Read a range from a Google Sheet (A1 notation, e.g. ``Sheet1!A1:D10``). "
+        "Requires a **google_sheets** connection. "
+        "Inputs: ``spreadsheet_id`` (required), ``range`` (required), optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "spreadsheet_id": {"type": "string", "description": "Spreadsheet id from the URL or Drive."},
+            "range": {"type": "string", "description": "A1 range including sheet name if needed."},
+        },
+        required=["spreadsheet_id", "range"],
+    ),
+    _fn(
+        "docs_get_document",
+        "Read a Google Doc as structured plain text plus raw API payload. "
+        "Requires a **google_docs** connection. "
+        "Inputs: ``document_id`` (required), optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "document_id": {"type": "string", "description": "Document id from the Docs URL."},
+        },
+        required=["document_id"],
+    ),
+    _fn(
         "youtube_list_my_channels",
         "List the authenticated user's YouTube channels (mine=true). "
         "Use before searching or listing videos when the channel id is unknown. "
@@ -326,6 +349,99 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         required=["owner", "repo"],
     ),
     _fn(
+        "slack_list_conversations",
+        "List Slack channels the bot can see (public + private by default). "
+        "Requires a **slack_bot** connection. "
+        "Optional ``connection_id``, ``types`` (Slack `types` string, default "
+        "``public_channel,private_channel``), ``cursor``, ``limit`` (1-1000).",
+        {
+            **_CONNECTION_ID,
+            "types": {"type": "string"},
+            "cursor": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+        },
+    ),
+    _fn(
+        "slack_get_conversation_history",
+        "Fetch recent messages from a Slack channel. ``channel_id`` is the `C...` id from "
+        "``slack_list_conversations``. Optional ``connection_id``, ``limit`` (1-200), ``cursor``.",
+        {
+            **_CONNECTION_ID,
+            "channel_id": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            "cursor": {"type": "string"},
+        },
+        required=["channel_id"],
+    ),
+    _fn(
+        "linear_list_issues",
+        "List recent **Linear** issues (GraphQL). Requires **linear** API key connection. "
+        "Optional ``first`` (1-100, default 25), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "first": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+    ),
+    _fn(
+        "linear_get_issue",
+        "Fetch one **Linear** issue by id (UUID). ``issue_id`` required. Optional ``connection_id``.",
+        {**_CONNECTION_ID, "issue_id": {"type": "string"}},
+        required=["issue_id"],
+    ),
+    _fn(
+        "notion_search",
+        "Search **Notion** pages/databases (POST /search). Requires **notion** integration token. "
+        "``query`` optional (empty returns recent). ``page_size`` 1-100. Optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "query": {"type": "string"},
+            "page_size": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+    ),
+    _fn(
+        "notion_get_page",
+        "Get a **Notion** page by id (from ``notion_search`` or a shared link id). "
+        "``page_id`` required. Optional ``connection_id``.",
+        {**_CONNECTION_ID, "page_id": {"type": "string"}},
+        required=["page_id"],
+    ),
+    _fn(
+        "telegram_get_me",
+        "Call Telegram **getMe** for the linked bot. Requires **telegram_bot**. Optional ``connection_id``.",
+        {**_CONNECTION_ID},
+    ),
+    _fn(
+        "telegram_get_updates",
+        "Telegram **getUpdates** (polling-style snapshot of recent activity). "
+        "Optional ``offset``, ``limit`` (1-100), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+    ),
+    _fn(
+        "discord_list_guilds",
+        "Discord: guilds the bot account is in. Requires **discord_bot**. Optional ``connection_id``.",
+        {**_CONNECTION_ID},
+    ),
+    _fn(
+        "discord_list_guild_channels",
+        "Discord: list channels for **guild_id**. Requires **discord_bot**.",
+        {**_CONNECTION_ID, "guild_id": {"type": "string"}},
+        required=["guild_id"],
+    ),
+    _fn(
+        "discord_get_channel_messages",
+        "Discord: fetch recent messages in **channel_id**. Optional ``limit`` (1-100), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "channel_id": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
+        required=["channel_id"],
+    ),
+    _fn(
         "device_list_ingested_files",
         "List files previously uploaded via the **device bridge** (e.g. iOS Shortcuts → "
         "``POST /api/v1/device-files/ingest``). Newest first. No cloud connector. "
@@ -343,7 +459,8 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
     _fn(
         "icloud_calendar_list_calendars",
         "List iCloud calendars (CalDAV) using the **icloud_caldav** connection (Apple ID + "
-        "**app-specific password**). The same connection enables **iCloud Drive** via "
+        "**app-specific password**). The same connection enables **iCloud Drive** and **CardDAV contacts** "
+        "(``icloud_contacts_list`` / ``icloud_contacts_search``) via "
         "``icloud_drive_list_folder`` / ``icloud_drive_get_file``. Returns calendar names and "
         "**calendar_url** values for ``icloud_calendar_list_events`` / create. "
         "Optional ``connection_id``.",
@@ -387,6 +504,58 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
             "max_bytes": {"type": "integer", "minimum": 1, "maximum": 33554432},
         },
         required=["path"],
+    ),
+    _fn(
+        "icloud_contacts_list",
+        "List contacts from **iCloud** via CardDAV (same ``icloud_caldav`` Apple ID + app password). "
+        "Returns parsed names, emails, and phones (best-effort vCard). "
+        "Optional ``max_results`` (1-2000, default 200), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 2000},
+        },
+    ),
+    _fn(
+        "icloud_contacts_search",
+        "Search **iCloud** contacts by substring match on name, email, or phone. "
+        "``query`` required. Optional ``max_results`` (1-200, default 50), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "query": {"type": "string"},
+            "max_results": {"type": "integer", "minimum": 1, "maximum": 200},
+        },
+        required=["query"],
+    ),
+    _fn(
+        "icloud_reminders_list",
+        "List **iCloud Reminders** via PyiCloud (same ``icloud_caldav`` as Calendar/Drive). "
+        "Unofficial web APIs — may require 2FA like Drive. "
+        "Optional ``max_lists`` (1-50), ``max_reminders_per_list`` (1-200), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "max_lists": {"type": "integer", "minimum": 1, "maximum": 50},
+            "max_reminders_per_list": {"type": "integer", "minimum": 1, "maximum": 200},
+        },
+    ),
+    _fn(
+        "icloud_notes_list",
+        "List recent **Apple Notes** titles via PyiCloud (``icloud_caldav``). "
+        "Best-effort; unofficial APIs. Optional ``limit`` (1-200), ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        },
+    ),
+    _fn(
+        "icloud_photos_list",
+        "List **photo metadata** (album, id, filename, size, created) via PyiCloud — **no image bytes**. "
+        "``icloud_caldav`` connector. Optional ``max_albums`` (1-40), ``max_photos_per_album`` (1-100), "
+        "``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "max_albums": {"type": "integer", "minimum": 1, "maximum": 40},
+            "max_photos_per_album": {"type": "integer", "minimum": 1, "maximum": 100},
+        },
     ),
     _fn(
         "outlook_list_messages",
@@ -660,6 +829,31 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         required=["file_id", "email"],
     ),
     _fn(
+        "sheets_append_row",
+        "Append one row to a Google Sheet (values as array of cells). Auto-applies. "
+        "``range`` is the table anchor (e.g. ``Sheet1!A1`` or ``Sheet1!A:D``). "
+        "Requires **google_sheets**. "
+        "Inputs: ``spreadsheet_id``, ``range``, ``values`` (array of strings/numbers), "
+        "optional ``connection_id``.",
+        {
+            **_CONNECTION_ID,
+            "spreadsheet_id": {"type": "string"},
+            "range": {"type": "string"},
+            "values": {
+                "type": "array",
+                "items": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "number"},
+                        {"type": "boolean"},
+                        {"type": "null"},
+                    ]
+                },
+            },
+        },
+        required=["spreadsheet_id", "range", "values"],
+    ),
+    _fn(
         "youtube_update_video",
         "Update YouTube video metadata (title, description, tags, category). "
         "``video_id`` required. Auto-applies. Optional ``connection_id``.",
@@ -748,6 +942,53 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
             "access_token": {"type": "string"},
         },
         required=["setup_token", "access_token"],
+    ),
+    _fn(
+        "submit_slack_credentials",
+        "After ``start_connector_setup`` for **slack_bot**, persist the **bot_token** (`xoxb-...`). "
+        "Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "bot_token": {"type": "string"},
+        },
+        required=["setup_token", "bot_token"],
+    ),
+    _fn(
+        "submit_linear_credentials",
+        "After ``start_connector_setup`` for **linear**, persist **api_key** (personal API key). Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "api_key": {"type": "string"},
+        },
+        required=["setup_token", "api_key"],
+    ),
+    _fn(
+        "submit_notion_credentials",
+        "After ``start_connector_setup`` for **notion**, persist **api_key** (internal integration secret). "
+        "Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "api_key": {"type": "string"},
+        },
+        required=["setup_token", "api_key"],
+    ),
+    _fn(
+        "submit_telegram_bot_credentials",
+        "After ``start_connector_setup`` for **telegram_bot**, persist **bot_token**. Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "bot_token": {"type": "string"},
+        },
+        required=["setup_token", "bot_token"],
+    ),
+    _fn(
+        "submit_discord_bot_credentials",
+        "After ``start_connector_setup`` for **discord_bot**, persist **bot_token**. Auto-applies.",
+        {
+            "setup_token": {"type": "string"},
+            "bot_token": {"type": "string"},
+        },
+        required=["setup_token", "bot_token"],
     ),
     _fn(
         "submit_icloud_caldav_credentials",
@@ -1016,6 +1257,60 @@ _PROPOSAL_TOOLS: list[dict[str, Any]] = [
         },
         required=["connection_id", "title", "content_base64", "mime_type"],
     ),
+    _fn(
+        "propose_slack_post_message",
+        "Queue a Slack **chat.postMessage** in a channel. Creates an approval card; "
+        "nothing is posted until the user approves. "
+        "``channel_id`` is the `C...` id from ``slack_list_conversations``. "
+        "Inputs: ``connection_id``, ``channel_id``, ``text`` (mrkdwn/plain), optional ``thread_ts``.",
+        {
+            "connection_id": {"type": "integer"},
+            "channel_id": {"type": "string"},
+            "text": {"type": "string", "maxLength": 4000},
+            "thread_ts": {"type": "string"},
+            **_IDEMPOTENCY,
+        },
+        required=["connection_id", "channel_id", "text"],
+    ),
+    _fn(
+        "propose_linear_create_comment",
+        "Queue a **Linear** comment on an issue. Approval required before post. "
+        "``issue_id`` is the Linear issue UUID; ``body`` is comment markdown/text.",
+        {
+            "connection_id": {"type": "integer"},
+            "issue_id": {"type": "string"},
+            "body": {"type": "string", "maxLength": 20000},
+            **_IDEMPOTENCY,
+        },
+        required=["connection_id", "issue_id", "body"],
+    ),
+    _fn(
+        "propose_telegram_send_message",
+        "Queue **sendMessage** to a Telegram ``chat_id``. Requires approval. "
+        "``chat_id`` may be numeric id or @channelusername for public channels. "
+        "``text`` is the outgoing body (max 4096).",
+        {
+            "connection_id": {"type": "integer"},
+            "chat_id": {
+                "anyOf": [{"type": "string"}, {"type": "integer"}],
+            },
+            "text": {"type": "string", "maxLength": 4096},
+            **_IDEMPOTENCY,
+        },
+        required=["connection_id", "chat_id", "text"],
+    ),
+    _fn(
+        "propose_discord_post_message",
+        "Queue a Discord channel message (**channel_id**). Requires approval. "
+        "``content`` max 2000 chars.",
+        {
+            "connection_id": {"type": "integer"},
+            "channel_id": {"type": "string"},
+            "content": {"type": "string", "maxLength": 2000},
+            **_IDEMPOTENCY,
+        },
+        required=["connection_id", "channel_id", "content"],
+    ),
 ]
 
 
@@ -1185,14 +1480,34 @@ def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:
         return frozenset({"google_tasks"})
     if n.startswith("people_"):
         return frozenset({"google_people"})
+    if n.startswith("sheets_"):
+        return frozenset({"google_sheets"})
+    if n.startswith("docs_"):
+        return frozenset({"google_docs"})
     if n.startswith("icloud_calendar_"):
         return frozenset({"icloud_caldav"})
     if n.startswith("icloud_drive_"):
+        return frozenset({"icloud_caldav"})
+    if n.startswith("icloud_contacts_"):
+        return frozenset({"icloud_caldav"})
+    if n in ("icloud_reminders_list", "icloud_notes_list", "icloud_photos_list"):
         return frozenset({"icloud_caldav"})
     if n == "propose_whatsapp_send":
         return frozenset({"whatsapp_business"})
     if n.startswith("github_"):
         return frozenset({"github"})
+    if n.startswith("slack_"):
+        return frozenset({"slack_bot"})
+    if n == "propose_slack_post_message":
+        return frozenset({"slack_bot"})
+    if n.startswith("linear_") or n == "propose_linear_create_comment":
+        return frozenset({"linear"})
+    if n.startswith("notion_"):
+        return frozenset({"notion"})
+    if n.startswith("telegram_") or n == "propose_telegram_send_message":
+        return frozenset({"telegram_bot"})
+    if n.startswith("discord_") or n == "propose_discord_post_message":
+        return frozenset({"discord_bot"})
     if n.startswith("outlook_"):
         return frozenset({"graph_mail"})
     if n.startswith("teams_"):

@@ -22,6 +22,10 @@ PROPOSAL_KINDS: tuple[str, ...] = (
     "email_reply",
     "whatsapp_send",
     "youtube_upload",
+    "slack_post",
+    "linear_comment",
+    "telegram_message",
+    "discord_message",
 )
 
 

@@ -91,6 +91,8 @@ _GOOGLE_SERVICE_TO_INTENT: dict[str, str] = {
     "youtube": "youtube",
     "tasks": "tasks",
     "people": "people",
+    "sheets": "sheets",
+    "docs": "docs",
     "all": "all",
 }
 _MICROSOFT_SERVICE_TO_INTENT: dict[str, str] = {
@@ -110,13 +112,128 @@ _MICROSOFT_SERVICE_TO_INTENT: dict[str, str] = {
 async def start_setup(db: AsyncSession, user: User, provider: str) -> dict[str, Any]:
     """Returns the structured setup card the agent emits to chat."""
     provider = (provider or "").lower().strip()
-    if provider not in ("google", "microsoft", "whatsapp", "icloud_caldav", "github"):
+    if provider not in (
+        "google",
+        "microsoft",
+        "whatsapp",
+        "icloud_caldav",
+        "github",
+        "slack_bot",
+        "linear",
+        "notion",
+        "telegram_bot",
+        "discord_bot",
+    ):
         return {
-            "error": "provider must be 'google', 'microsoft', 'whatsapp', 'icloud_caldav', or 'github'",
+            "error": "provider must be 'google', 'microsoft', 'whatsapp', 'icloud_caldav', 'github', 'slack_bot', 'linear', 'notion', 'telegram_bot', or 'discord_bot'",
         }
 
     redirect_base = await get_redirect_base(db)
     setup_token = _create_setup_token(user, provider)
+
+    if provider == "linear":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "linear",
+            "setup_token": setup_token,
+            "console_url": "https://linear.app/settings/api",
+            "steps": [
+                {
+                    "title": "Create a Linear API key",
+                    "action_url": "https://linear.app/settings/api",
+                    "instruction": "Under **API**, create a **Personal API key** and copy it.",
+                },
+                {
+                    "title": "Paste the API key",
+                    "instruction": "Send **api_key** when ready. Stored encrypted.",
+                    "expects": ["api_key"],
+                },
+            ],
+        }
+
+    if provider == "notion":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "notion",
+            "setup_token": setup_token,
+            "console_url": "https://www.notion.so/my-integrations",
+            "steps": [
+                {
+                    "title": "Create an internal integration",
+                    "action_url": "https://www.notion.so/my-integrations",
+                    "instruction": "Create an integration, copy the **Internal Integration Secret**, and share target pages with the integration.",
+                },
+                {
+                    "title": "Paste the token",
+                    "instruction": "Send **api_key** (integration secret). Stored encrypted.",
+                    "expects": ["api_key"],
+                },
+            ],
+        }
+
+    if provider == "telegram_bot":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "telegram_bot",
+            "setup_token": setup_token,
+            "console_url": "https://core.telegram.org/bots/tutorial",
+            "steps": [
+                {
+                    "title": "Create a bot with BotFather",
+                    "action_url": "https://t.me/BotFather",
+                    "instruction": "Message **@BotFather**, create a bot, and copy the **HTTP API token**.",
+                },
+                {
+                    "title": "Paste the bot token",
+                    "instruction": "Send **bot_token** when ready. Stored encrypted.",
+                    "expects": ["bot_token"],
+                },
+            ],
+        }
+
+    if provider == "discord_bot":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "discord_bot",
+            "setup_token": setup_token,
+            "console_url": "https://discord.com/developers/applications",
+            "steps": [
+                {
+                    "title": "Create a Discord application + bot",
+                    "action_url": "https://discord.com/developers/applications",
+                    "instruction": "Create an application, open **Bot**, reset/copy the **token**, and invite the bot with **Message Content** / channel permissions you need.",
+                },
+                {
+                    "title": "Paste the bot token",
+                    "instruction": "Send **bot_token** when ready. Stored encrypted.",
+                    "expects": ["bot_token"],
+                },
+            ],
+        }
+
+    if provider == "slack_bot":
+        return {
+            "card_kind": "connector_setup",
+            "provider": "slack_bot",
+            "setup_token": setup_token,
+            "console_url": "https://api.slack.com/apps",
+            "steps": [
+                {
+                    "title": "Create a Slack app + install to workspace",
+                    "action_url": "https://api.slack.com/apps",
+                    "instruction": (
+                        "Create an app, add **Bot Token Scopes** (at minimum `channels:history`, "
+                        "`channels:read`, `groups:history`, `groups:read`, `chat:write`), "
+                        "install to your workspace, and copy the **Bot User OAuth Token** (`xoxb-...`)."
+                    ),
+                },
+                {
+                    "title": "Paste the bot token",
+                    "instruction": "Send **bot_token** when ready. It is stored encrypted.",
+                    "expects": ["bot_token"],
+                },
+            ],
+        }
 
     if provider == "github":
         return {
@@ -383,6 +500,137 @@ async def submit_github_credentials(
         ),
     )
     return {"ok": True, "provider": "github", "next": "connected"}
+
+
+async def submit_slack_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    bot_token: str,
+) -> dict[str, Any]:
+    """Persist a Slack bot token (xoxb-...)."""
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "slack_bot":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for slack_bot again"}
+    tok = str(bot_token or "").strip()
+    if not tok or not tok.startswith("xoxb-"):
+        return {"error": "bot_token must be a Slack bot token (xoxb-...)"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="slack_bot",
+            label="Slack",
+            credentials={"bot_token": tok},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "slack_bot", "next": "connected"}
+
+
+async def submit_linear_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    api_key: str,
+) -> dict[str, Any]:
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "linear":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for linear again"}
+    key = str(api_key or "").strip()
+    if not key:
+        return {"error": "api_key is required"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="linear",
+            label="Linear",
+            credentials={"api_key": key},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "linear", "next": "connected"}
+
+
+async def submit_notion_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    api_key: str,
+) -> dict[str, Any]:
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "notion":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for notion again"}
+    key = str(api_key or "").strip()
+    if not key:
+        return {"error": "api_key is required"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="notion",
+            label="Notion",
+            credentials={"api_key": key},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "notion", "next": "connected"}
+
+
+async def submit_telegram_bot_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    bot_token: str,
+) -> dict[str, Any]:
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "telegram_bot":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for telegram_bot again"}
+    tok = str(bot_token or "").strip()
+    if not tok:
+        return {"error": "bot_token is required"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="telegram_bot",
+            label="Telegram Bot",
+            credentials={"bot_token": tok},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "telegram_bot", "next": "connected"}
+
+
+async def submit_discord_bot_credentials(
+    db: AsyncSession,
+    user: User,
+    *,
+    setup_token: str,
+    bot_token: str,
+) -> dict[str, Any]:
+    sess = _consume_setup_token(setup_token, expected_user_id=user.id)
+    if not sess or sess.provider != "discord_bot":
+        return {"error": "setup_token invalid or expired; call start_connector_setup for discord_bot again"}
+    tok = str(bot_token or "").strip()
+    if not tok:
+        return {"error": "bot_token is required"}
+    await ConnectorService.create_connection(
+        db,
+        user,
+        ConnectorConnectionCreate(
+            provider="discord_bot",
+            label="Discord Bot",
+            credentials={"bot_token": tok},
+            meta={"source": "chat_setup"},
+        ),
+    )
+    return {"ok": True, "provider": "discord_bot", "next": "connected"}
 
 
 async def submit_icloud_caldav_credentials(

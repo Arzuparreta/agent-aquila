@@ -329,7 +329,7 @@ const en = {
   "connectors.google.step1.line2":
     "Under <strong>Authorized redirect URIs</strong>, add this exact line (copy–paste):",
   "connectors.google.step1.line3":
-    "Turn on the <strong>Gmail</strong>, <strong>Calendar</strong>, and <strong>Drive</strong> APIs for that project.",
+    "Turn on the <strong>Gmail</strong>, <strong>Calendar</strong>, <strong>Drive</strong>, <strong>Sheets</strong>, and <strong>Docs</strong> APIs for that project (and any others you use, e.g. YouTube).",
   "connectors.google.step2": "Step 2 — Paste into this page",
   "connectors.google.clientId": "Client ID (from Google)",
   "connectors.google.clientIdPlaceholder": "….apps.googleusercontent.com",
@@ -345,10 +345,12 @@ const en = {
   "connectors.google.savedNotConfigured":
     "Saved. Add the Client secret if Google still asks for it, then try Connect Google.",
   "connectors.google.savedError": "Could not save Google settings",
-  "connectors.google.connectAll": "Connect Google (Gmail + Calendar + Drive)",
+  "connectors.google.connectAll": "Connect Google (all products)",
   "connectors.google.gmailOnly": "Gmail only",
   "connectors.google.calendarOnly": "Calendar only",
   "connectors.google.driveOnly": "Drive only",
+  "connectors.google.sheetsOnly": "Sheets only",
+  "connectors.google.docsOnly": "Docs only",
   "connectors.google.tooltipSaveFirst":
     "Save the Client ID and secret above first, then these buttons open Google sign-in.",
   "connectors.google.tooltipCompleteStep2": "Complete Step 2 and save, then try again.",
@@ -436,6 +438,11 @@ const en = {
   "connectors.provider.whatsapp_business": "WhatsApp Business (Meta Cloud API)",
   "connectors.provider.icloud_caldav": "iCloud (Calendar + Drive)",
   "connectors.provider.github": "GitHub (personal access token)",
+  "connectors.provider.slack_bot": "Slack (bot token)",
+  "connectors.provider.linear": "Linear (API key)",
+  "connectors.provider.notion": "Notion (integration token)",
+  "connectors.provider.telegram_bot": "Telegram (bot token)",
+  "connectors.provider.discord_bot": "Discord (bot token)",
 
   "connectors.whatsapp.title": "WhatsApp Business (Meta Cloud API)",
   "connectors.whatsapp.intro":
@@ -480,6 +487,66 @@ const en = {
   "connectors.github.saving": "Saving…",
   "connectors.github.saved": "GitHub connection saved. Use Verify access below.",
   "connectors.github.errors.missing": "Token and label are required.",
+
+  "connectors.slack.title": "Slack (bot)",
+  "connectors.slack.intro":
+    "Create a Slack app, add bot scopes (<strong>channels:history</strong>, <strong>channels:read</strong>, <strong>groups:history</strong>, <strong>groups:read</strong>, <strong>chat:write</strong>), install it to your workspace, then paste the <strong>Bot User OAuth Token</strong> (<mono>xoxb-…</mono>).",
+  "connectors.slack.consoleLink": "api.slack.com → Your Apps",
+  "connectors.slack.botToken": "Bot User OAuth Token",
+  "connectors.slack.label": "Label",
+  "connectors.slack.labelPlaceholder": "Slack · My workspace",
+  "connectors.slack.save": "Save Slack connection",
+  "connectors.slack.saving": "Saving…",
+  "connectors.slack.saved": "Slack connection saved.",
+  "connectors.slack.errors.missing": "Bot token and label are required.",
+
+  "connectors.linear.title": "Linear",
+  "connectors.linear.intro":
+    "Create a <strong>Personal API key</strong> in Linear → Settings → API — it grants access to issues for your workspace. Keys are stored encrypted.",
+  "connectors.linear.consoleLink": "linear.app → Settings → API",
+  "connectors.linear.apiKey": "API key",
+  "connectors.linear.label": "Label",
+  "connectors.linear.labelPlaceholder": "Linear · Engineering",
+  "connectors.linear.save": "Save Linear connection",
+  "connectors.linear.saving": "Saving…",
+  "connectors.linear.saved": "Linear connection saved. Use Verify access below.",
+  "connectors.linear.errors.missing": "API key and label are required.",
+
+  "connectors.notion.title": "Notion",
+  "connectors.notion.intro":
+    "Create an <strong>internal integration</strong> in Notion, copy the <strong>internal integration secret</strong>, and share the pages or databases the bot should read with that integration.",
+  "connectors.notion.consoleLink": "notion.so → Settings → Connections → Develop or manage integrations",
+  "connectors.notion.secret": "Internal integration secret",
+  "connectors.notion.label": "Label",
+  "connectors.notion.labelPlaceholder": "Notion · Wiki",
+  "connectors.notion.save": "Save Notion connection",
+  "connectors.notion.saving": "Saving…",
+  "connectors.notion.saved": "Notion connection saved. Use Verify access below.",
+  "connectors.notion.errors.missing": "Integration secret and label are required.",
+
+  "connectors.telegram.title": "Telegram (bot)",
+  "connectors.telegram.intro":
+    "Create a bot with <strong>@BotFather</strong>, copy the <strong>HTTP API token</strong>, and keep it secret. Outbound messages from the agent require approval in the chat UI.",
+  "connectors.telegram.consoleLink": "Telegram — @BotFather",
+  "connectors.telegram.botToken": "Bot token",
+  "connectors.telegram.label": "Label",
+  "connectors.telegram.labelPlaceholder": "Telegram · Alerts bot",
+  "connectors.telegram.save": "Save Telegram connection",
+  "connectors.telegram.saving": "Saving…",
+  "connectors.telegram.saved": "Telegram connection saved. Use Verify access below.",
+  "connectors.telegram.errors.missing": "Bot token and label are required.",
+
+  "connectors.discord.title": "Discord (bot)",
+  "connectors.discord.intro":
+    "Create an application in the Discord Developer Portal, add a bot, enable the <strong>Message Content Intent</strong> if you need to read message text, and paste the bot token. Outbound posts require approval.",
+  "connectors.discord.consoleLink": "Discord Developer Portal — applications",
+  "connectors.discord.botToken": "Bot token",
+  "connectors.discord.label": "Label",
+  "connectors.discord.labelPlaceholder": "Discord · Server bot",
+  "connectors.discord.save": "Save Discord connection",
+  "connectors.discord.saving": "Saving…",
+  "connectors.discord.saved": "Discord connection saved. Use Verify access below.",
+  "connectors.discord.errors.missing": "Bot token and label are required.",
 
   // ── Technical settings page ───────────────────────────────────────────────
   "settings.technical.backToChat": "← Back to chat",
@@ -1209,7 +1276,7 @@ const es: Record<keyof typeof en, string> = {
   "connectors.google.step1.line2":
     "En <strong>URI de redireccionamiento autorizadas</strong>, añade exactamente esta línea (copia y pega):",
   "connectors.google.step1.line3":
-    "Activa las APIs de <strong>Gmail</strong>, <strong>Calendar</strong> y <strong>Drive</strong> para ese proyecto.",
+    "Activa las APIs de <strong>Gmail</strong>, <strong>Calendar</strong>, <strong>Drive</strong>, <strong>Sheets</strong> y <strong>Docs</strong> para ese proyecto (y las demás que uses, p. ej. YouTube).",
   "connectors.google.step2": "Paso 2 — Pega los datos en esta página",
   "connectors.google.clientId": "ID de cliente (de Google)",
   "connectors.google.clientIdPlaceholder": "….apps.googleusercontent.com",
@@ -1225,10 +1292,12 @@ const es: Record<keyof typeof en, string> = {
   "connectors.google.savedNotConfigured":
     "Guardado. Añade el secreto de cliente si Google sigue pidiéndolo y vuelve a probar «Conectar Google».",
   "connectors.google.savedError": "No se pudieron guardar los ajustes de Google",
-  "connectors.google.connectAll": "Conectar Google (Gmail + Calendar + Drive)",
+  "connectors.google.connectAll": "Conectar Google (todos los productos)",
   "connectors.google.gmailOnly": "Solo Gmail",
   "connectors.google.calendarOnly": "Solo Calendar",
   "connectors.google.driveOnly": "Solo Drive",
+  "connectors.google.sheetsOnly": "Solo Sheets",
+  "connectors.google.docsOnly": "Solo Docs",
   "connectors.google.tooltipSaveFirst":
     "Guarda primero el ID de cliente y el secreto; entonces estos botones abrirán el inicio de sesión de Google.",
   "connectors.google.tooltipCompleteStep2": "Completa el paso 2 y guarda; después vuelve a intentarlo.",
@@ -1318,6 +1387,11 @@ const es: Record<keyof typeof en, string> = {
   "connectors.provider.whatsapp_business": "WhatsApp Business (API en la nube de Meta)",
   "connectors.provider.icloud_caldav": "iCloud (Calendario + Drive)",
   "connectors.provider.github": "GitHub (token personal)",
+  "connectors.provider.slack_bot": "Slack (token de bot)",
+  "connectors.provider.linear": "Linear (clave API)",
+  "connectors.provider.notion": "Notion (token de integración)",
+  "connectors.provider.telegram_bot": "Telegram (token de bot)",
+  "connectors.provider.discord_bot": "Discord (token de bot)",
 
   "connectors.whatsapp.title": "WhatsApp Business (API en la nube de Meta)",
   "connectors.whatsapp.intro":
@@ -1362,6 +1436,66 @@ const es: Record<keyof typeof en, string> = {
   "connectors.github.saving": "Guardando…",
   "connectors.github.saved": "Conexión de GitHub guardada. Usa «Comprobar acceso» abajo.",
   "connectors.github.errors.missing": "Token y etiqueta son obligatorios.",
+
+  "connectors.slack.title": "Slack (bot)",
+  "connectors.slack.intro":
+    "Crea una app de Slack, añade permisos de bot (<strong>channels:history</strong>, <strong>channels:read</strong>, <strong>groups:history</strong>, <strong>groups:read</strong>, <strong>chat:write</strong>), instálala en tu espacio de trabajo y pega el <strong>Bot User OAuth Token</strong> (<mono>xoxb-…</mono>).",
+  "connectors.slack.consoleLink": "api.slack.com → Tus apps",
+  "connectors.slack.botToken": "Bot User OAuth Token",
+  "connectors.slack.label": "Etiqueta",
+  "connectors.slack.labelPlaceholder": "Slack · Mi equipo",
+  "connectors.slack.save": "Guardar conexión de Slack",
+  "connectors.slack.saving": "Guardando…",
+  "connectors.slack.saved": "Conexión de Slack guardada.",
+  "connectors.slack.errors.missing": "Token de bot y etiqueta son obligatorios.",
+
+  "connectors.linear.title": "Linear",
+  "connectors.linear.intro":
+    "Crea una <strong>clave API personal</strong> en Linear → Ajustes → API; da acceso a incidencias de tu espacio de trabajo. Las claves se guardan cifradas.",
+  "connectors.linear.consoleLink": "linear.app → Ajustes → API",
+  "connectors.linear.apiKey": "Clave API",
+  "connectors.linear.label": "Etiqueta",
+  "connectors.linear.labelPlaceholder": "Linear · Ingeniería",
+  "connectors.linear.save": "Guardar conexión de Linear",
+  "connectors.linear.saving": "Guardando…",
+  "connectors.linear.saved": "Conexión de Linear guardada. Usa «Comprobar acceso» abajo.",
+  "connectors.linear.errors.missing": "Clave API y etiqueta son obligatorios.",
+
+  "connectors.notion.title": "Notion",
+  "connectors.notion.intro":
+    "Crea una <strong>integración interna</strong> en Notion, copia el <strong>secret de integración interna</strong> y comparte con esa integración las páginas o bases de datos que el bot debe leer.",
+  "connectors.notion.consoleLink": "notion.so → Ajustes → Conexiones → Desarrollar o gestionar integraciones",
+  "connectors.notion.secret": "Secret de integración interna",
+  "connectors.notion.label": "Etiqueta",
+  "connectors.notion.labelPlaceholder": "Notion · Wiki",
+  "connectors.notion.save": "Guardar conexión de Notion",
+  "connectors.notion.saving": "Guardando…",
+  "connectors.notion.saved": "Conexión de Notion guardada. Usa «Comprobar acceso» abajo.",
+  "connectors.notion.errors.missing": "Secret de integración y etiqueta son obligatorios.",
+
+  "connectors.telegram.title": "Telegram (bot)",
+  "connectors.telegram.intro":
+    "Crea un bot con <strong>@BotFather</strong>, copia el <strong>token de la API HTTP</strong> y mantenlo en secreto. Los mensajes salientes del agente requieren aprobación en el chat.",
+  "connectors.telegram.consoleLink": "Telegram — @BotFather",
+  "connectors.telegram.botToken": "Token del bot",
+  "connectors.telegram.label": "Etiqueta",
+  "connectors.telegram.labelPlaceholder": "Telegram · Bot de alertas",
+  "connectors.telegram.save": "Guardar conexión de Telegram",
+  "connectors.telegram.saving": "Guardando…",
+  "connectors.telegram.saved": "Conexión de Telegram guardada. Usa «Comprobar acceso» abajo.",
+  "connectors.telegram.errors.missing": "Token de bot y etiqueta son obligatorios.",
+
+  "connectors.discord.title": "Discord (bot)",
+  "connectors.discord.intro":
+    "Crea una aplicación en el Portal de desarrolladores de Discord, añade un bot, activa el <strong>Intent de contenido del mensaje</strong> si necesitas leer el texto, y pega el token del bot. Las publicaciones salientes requieren aprobación.",
+  "connectors.discord.consoleLink": "Portal de desarrolladores de Discord — aplicaciones",
+  "connectors.discord.botToken": "Token del bot",
+  "connectors.discord.label": "Etiqueta",
+  "connectors.discord.labelPlaceholder": "Discord · Bot del servidor",
+  "connectors.discord.save": "Guardar conexión de Discord",
+  "connectors.discord.saving": "Guardando…",
+  "connectors.discord.saved": "Conexión de Discord guardada. Usa «Comprobar acceso» abajo.",
+  "connectors.discord.errors.missing": "Token de bot y etiqueta son obligatorios.",
 
   // ── Technical settings page ───────────────────────────────────────────────
   "settings.technical.backToChat": "← Volver al chat",

@@ -27,14 +27,24 @@ const PROVIDER_EXAMPLES: ProviderExample[] = [
   { id: "graph_teams", labelKey: "connectors.provider.graph_teams" },
   { id: "whatsapp_business", labelKey: "connectors.provider.whatsapp_business" },
   { id: "icloud_caldav", labelKey: "connectors.provider.icloud_caldav" },
-  { id: "github", labelKey: "connectors.provider.github" }
+  { id: "github", labelKey: "connectors.provider.github" },
+  { id: "slack_bot", labelKey: "connectors.provider.slack_bot" },
+  { id: "linear", labelKey: "connectors.provider.linear" },
+  { id: "notion", labelKey: "connectors.provider.notion" },
+  { id: "telegram_bot", labelKey: "connectors.provider.telegram_bot" },
+  { id: "discord_bot", labelKey: "connectors.provider.discord_bot" }
 ];
 
 /** Saved-connection list: human-readable provider names (raw id otherwise). */
 const CONNECTOR_PROVIDER_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
   whatsapp_business: "connectors.provider.whatsapp_business",
   icloud_caldav: "connectors.provider.icloud_caldav",
-  github: "connectors.provider.github"
+  github: "connectors.provider.github",
+  slack_bot: "connectors.provider.slack_bot",
+  linear: "connectors.provider.linear",
+  notion: "connectors.provider.notion",
+  telegram_bot: "connectors.provider.telegram_bot",
+  discord_bot: "connectors.provider.discord_bot"
 };
 
 type OAuthCredentialSource = "database" | "environment" | "none";
@@ -155,6 +165,26 @@ export function ConnectorsSection() {
   const [ghPat, setGhPat] = useState("");
   const [ghLabel, setGhLabel] = useState("");
   const [ghSaving, setGhSaving] = useState(false);
+
+  const [slackBotToken, setSlackBotToken] = useState("");
+  const [slackLabel, setSlackLabel] = useState("");
+  const [slackSaving, setSlackSaving] = useState(false);
+
+  const [linearApiKey, setLinearApiKey] = useState("");
+  const [linearLabel, setLinearLabel] = useState("");
+  const [linearSaving, setLinearSaving] = useState(false);
+
+  const [notionSecret, setNotionSecret] = useState("");
+  const [notionLabel, setNotionLabel] = useState("");
+  const [notionSaving, setNotionSaving] = useState(false);
+
+  const [telegramBotToken, setTelegramBotToken] = useState("");
+  const [telegramLabel, setTelegramLabel] = useState("");
+  const [telegramSaving, setTelegramSaving] = useState(false);
+
+  const [discordBotToken, setDiscordBotToken] = useState("");
+  const [discordLabel, setDiscordLabel] = useState("");
+  const [discordSaving, setDiscordSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -489,6 +519,156 @@ export function ConnectorsSection() {
     }
   };
 
+  const saveSlackConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!slackBotToken.trim() || !slackLabel.trim()) {
+      setError(t("connectors.slack.errors.missing"));
+      return;
+    }
+    setSlackSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "slack_bot",
+          label: slackLabel.trim(),
+          credentials: { bot_token: slackBotToken.trim() },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setSlackBotToken("");
+      setSlackLabel("");
+      setInfo(t("connectors.slack.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setSlackSaving(false);
+    }
+  };
+
+  const saveLinearConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!linearApiKey.trim() || !linearLabel.trim()) {
+      setError(t("connectors.linear.errors.missing"));
+      return;
+    }
+    setLinearSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "linear",
+          label: linearLabel.trim(),
+          credentials: { api_key: linearApiKey.trim() },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setLinearApiKey("");
+      setLinearLabel("");
+      setInfo(t("connectors.linear.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setLinearSaving(false);
+    }
+  };
+
+  const saveNotionConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!notionSecret.trim() || !notionLabel.trim()) {
+      setError(t("connectors.notion.errors.missing"));
+      return;
+    }
+    setNotionSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "notion",
+          label: notionLabel.trim(),
+          credentials: { api_key: notionSecret.trim() },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setNotionSecret("");
+      setNotionLabel("");
+      setInfo(t("connectors.notion.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setNotionSaving(false);
+    }
+  };
+
+  const saveTelegramConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!telegramBotToken.trim() || !telegramLabel.trim()) {
+      setError(t("connectors.telegram.errors.missing"));
+      return;
+    }
+    setTelegramSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "telegram_bot",
+          label: telegramLabel.trim(),
+          credentials: { bot_token: telegramBotToken.trim() },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setTelegramBotToken("");
+      setTelegramLabel("");
+      setInfo(t("connectors.telegram.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setTelegramSaving(false);
+    }
+  };
+
+  const saveDiscordConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setInfo(null);
+    if (!discordBotToken.trim() || !discordLabel.trim()) {
+      setError(t("connectors.discord.errors.missing"));
+      return;
+    }
+    setDiscordSaving(true);
+    try {
+      await apiFetch<ConnectorConnection>("/connectors", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "discord_bot",
+          label: discordLabel.trim(),
+          credentials: { bot_token: discordBotToken.trim() },
+          meta: { source: "settings_ui" }
+        })
+      });
+      setDiscordBotToken("");
+      setDiscordLabel("");
+      setInfo(t("connectors.discord.saved"));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("connectors.errors.saveFailed"));
+    } finally {
+      setDiscordSaving(false);
+    }
+  };
+
   const gmailNeedsReauth = rows.some(
     (r) => (r.provider === "google_gmail" || r.provider === "gmail") && r.needs_reauth,
   );
@@ -687,6 +867,22 @@ export function ConnectorsSection() {
             onClick={() => void connectGoogle("drive")}
           >
             {t("connectors.google.driveOnly")}
+          </Button>
+          <Button
+            type="button"
+            disabled={!googleApp?.configured}
+            title={googleApp?.configured ? undefined : t("connectors.google.tooltipCompleteStep2")}
+            onClick={() => void connectGoogle("sheets")}
+          >
+            {t("connectors.google.sheetsOnly")}
+          </Button>
+          <Button
+            type="button"
+            disabled={!googleApp?.configured}
+            title={googleApp?.configured ? undefined : t("connectors.google.tooltipCompleteStep2")}
+            onClick={() => void connectGoogle("docs")}
+          >
+            {t("connectors.google.docsOnly")}
           </Button>
         </div>
       </div>
@@ -1015,6 +1211,246 @@ export function ConnectorsSection() {
             disabled={ghSaving}
           >
             {ghSaving ? t("connectors.github.saving") : t("connectors.github.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.slack.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.slack.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://api.slack.com/apps"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.slack.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveSlackConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.slack.botToken")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={slackBotToken}
+              onChange={(e) => setSlackBotToken(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.slack.label")}
+            <Input
+              className="mt-1"
+              value={slackLabel}
+              onChange={(e) => setSlackLabel(e.target.value)}
+              placeholder={t("connectors.slack.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={slackSaving}
+          >
+            {slackSaving ? t("connectors.slack.saving") : t("connectors.slack.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.linear.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.linear.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://linear.app/settings/api"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.linear.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveLinearConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.linear.apiKey")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={linearApiKey}
+              onChange={(e) => setLinearApiKey(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.linear.label")}
+            <Input
+              className="mt-1"
+              value={linearLabel}
+              onChange={(e) => setLinearLabel(e.target.value)}
+              placeholder={t("connectors.linear.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={linearSaving}
+          >
+            {linearSaving ? t("connectors.linear.saving") : t("connectors.linear.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.notion.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.notion.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://www.notion.so/my-integrations"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.notion.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveNotionConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.notion.secret")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={notionSecret}
+              onChange={(e) => setNotionSecret(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.notion.label")}
+            <Input
+              className="mt-1"
+              value={notionLabel}
+              onChange={(e) => setNotionLabel(e.target.value)}
+              placeholder={t("connectors.notion.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={notionSaving}
+          >
+            {notionSaving ? t("connectors.notion.saving") : t("connectors.notion.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.telegram.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.telegram.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://t.me/BotFather"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.telegram.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveTelegramConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.telegram.botToken")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={telegramBotToken}
+              onChange={(e) => setTelegramBotToken(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.telegram.label")}
+            <Input
+              className="mt-1"
+              value={telegramLabel}
+              onChange={(e) => setTelegramLabel(e.target.value)}
+              placeholder={t("connectors.telegram.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={telegramSaving}
+          >
+            {telegramSaving ? t("connectors.telegram.saving") : t("connectors.telegram.save")}
+          </Button>
+        </form>
+      </div>
+
+      <div className="mt-4 rounded-md border border-border bg-surface-muted p-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-fg">{t("connectors.discord.title")}</h3>
+          <p className="text-xs text-fg-muted">
+            <RichText text={t("connectors.discord.intro")} />
+          </p>
+          <a
+            className="text-xs font-medium text-fg underline underline-offset-2"
+            href="https://discord.com/developers/applications"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("connectors.discord.consoleLink")}
+          </a>
+        </div>
+        <form
+          className="mt-3 grid gap-3 rounded-md border border-border bg-surface-elevated p-3"
+          onSubmit={(e) => void saveDiscordConnection(e)}
+        >
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.discord.botToken")}
+            <Input
+              className="mt-1 font-mono text-xs"
+              type="password"
+              value={discordBotToken}
+              onChange={(e) => setDiscordBotToken(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label className="text-xs font-medium text-fg">
+            {t("connectors.discord.label")}
+            <Input
+              className="mt-1"
+              value={discordLabel}
+              onChange={(e) => setDiscordLabel(e.target.value)}
+              placeholder={t("connectors.discord.labelPlaceholder")}
+            />
+          </label>
+          <Button
+            type="submit"
+            className="w-fit border-primary bg-primary text-primary-fg hover:opacity-90"
+            disabled={discordSaving}
+          >
+            {discordSaving ? t("connectors.discord.saving") : t("connectors.discord.save")}
           </Button>
         </form>
       </div>

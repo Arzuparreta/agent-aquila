@@ -102,9 +102,21 @@ from app.services.connectors.gcal_client import CalendarAPIError, GoogleCalendar
 from app.services.connectors.gmail_client import GmailAPIError, GmailClient
 from app.services.connectors.drive_client import DriveAPIError, GoogleDriveClient
 from app.services.connectors.google_people_client import GooglePeopleAPIError, GooglePeopleClient
+from app.services.connectors.google_docs_client import GoogleDocsAPIError, GoogleDocsClient
+from app.services.connectors.google_sheets_client import GoogleSheetsAPIError, GoogleSheetsClient
 from app.services.connectors.google_tasks_client import GoogleTasksAPIError, GoogleTasksClient
 from app.services.connectors.graph_client import GraphAPIError, GraphClient
 from app.services.connectors.icloud_caldav_client import ICloudCalDAVError, ICloudCalDAVClient
+from app.services.connectors.icloud_contacts_client import (
+    ICloudContactsError,
+    list_contacts as icloud_carddav_list_contacts,
+    search_contacts as icloud_carddav_search_contacts,
+)
+from app.services.connectors.icloud_pyicloud_extras import (
+    list_notes as icloud_pyicloud_list_notes,
+    list_photos as icloud_pyicloud_list_photos,
+    list_reminders as icloud_pyicloud_list_reminders,
+)
 from app.services.connectors.icloud_drive_client import (
     DEFAULT_DOWNLOAD_MAX_BYTES,
     ICloudDriveError,
@@ -114,6 +126,11 @@ from app.services.connectors.icloud_drive_client import (
 from app.services.connectors.whatsapp_client import WhatsAppAPIError, WhatsAppClient
 from app.services.connectors.youtube_client import YoutubeAPIError, YoutubeClient
 from app.services.connectors.github_client import GitHubAPIError, GitHubClient
+from app.services.connectors.linear_client import LinearAPIError, LinearClient
+from app.services.connectors.notion_client import NotionAPIError, NotionClient
+from app.services.connectors.discord_bot_client import DiscordAPIError, DiscordBotClient
+from app.services.connectors.slack_client import SlackAPIError, SlackClient
+from app.services.connectors.telegram_bot_client import TelegramAPIError, TelegramBotClient
 from app.services.gmail_metadata_cache import (
     get_message_metadata,
     get_thread as gmail_cache_get_thread,
@@ -125,8 +142,13 @@ from app.services.gmail_metadata_cache import (
 from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
 from app.services.connector_setup_service import (
+    submit_discord_bot_credentials as submit_discord_bot_credentials_service,
     submit_github_credentials as submit_github_credentials_service,
     submit_icloud_caldav_credentials as submit_icloud_caldav_credentials_service,
+    submit_linear_credentials as submit_linear_credentials_service,
+    submit_notion_credentials as submit_notion_credentials_service,
+    submit_slack_credentials as submit_slack_credentials_service,
+    submit_telegram_bot_credentials as submit_telegram_bot_credentials_service,
     submit_whatsapp_credentials as submit_whatsapp_credentials_service,
 )
 from app.services.device_ingest_service import DeviceIngestService
@@ -153,9 +175,16 @@ _TEAMS_PROVIDERS = ("graph_teams", "ms_teams")
 _YOUTUBE_PROVIDERS = ("google_youtube",)
 _TASKS_PROVIDERS = ("google_tasks",)
 _PEOPLE_PROVIDERS = ("google_people",)
+_SHEETS_PROVIDERS = ("google_sheets",)
+_DOCS_PROVIDERS = ("google_docs",)
 _WHATSAPP_PROVIDERS = ("whatsapp_business",)
 _ICLOUD_CAL_PROVIDERS = ("icloud_caldav",)
 _GITHUB_PROVIDERS = ("github",)
+_SLACK_PROVIDERS = ("slack_bot",)
+_LINEAR_PROVIDERS = ("linear",)
+_NOTION_PROVIDERS = ("notion",)
+_TELEGRAM_PROVIDERS = ("telegram_bot",)
+_DISCORD_PROVIDERS = ("discord_bot",)
 
 _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
 
@@ -368,6 +397,16 @@ async def _people_client(db: AsyncSession, row: ConnectorConnection) -> GooglePe
     return GooglePeopleClient(token)
 
 
+async def _sheets_client(db: AsyncSession, row: ConnectorConnection) -> GoogleSheetsClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GoogleSheetsClient(token)
+
+
+async def _docs_client(db: AsyncSession, row: ConnectorConnection) -> GoogleDocsClient:
+    token = await TokenManager.get_valid_access_token(db, row)
+    return GoogleDocsClient(token)
+
+
 def _icloud_app_password_creds(row: ConnectorConnection) -> tuple[str, str, bool]:
     creds = ConnectorService.decrypt_credentials(row)
     user = str(creds.get("username") or creds.get("apple_id") or "").strip()
@@ -389,6 +428,34 @@ async def _graph_client(db: AsyncSession, row: ConnectorConnection) -> GraphClie
 async def _github_client(db: AsyncSession, row: ConnectorConnection) -> GitHubClient:
     token = await TokenManager.get_valid_access_token(db, row)
     return GitHubClient(token)
+
+
+async def _slack_api_client(db: AsyncSession, row: ConnectorConnection) -> SlackClient:
+    token, creds, _p = await TokenManager.get_valid_creds(db, row)
+    bot = str(creds.get("bot_token") or token or "").strip()
+    return SlackClient(bot)
+
+
+async def _linear_client(db: AsyncSession, row: ConnectorConnection) -> LinearClient:
+    key = await TokenManager.get_valid_access_token(db, row)
+    return LinearClient(key)
+
+
+async def _notion_client(db: AsyncSession, row: ConnectorConnection) -> NotionClient:
+    key = await TokenManager.get_valid_access_token(db, row)
+    return NotionClient(key)
+
+
+async def _telegram_client(db: AsyncSession, row: ConnectorConnection) -> TelegramBotClient:
+    token, creds, _p = await TokenManager.get_valid_creds(db, row)
+    bot = str(creds.get("bot_token") or token or "").strip()
+    return TelegramBotClient(bot)
+
+
+async def _discord_client(db: AsyncSession, row: ConnectorConnection) -> DiscordBotClient:
+    token, creds, _p = await TokenManager.get_valid_creds(db, row)
+    bot = str(creds.get("bot_token") or token or "").strip()
+    return DiscordBotClient(bot)
 
 
 class AgentService:
@@ -782,6 +849,38 @@ class AgentService:
             str(args.get("role") or "reader"),
         )
 
+    @staticmethod
+    async def _tool_sheets_read_range(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _SHEETS_PROVIDERS, label="Google Sheets")
+        client = await _sheets_client(db, row)
+        return await client.get_values(str(args["spreadsheet_id"]), str(args["range"]))
+
+    @staticmethod
+    async def _tool_sheets_append_row(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _SHEETS_PROVIDERS, label="Google Sheets")
+        client = await _sheets_client(db, row)
+        raw_vals = args.get("values")
+        if not isinstance(raw_vals, list):
+            return {"error": "values must be an array"}
+        row_vals: list[Any] = list(raw_vals)
+        return await client.append_row(
+            str(args["spreadsheet_id"]),
+            str(args["range"]),
+            row_vals,
+        )
+
+    @staticmethod
+    async def _tool_docs_get_document(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DOCS_PROVIDERS, label="Google Docs")
+        client = await _docs_client(db, row)
+        return await client.get_document(str(args["document_id"]))
+
     # ------------------------------------------------------------------
     # YouTube, Tasks, People, iCloud CalDAV
     # ------------------------------------------------------------------
@@ -978,6 +1077,116 @@ class AgentService:
         return {"issues": items}
 
     @staticmethod
+    async def _tool_slack_list_conversations(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _SLACK_PROVIDERS, label="Slack")
+        client = await _slack_api_client(db, row)
+        return await client.conversations_list(
+            types=str(args.get("types") or "public_channel,private_channel"),
+            cursor=args.get("cursor"),
+            limit=int(args.get("limit") or 200),
+        )
+
+    @staticmethod
+    async def _tool_slack_get_conversation_history(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _SLACK_PROVIDERS, label="Slack")
+        client = await _slack_api_client(db, row)
+        return await client.conversations_history(
+            str(args["channel_id"]),
+            limit=int(args.get("limit") or 50),
+            cursor=args.get("cursor"),
+        )
+
+    @staticmethod
+    async def _tool_linear_list_issues(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _LINEAR_PROVIDERS, label="Linear")
+        client = await _linear_client(db, row)
+        data = await client.list_issues(first=int(args.get("first") or 25))
+        return data
+
+    @staticmethod
+    async def _tool_linear_get_issue(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _LINEAR_PROVIDERS, label="Linear")
+        client = await _linear_client(db, row)
+        return await client.get_issue(str(args["issue_id"]))
+
+    @staticmethod
+    async def _tool_notion_search(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _NOTION_PROVIDERS, label="Notion")
+        client = await _notion_client(db, row)
+        return await client.search(
+            str(args.get("query") or ""),
+            page_size=int(args.get("page_size") or 20),
+        )
+
+    @staticmethod
+    async def _tool_notion_get_page(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _NOTION_PROVIDERS, label="Notion")
+        client = await _notion_client(db, row)
+        return await client.get_page(str(args["page_id"]))
+
+    @staticmethod
+    async def _tool_telegram_get_me(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TELEGRAM_PROVIDERS, label="Telegram")
+        client = await _telegram_client(db, row)
+        return await client.get_me()
+
+    @staticmethod
+    async def _tool_telegram_get_updates(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _TELEGRAM_PROVIDERS, label="Telegram")
+        client = await _telegram_client(db, row)
+        off = args.get("offset")
+        return await client.get_updates(
+            offset=int(off) if off is not None else None,
+            limit=int(args.get("limit") or 40),
+        )
+
+    @staticmethod
+    async def _tool_discord_list_guilds(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DISCORD_PROVIDERS, label="Discord")
+        client = await _discord_client(db, row)
+        guilds = await client.list_guilds()
+        return {"guilds": guilds}
+
+    @staticmethod
+    async def _tool_discord_list_guild_channels(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DISCORD_PROVIDERS, label="Discord")
+        client = await _discord_client(db, row)
+        ch = await client.list_guild_channels(str(args["guild_id"]))
+        return {"channels": ch}
+
+    @staticmethod
+    async def _tool_discord_get_channel_messages(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _DISCORD_PROVIDERS, label="Discord")
+        client = await _discord_client(db, row)
+        msgs = await client.list_messages(
+            str(args["channel_id"]),
+            limit=int(args.get("limit") or 25),
+        )
+        return {"messages": msgs}
+
+    @staticmethod
     async def _tool_device_list_ingested_files(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1084,6 +1293,102 @@ class AgentService:
             return {"error": exc.detail, "status_code": exc.status_code}
 
     @staticmethod
+    async def _tool_icloud_contacts_list(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        try:
+            return await icloud_carddav_list_contacts(
+                uid,
+                pw,
+                china_mainland=china,
+                max_results=int(args.get("max_results") or 200),
+            )
+        except ICloudContactsError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
+    async def _tool_icloud_contacts_search(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        try:
+            return await icloud_carddav_search_contacts(
+                uid,
+                pw,
+                str(args.get("query") or ""),
+                china_mainland=china,
+                max_results=int(args.get("max_results") or 50),
+            )
+        except ICloudContactsError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
+    async def _tool_icloud_reminders_list(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        try:
+            return await icloud_pyicloud_list_reminders(
+                uid,
+                pw,
+                connection_id=row.id,
+                china_mainland=china,
+                max_lists=int(args.get("max_lists") or 20),
+                max_reminders_per_list=int(args.get("max_reminders_per_list") or 50),
+            )
+        except ICloudDriveError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
+    async def _tool_icloud_notes_list(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        try:
+            return await icloud_pyicloud_list_notes(
+                uid,
+                pw,
+                connection_id=row.id,
+                china_mainland=china,
+                limit=int(args.get("limit") or 40),
+            )
+        except ICloudDriveError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
+    async def _tool_icloud_photos_list(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        row = await _resolve_connection(db, user, args, _ICLOUD_CAL_PROVIDERS, label="iCloud")
+        uid, pw, china = _icloud_app_password_creds(row)
+        if not uid or not pw.strip():
+            return {"error": "missing Apple ID or password on this iCloud connection"}
+        try:
+            return await icloud_pyicloud_list_photos(
+                uid,
+                pw,
+                connection_id=row.id,
+                china_mainland=china,
+                max_albums=int(args.get("max_albums") or 8),
+                max_photos_per_album=int(args.get("max_photos_per_album") or 25),
+            )
+        except ICloudDriveError as exc:
+            return {"error": exc.detail, "status_code": exc.status_code}
+
+    @staticmethod
     async def _tool_submit_whatsapp_credentials(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1105,6 +1410,61 @@ class AgentService:
             user,
             setup_token=str(args.get("setup_token") or ""),
             access_token=str(args.get("access_token") or ""),
+        )
+
+    @staticmethod
+    async def _tool_submit_slack_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_slack_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            bot_token=str(args.get("bot_token") or ""),
+        )
+
+    @staticmethod
+    async def _tool_submit_linear_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_linear_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            api_key=str(args.get("api_key") or ""),
+        )
+
+    @staticmethod
+    async def _tool_submit_notion_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_notion_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            api_key=str(args.get("api_key") or ""),
+        )
+
+    @staticmethod
+    async def _tool_submit_telegram_bot_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_telegram_bot_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            bot_token=str(args.get("bot_token") or ""),
+        )
+
+    @staticmethod
+    async def _tool_submit_discord_bot_credentials(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await submit_discord_bot_credentials_service(
+            db,
+            user,
+            setup_token=str(args.get("setup_token") or ""),
+            bot_token=str(args.get("bot_token") or ""),
         )
 
     @staticmethod
@@ -1622,6 +1982,106 @@ class AgentService:
             idempotency_key=AgentService._idem(args),
         )
 
+    @staticmethod
+    async def _tool_propose_slack_post_message(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        channel = str(args.get("channel_id") or "").strip()
+        if not channel:
+            return {"error": "channel_id is required (from slack_list_conversations)"}
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return {"error": "text is required"}
+        payload: dict[str, Any] = {
+            "connection_id": int(args["connection_id"]),
+            "channel_id": channel,
+            "text": text[:4000],
+        }
+        if args.get("thread_ts"):
+            payload["thread_ts"] = str(args["thread_ts"]).strip()
+        return await AgentService._insert_proposal(
+            db,
+            user,
+            run_id,
+            "slack_post",
+            payload,
+            f"Slack post → {channel[:40]}",
+            idempotency_key=AgentService._idem(args),
+        )
+
+    @staticmethod
+    async def _tool_propose_linear_create_comment(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        iid = str(args.get("issue_id") or "").strip()
+        if not iid:
+            return {"error": "issue_id is required"}
+        body = str(args.get("body") or "").strip()
+        if not body:
+            return {"error": "body is required"}
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "issue_id": iid,
+            "body": body[:20000],
+        }
+        return await AgentService._insert_proposal(
+            db,
+            user,
+            run_id,
+            "linear_comment",
+            payload,
+            f"Linear comment → {iid[:40]}",
+            idempotency_key=AgentService._idem(args),
+        )
+
+    @staticmethod
+    async def _tool_propose_telegram_send_message(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return {"error": "text is required"}
+        cid = args.get("chat_id")
+        if cid is None:
+            return {"error": "chat_id is required"}
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "chat_id": cid,
+            "text": text[:4096],
+        }
+        return await AgentService._insert_proposal(
+            db,
+            user,
+            run_id,
+            "telegram_message",
+            payload,
+            f"Telegram → {str(cid)[:40]}",
+            idempotency_key=AgentService._idem(args),
+        )
+
+    @staticmethod
+    async def _tool_propose_discord_post_message(
+        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        channel = str(args.get("channel_id") or "").strip()
+        content = str(args.get("content") or "").strip()
+        if not channel or not content:
+            return {"error": "channel_id and content are required"}
+        payload = {
+            "connection_id": int(args["connection_id"]),
+            "channel_id": channel,
+            "content": content[:2000],
+        }
+        return await AgentService._insert_proposal(
+            db,
+            user,
+            run_id,
+            "discord_message",
+            payload,
+            f"Discord → {channel[:40]}",
+            idempotency_key=AgentService._idem(args),
+        )
+
     # ------------------------------------------------------------------
     # Tool dispatch — single source of truth for routing model-issued
     # tool calls to the matching internal handler.
@@ -1690,8 +2150,15 @@ class AgentService:
             WhatsAppAPIError,
             GoogleTasksAPIError,
             GooglePeopleAPIError,
+            GoogleSheetsAPIError,
+            GoogleDocsAPIError,
             ICloudCalDAVError,
             GitHubAPIError,
+            SlackAPIError,
+            LinearAPIError,
+            NotionAPIError,
+            TelegramAPIError,
+            DiscordAPIError,
         ) as exc:
             return ({"error": f"upstream {exc.status_code}: {exc.detail[:300]}"}, None)
         except Exception as exc:  # noqa: BLE001 — surface tool errors to the model

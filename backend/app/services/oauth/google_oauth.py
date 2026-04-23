@@ -52,6 +52,14 @@ SCOPES_TASKS = [
 SCOPES_PEOPLE = [
     "https://www.googleapis.com/auth/contacts.readonly",
 ]
+# Sheets — read + append (narrow write surface).
+SCOPES_SHEETS = [
+    "https://www.googleapis.com/auth/spreadsheets",
+]
+# Docs — read structured content only.
+SCOPES_DOCS = [
+    "https://www.googleapis.com/auth/documents.readonly",
+]
 SCOPES_IDENTITY = ["openid", "email", "profile"]
 
 
@@ -114,7 +122,7 @@ def scopes_for_intent(intent: str) -> list[str]:
     """Translate an `intent` string from the UI into the concrete scope list."""
     parts = {p.strip().lower() for p in (intent or "all").split(",") if p.strip()}
     if "all" in parts or not parts:
-        parts = {"gmail", "calendar", "drive", "youtube", "tasks", "people"}
+        parts = {"gmail", "calendar", "drive", "youtube", "tasks", "people", "sheets", "docs"}
     selected: list[str] = list(SCOPES_IDENTITY)
     if "gmail" in parts:
         selected += SCOPES_GMAIL
@@ -128,6 +136,10 @@ def scopes_for_intent(intent: str) -> list[str]:
         selected += SCOPES_TASKS
     if "people" in parts:
         selected += SCOPES_PEOPLE
+    if "sheets" in parts:
+        selected += SCOPES_SHEETS
+    if "docs" in parts:
+        selected += SCOPES_DOCS
     # Deduplicate while preserving order.
     seen: set[str] = set()
     out: list[str] = []
@@ -154,6 +166,10 @@ def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
         out.append("google_tasks")
     if "/auth/contacts" in joined:
         out.append("google_people")
+    if "/auth/spreadsheets" in joined:
+        out.append("google_sheets")
+    if "/auth/documents" in joined:
+        out.append("google_docs")
     return out
 
 

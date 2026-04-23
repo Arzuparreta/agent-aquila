@@ -8,7 +8,11 @@ OAuthCredentialSource = Literal["database", "environment", "none"]
 
 
 class OAuthStartRequest(BaseModel):
-    intent: str = Field(default="all", max_length=64, description="`gmail`, `calendar`, `drive`, `all`, or comma list")
+    intent: str = Field(
+        default="all",
+        max_length=64,
+        description="`gmail`, `calendar`, `drive`, `youtube`, `tasks`, `people`, `sheets`, `docs`, `all`, or comma list",
+    )
     redirect_after: str | None = Field(default=None, max_length=500)
 
 

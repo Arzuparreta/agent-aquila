@@ -30,6 +30,10 @@ def test_proposal_tool_set_covers_outbound_kinds() -> None:
         "propose_email_reply",
         "propose_whatsapp_send",
         "propose_youtube_upload",
+        "propose_slack_post_message",
+        "propose_linear_create_comment",
+        "propose_telegram_send_message",
+        "propose_discord_post_message",
     }
 
 

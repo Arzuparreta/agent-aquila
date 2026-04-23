@@ -22,7 +22,13 @@ from app.services.connector_dry_run_service import ACTION_TO_KIND as _ACTION_TO_
 from app.services.connector_dry_run_service import ConnectorDryRunService
 from app.services.connector_service import ConnectorService
 from app.services.connectors.github_client import GitHubAPIError, GitHubClient
+from app.services.connectors.discord_bot_client import DiscordAPIError, DiscordBotClient
+from app.services.connectors.linear_client import LinearAPIError, LinearClient
+from app.services.connectors.notion_client import NotionAPIError, NotionClient
+from app.services.connectors.slack_client import SlackAPIError, SlackClient
+from app.services.connectors.telegram_bot_client import TelegramAPIError, TelegramBotClient
 from app.services.connectors.icloud_caldav_client import ICloudCalDAVClient, ICloudCalDAVError
+from app.services.connectors.icloud_contacts_client import ICloudContactsError, verify_contacts_sync
 from app.services.connectors.icloud_drive_client import ICloudDriveError, verify_drive_sync
 from app.services.connectors.whatsapp_client import (
     DEFAULT_GRAPH_VERSION,
@@ -204,18 +210,35 @@ async def connector_health(
         except ICloudDriveError as exc:
             drive_err = exc.detail[:500]
 
+        contacts_err: str | None = None
+        contacts_sample = 0
+        try:
+            cinfo = await asyncio.to_thread(
+                verify_contacts_sync,
+                uid,
+                pw,
+                connection_id=row.id,
+                china_mainland=china,
+            )
+            contacts_sample = int(cinfo.get("sample_contact_count") or 0)
+        except ICloudContactsError as exc:
+            contacts_err = exc.detail[:500]
+
         account_bits = [
             uid,
             f"{n_cal} calendars" if not cal_err else "Calendar: error",
             f"Drive: {drive_root_n} items at root" if not drive_err else "Drive: error",
+            f"Contacts: sampled {contacts_sample}" if not contacts_err else "Contacts: error",
         ]
         account_summary = " · ".join(account_bits)
-        if cal_err or drive_err:
+        if cal_err or drive_err or contacts_err:
             err_parts = []
             if cal_err:
                 err_parts.append(f"CalDAV: {cal_err}")
             if drive_err:
                 err_parts.append(f"iCloud Drive (PyiCloud): {drive_err}")
+            if contacts_err:
+                err_parts.append(f"CardDAV contacts: {contacts_err}")
             return ConnectorHealthResponse(
                 ok=False,
                 provider=row.provider,
@@ -239,6 +262,100 @@ async def connector_health(
             login = str(user_payload.get("login") or "")
             return ConnectorHealthResponse(ok=True, provider=row.provider, account=login or None)
         except GitHubAPIError as exc:
+            return ConnectorHealthResponse(ok=False, provider=row.provider, error=exc.detail[:500])
+
+    if row.provider == "slack_bot":
+        creds = ConnectorService.decrypt_credentials(row)
+        tok = str(creds.get("bot_token") or creds.get("access_token") or "").strip()
+        if not tok:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Missing bot_token in stored credentials.",
+            )
+        try:
+            client = SlackClient(tok)
+            info = await client.auth_test()
+            team = str(info.get("team") or info.get("url") or "")
+            who = str(info.get("user") or info.get("user_id") or "")
+            label = " · ".join(p for p in (team, who) if p) or "Slack"
+            return ConnectorHealthResponse(ok=True, provider=row.provider, account=label)
+        except SlackAPIError as exc:
+            return ConnectorHealthResponse(ok=False, provider=row.provider, error=exc.detail[:500])
+
+    if row.provider == "linear":
+        creds = ConnectorService.decrypt_credentials(row)
+        key = str(creds.get("api_key") or creds.get("access_token") or "").strip()
+        if not key:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Missing api_key in stored credentials.",
+            )
+        try:
+            client = LinearClient(key)
+            data = await client._post("query { viewer { id name } }", {})
+            viewer = data.get("viewer") or {}
+            label = str(viewer.get("name") or viewer.get("id") or "Linear")
+            return ConnectorHealthResponse(ok=True, provider=row.provider, account=label)
+        except LinearAPIError as exc:
+            return ConnectorHealthResponse(ok=False, provider=row.provider, error=exc.detail[:500])
+
+    if row.provider == "notion":
+        creds = ConnectorService.decrypt_credentials(row)
+        key = str(creds.get("api_key") or "").strip()
+        if not key:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Missing api_key in stored credentials.",
+            )
+        try:
+            client = NotionClient(key)
+            me = await client._request("GET", "/users/me")
+            acc = str((me or {}).get("name") or (me or {}).get("id") or "Notion")
+            return ConnectorHealthResponse(ok=True, provider=row.provider, account=acc)
+        except NotionAPIError as exc:
+            return ConnectorHealthResponse(ok=False, provider=row.provider, error=exc.detail[:500])
+
+    if row.provider == "telegram_bot":
+        creds = ConnectorService.decrypt_credentials(row)
+        tok = str(creds.get("bot_token") or "").strip()
+        if not tok:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Missing bot_token in stored credentials.",
+            )
+        try:
+            client = TelegramBotClient(tok)
+            data = await client.get_me()
+            result = data.get("result") if isinstance(data, dict) else None
+            uname = ""
+            if isinstance(result, dict):
+                uname = str(result.get("username") or result.get("first_name") or result.get("id") or "")
+            label = f"@{uname}" if uname and not uname.startswith("@") else uname or "Telegram"
+            return ConnectorHealthResponse(ok=True, provider=row.provider, account=label)
+        except TelegramAPIError as exc:
+            return ConnectorHealthResponse(ok=False, provider=row.provider, error=exc.detail[:500])
+
+    if row.provider == "discord_bot":
+        creds = ConnectorService.decrypt_credentials(row)
+        tok = str(creds.get("bot_token") or "").strip()
+        if not tok:
+            return ConnectorHealthResponse(
+                ok=False,
+                provider=row.provider,
+                error="Missing bot_token in stored credentials.",
+            )
+        try:
+            client = DiscordBotClient(tok)
+            me = await client.get_me()
+            if not isinstance(me, dict):
+                return ConnectorHealthResponse(ok=True, provider=row.provider, account="Discord")
+            handle = str(me.get("username") or me.get("global_name") or me.get("id") or "")
+            return ConnectorHealthResponse(ok=True, provider=row.provider, account=handle or None)
+        except DiscordAPIError as exc:
             return ConnectorHealthResponse(ok=False, provider=row.provider, error=exc.detail[:500])
 
     try:

@@ -1,8 +1,8 @@
 """Apply approved proposals.
 
 Handles ``email_send`` / ``email_reply`` via ``email_adapters.send_email``,
-``whatsapp_send`` via Meta WhatsApp Cloud API, and ``youtube_upload`` via
-YouTube Data API resumable upload.
+``whatsapp_send`` via Meta WhatsApp Cloud API, ``youtube_upload`` via
+YouTube Data API resumable upload, and ``slack_post`` via Slack ``chat.postMessage``.
 """
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ from app.services.audit_service import create_audit_log
 from app.services.connector_service import ConnectorService
 from app.services.connectors.email_adapters import send_email as email_send
 from app.services.connectors.whatsapp_client import WhatsAppClient
+from app.services.connectors.linear_client import LinearAPIError, LinearClient
+from app.services.connectors.discord_bot_client import DiscordAPIError, DiscordBotClient
+from app.services.connectors.linear_client import LinearAPIError, LinearClient
+from app.services.connectors.slack_client import SlackAPIError, SlackClient
+from app.services.connectors.telegram_bot_client import TelegramAPIError, TelegramBotClient
 from app.services.connectors.youtube_client import YoutubeClient
 from app.services.oauth import TokenManager
 
@@ -42,6 +47,18 @@ class PendingExecutionService:
             return
         if kind == "youtube_upload":
             await PendingExecutionService._exec_youtube_upload(db, user, payload)
+            return
+        if kind == "slack_post":
+            await PendingExecutionService._exec_slack_post(db, user, payload)
+            return
+        if kind == "linear_comment":
+            await PendingExecutionService._exec_linear_comment(db, user, payload)
+            return
+        if kind == "telegram_message":
+            await PendingExecutionService._exec_telegram_message(db, user, payload)
+            return
+        if kind == "discord_message":
+            await PendingExecutionService._exec_discord_message(db, user, payload)
             return
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -175,6 +192,155 @@ class PendingExecutionService:
             user.id,
         )
 
+    @staticmethod
+    async def _exec_slack_post(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        if row.provider != "slack_bot":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="connection_id is not a Slack bot (slack_bot) connection",
+            )
+        token, creds, _p = await TokenManager.get_valid_creds(db, row)
+        bot = str(creds.get("bot_token") or token or "").strip()
+        if not bot:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing bot_token on Slack connection",
+            )
+        channel = str(payload.get("channel_id") or "").strip()
+        text = str(payload.get("text") or "")
+        if not channel or not text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="channel_id and text are required",
+            )
+        thread_ts = payload.get("thread_ts")
+        client = SlackClient(bot)
+        try:
+            result = await client.chat_post_message(
+                channel,
+                text,
+                thread_ts=str(thread_ts).strip() if thread_ts else None,
+            )
+        except SlackAPIError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=exc.detail[:500],
+            ) from exc
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "slack_post",
+            {"channel": channel, "ts": result.get("ts")},
+            user.id,
+        )
+
+    @staticmethod
+    async def _exec_linear_comment(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        if row.provider != "linear":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="connection_id is not a Linear connection",
+            )
+        token = await TokenManager.get_valid_access_token(db, row)
+        issue_id = str(payload.get("issue_id") or "").strip()
+        body = str(payload.get("body") or "")
+        if not issue_id or not body.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="issue_id and body are required",
+            )
+        client = LinearClient(token)
+        try:
+            result = await client.create_comment(issue_id, body)
+        except LinearAPIError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=exc.detail[:500],
+            ) from exc
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "linear_comment",
+            {"issue_id": issue_id, "result_keys": list(result.keys()) if isinstance(result, dict) else []},
+            user.id,
+        )
+
+    @staticmethod
+    async def _exec_telegram_message(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        if row.provider != "telegram_bot":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="connection_id is not a telegram_bot connection",
+            )
+        _t, creds, _p = await TokenManager.get_valid_creds(db, row)
+        tok = str(creds.get("bot_token") or _t or "").strip()
+        chat_id = payload.get("chat_id")
+        text = str(payload.get("text") or "")
+        if chat_id is None or not str(text).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="chat_id and text are required",
+            )
+        client = TelegramBotClient(tok)
+        try:
+            result = await client.send_message(chat_id, text)
+        except TelegramAPIError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=exc.detail[:500],
+            ) from exc
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "telegram_message",
+            {"chat_id": str(chat_id), "message_id": result.get("result", {}).get("message_id")},
+            user.id,
+        )
+
+    @staticmethod
+    async def _exec_discord_message(db: AsyncSession, user: User, payload: dict[str, Any]) -> None:
+        conn_id = int(payload["connection_id"])
+        row = await ConnectorService.require_connection(db, user, conn_id)
+        if row.provider != "discord_bot":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="connection_id is not a discord_bot connection",
+            )
+        _t, creds, _p = await TokenManager.get_valid_creds(db, row)
+        tok = str(creds.get("bot_token") or _t or "").strip()
+        channel_id = str(payload.get("channel_id") or "").strip()
+        content = str(payload.get("content") or payload.get("text") or "")
+        if not channel_id or not content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="channel_id and content are required",
+            )
+        client = DiscordBotClient(tok)
+        try:
+            result = await client.create_message(channel_id, content)
+        except DiscordAPIError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=exc.detail[:500],
+            ) from exc
+        await create_audit_log(
+            db,
+            "connector_action",
+            conn_id,
+            "discord_message",
+            {"channel_id": channel_id, "id": result.get("id")},
+            user.id,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Lightweight previews used by the chat UI to render the approval card.
@@ -231,6 +397,39 @@ def build_youtube_upload_preview(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_telegram_message_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "action": "telegram_message",
+        "chat_id": str(payload.get("chat_id") or ""),
+        "text_preview": (str(payload.get("text") or ""))[:2000],
+    }
+
+
+def build_discord_message_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "action": "discord_message",
+        "channel_id": str(payload.get("channel_id") or ""),
+        "content_preview": (str(payload.get("content") or payload.get("text") or ""))[:2000],
+    }
+
+
+def build_linear_comment_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "action": "linear_comment",
+        "issue_id": str(payload.get("issue_id") or ""),
+        "body_preview": (str(payload.get("body") or ""))[:2000],
+    }
+
+
+def build_slack_post_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "action": "slack_post",
+        "channel_id": str(payload.get("channel_id") or ""),
+        "text_preview": (str(payload.get("text") or ""))[:2000],
+        "thread_ts": payload.get("thread_ts"),
+    }
+
+
 def preview_for_proposal_kind(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     if kind in ("email_send", "email_reply"):
         return build_email_preview(payload)
@@ -238,4 +437,12 @@ def preview_for_proposal_kind(kind: str, payload: dict[str, Any]) -> dict[str, A
         return build_whatsapp_preview(payload)
     if kind == "youtube_upload":
         return build_youtube_upload_preview(payload)
+    if kind == "slack_post":
+        return build_slack_post_preview(payload)
+    if kind == "linear_comment":
+        return build_linear_comment_preview(payload)
+    if kind == "telegram_message":
+        return build_telegram_message_preview(payload)
+    if kind == "discord_message":
+        return build_discord_message_preview(payload)
     return {"action": kind, "payload": payload}
