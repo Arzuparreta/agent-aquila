@@ -15,4 +15,3 @@ dist/
 coverage/
 *.egg-info/
 *.tsbuildinfo
-backend/data/users/*/memory_workspace/
