@@ -2646,6 +2646,8 @@ class AgentService:
             final_answer_text: str | None = None
             max_steps = eff_max
             overflow_retried = False
+            empty_gmail_search_streak = 0
+            empty_gmail_queries: list[str] = []
             for _ in range(max_steps):
                 parse_errors: list[str] = []
                 llm_span = new_span_id()
@@ -2799,6 +2801,7 @@ class AgentService:
                     conversation.append({"role": "assistant", "content": response.content or ""})
 
                 tool_result_dicts: list[dict[str, Any]] = []
+                stop_due_to_repeated_empty_gmail_search = False
                 for call in response.tool_calls:
                     tool_name = call.name or ""
                     args = call.arguments if isinstance(call.arguments, dict) else {}
@@ -2846,6 +2849,34 @@ class AgentService:
                         )
                     )
                     tool_result_dicts.append(result if isinstance(result, dict) else {"result": result})
+                    if tool_name == "gmail_list_messages" and isinstance(result, dict):
+                        result_size = result.get("resultSizeEstimate")
+                        msgs = result.get("messages")
+                        empty_result = False
+                        if isinstance(result_size, int):
+                            empty_result = result_size == 0
+                        elif isinstance(msgs, list):
+                            empty_result = len(msgs) == 0
+                        if empty_result:
+                            empty_gmail_search_streak += 1
+                            q = str(args.get("q") or "").strip()
+                            if q and q not in empty_gmail_queries:
+                                empty_gmail_queries.append(q)
+                        else:
+                            empty_gmail_search_streak = 0
+                            empty_gmail_queries.clear()
+                        if empty_gmail_search_streak >= 4 and final_answer_text is None:
+                            tried = ", ".join(f"'{q}'" for q in empty_gmail_queries[:4]) or "several queries"
+                            run.assistant_reply = (
+                                "No encuentro correos coincidentes en Gmail tras varias busquedas "
+                                f"({tried}). Para continuar sin fallar: dime 1-2 remitentes, un rango "
+                                "de fechas, o un fragmento exacto del asunto/cuerpo y lo intento de nuevo."
+                            )
+                            run.status = "completed"
+                            stop_due_to_repeated_empty_gmail_search = True
+                    elif tool_name != FINAL_ANSWER_TOOL_NAME:
+                        empty_gmail_search_streak = 0
+                        empty_gmail_queries.clear()
                     if effective == "native":
                         tool_payload = json.dumps(result, ensure_ascii=False, default=str)
                         conversation.append(
@@ -2876,6 +2907,11 @@ class AgentService:
                             "proposal": bool(prop),
                         },
                     )
+                    if stop_due_to_repeated_empty_gmail_search:
+                        break
+
+                if stop_due_to_repeated_empty_gmail_search:
+                    break
 
                 executed_non_final = any(
                     (c.name or "") != FINAL_ANSWER_TOOL_NAME for c in response.tool_calls
