@@ -23,7 +23,7 @@
 
 Your self-hosted personal operations assistant: **broad connector surface**, **context-first** automated wakes, and a **lean harness** (scoped tool palettes and user context snapshot) so you are not paying the full tool catalogue on every background ping.
 
-Agent Aquila helps you manage mail, calendar, files, and more across **Gmail, Calendar, Drive, Outlook, Teams**, and many other linked providers while keeping control where it belongs: **your accounts, your keys, your machine**. Multi-channel is a first-class goal (web UI plus gateway and channel adapters). See [`docs/VISION.md`](docs/VISION.md) for how this compares to the OpenClaw *shape* and what Aquila optimizes for.
+Agent Aquila helps you manage mail, calendar, files, and more across **Gmail, Calendar, Drive, Outlook, Teams**, and many other linked providers while keeping control where it belongs: **your accounts, your keys, your machine**. Multi-channel is a first-class goal (web UI plus gateway and channel adapters). See [`docs/VISION.md`](docs/VISION.md) for how this compares to the harnesses like openclaw and what Aquila optimizes for.
 
 Persistent **memory** and reusable **skills** (markdown playbooks in `backend/skills/`) keep behavior consistent across sessions. An optional heartbeat scheduler can wake the agent on a cadence; by default it does **not** scan Gmail (`AGENT_HEARTBEAT_CHECK_GMAIL=false`) to avoid background quota burn (details in [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md)).
 
