@@ -46,6 +46,7 @@ services:
       POSTGRES_PORT: "5432"
       DATABASE_URL: ""
       REDIS_URL: redis://redis:6379/0
+      AQUILA_USER_DATA_DIR: /app/.local_data
     depends_on:
       db:
         condition: service_healthy
@@ -75,6 +76,7 @@ services:
       POSTGRES_PORT: "5432"
       DATABASE_URL: ""
       REDIS_URL: redis://redis:6379/0
+      AQUILA_USER_DATA_DIR: /app/.local_data
     depends_on:
       backend:
         condition: service_started

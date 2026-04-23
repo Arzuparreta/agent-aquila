@@ -6,6 +6,7 @@ frontend/next-env.d.ts
 __pycache__/
 *.pyc
 backend/.secrets/
+backend/.local_data/
 .pytest_cache/
 .mypy_cache/
 .DS_Store
