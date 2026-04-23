@@ -100,3 +100,24 @@ You can tune this policy in [`backend/app/services/agent_tools.py`](backend/app/
 - [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md) — Gmail API usage, heartbeat, SQL to audit tool calls  
 - [`docs/GMAIL_WATCH.md`](docs/GMAIL_WATCH.md) — design: Gmail Pub/Sub / `users.watch` (automation)  
 - [`docs/INTEGRATIONS_ROADMAP.md`](docs/INTEGRATIONS_ROADMAP.md) — integration backlog (not a release promise)  
+
+---
+
+## Version Sync From GitHub Releases
+
+This repository treats the GitHub release/tag as the version source of truth.
+
+- Workflow: `.github/workflows/sync-version-from-release.yml`
+- Expected tag format: `vX.Y.Z` (also accepts `X.Y.Z`)
+- On release publish (or matching tag push), the workflow syncs:
+  - `frontend/package.json` -> `version`
+  - `backend/pyproject.toml` -> `[project].version`
+  - `backend/app/main.py` -> `FastAPI(..., version="...")`
+- If the tag is invalid, or any target cannot be updated deterministically, the workflow fails fast.
+
+Local checks:
+
+```bash
+python3 scripts/sync_version_from_tag.py --tag v0.0.3 --dry-run
+python3 scripts/sync_version_from_tag.py --tag refs/tags/v0.0.3 --print-only
+```
