@@ -437,7 +437,9 @@ async def apply_agent_run_to_placeholder(
         msg.content = ""
     else:
         msg.content = run_read.error or ""
-    msg.role = "assistant" if run_read.status == "completed" else "system"
+    msg.role = (
+        "assistant" if run_read.status in ("completed", "cancelled") else "system"
+    )
     msg.attachments = cards or None
     thread.last_message_at = datetime.now(UTC)
     await db.flush()

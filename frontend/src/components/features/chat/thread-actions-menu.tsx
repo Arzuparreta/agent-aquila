@@ -13,16 +13,8 @@ import { useTranslation, type TranslationKey } from "@/lib/i18n";
 import type { ChatThread } from "@/types/api";
 
 /**
- * Shared overflow-actions menu for a single chat thread.
- *
- * Used by both:
- * - the sidebar row (``thread-list.tsx``) — hover-revealed trigger.
- * - the chat top bar (``top-bar.tsx``) — always-visible trigger for the
- *   currently-open thread, so mobile users (no hover) can still reach
- *   these actions.
- *
- * Mutation handlers are passed in from ``chat-home.tsx`` so post-mutation
- * focus / refresh logic stays centralized.
+ * Overflow-actions menu for a single chat thread (sidebar row in
+ * ``thread-list.tsx``). Mutation handlers are passed in from ``chat-home.tsx``.
  */
 export function ThreadActionsMenu({
   thread,
@@ -30,7 +22,6 @@ export function ThreadActionsMenu({
   onTogglePin,
   onToggleArchive,
   onDelete,
-  variant = "row",
   open,
   onOpenChange,
 }: {
@@ -39,8 +30,6 @@ export function ThreadActionsMenu({
   onTogglePin: (id: number, next: boolean) => Promise<void> | void;
   onToggleArchive: (id: number, next: boolean) => Promise<void> | void;
   onDelete: (id: number) => Promise<void> | void;
-  /** ``"row"`` = compact icon for the sidebar; ``"bar"`` = bigger icon for the top bar. */
-  variant?: "row" | "bar";
   /** Controlled open state. Optional — when omitted the menu manages itself. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -50,13 +39,11 @@ export function ThreadActionsMenu({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
-  const triggerSize = variant === "bar" ? "p-2" : "p-1";
-
   const trigger = (
     <button
       type="button"
       aria-label={t("chat.threadActions.triggerAria")}
-      className={`rounded-md ${triggerSize} text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg`}
+      className="rounded-md p-1 text-fg-subtle hover:bg-interactive-hover-strong hover:text-fg"
       onClick={(e) => e.stopPropagation()}
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>

@@ -112,6 +112,16 @@ export function ChatThreadView({
   const composerBusy = sending;
   const showEphemeralThinking = sending && pendingRunId == null;
 
+  const stopActiveRun = useCallback(async () => {
+    const rid = pendingRunId;
+    if (rid == null) return;
+    try {
+      await apiFetch(`/agent/runs/${rid}/stop`, { method: "POST" });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t("chat.threadView.stopFailed"));
+    }
+  }, [pendingRunId, t]);
+
   const pendingLabel = useMemo(() => {
     if (sending && pendingRunSnapshot == null) {
       return t("chat.threadView.state.queued");
@@ -402,6 +412,10 @@ export function ChatThreadView({
       </div>
       <ChatComposer
         onSend={onSend}
+        onStop={() => {
+          void stopActiveRun();
+        }}
+        showStop={pendingRunId != null}
         disabled={composerBusy}
         busyLabel={sending ? pendingLabel : t("chat.composer.placeholderBusy")}
       />

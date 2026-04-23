@@ -9,13 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.channel_thread_binding import ChannelThreadBinding
+from app.models.user import User
 from app.services.llm_client import shared_http_client
+from app.services.telegram_integration_service import get_effective_bot_token_for_user
 
 logger = logging.getLogger(__name__)
 
 
-async def send_telegram_text(chat_id: str, text: str) -> None:
-    token = (settings.telegram_bot_token or "").strip()
+async def send_telegram_text(chat_id: str, text: str, *, bot_token: str | None = None) -> None:
+    token = ((bot_token or "").strip() or (settings.telegram_bot_token or "").strip())
     if not token or not chat_id:
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -53,4 +55,8 @@ async def notify_telegram_for_completed_run(
     if not chat_id:
         return
     body = (assistant_reply or error or "(no output)")[:4090]
-    await send_telegram_text(chat_id, body)
+    user = await db.get(User, user_id)
+    if not user:
+        return
+    tok = await get_effective_bot_token_for_user(db, user)
+    await send_telegram_text(chat_id, body, bot_token=tok)

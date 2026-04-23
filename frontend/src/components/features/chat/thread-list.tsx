@@ -116,8 +116,10 @@ export function ChatThreadList({
             return (
               <li key={t.id}>
                 <div
-                  className={`group/row relative flex w-full items-center gap-3 px-3 py-3 transition ${
-                    active ? "bg-primary/20 text-fg" : "text-fg hover:bg-interactive-hover"
+                  className={`group/row relative flex w-full items-center gap-3 border-l-[3px] py-3 pl-[9px] pr-3 transition ${
+                    active
+                      ? "border-l-primary bg-primary/15 text-fg ring-2 ring-inset ring-primary/35"
+                      : "border-l-transparent text-fg hover:bg-interactive-hover"
                   }`}
                 >
                   <button
@@ -149,7 +151,6 @@ export function ChatThreadList({
                   <div className="flex h-8 w-8 shrink-0 items-center justify-end">
                     <ThreadActionsMenu
                       thread={t}
-                      variant="row"
                       open={menuOpen}
                       onOpenChange={(next) => setMenuOpenId(next ? t.id : null)}
                       onRename={onRenameThread}

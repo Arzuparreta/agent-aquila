@@ -16,8 +16,12 @@ from app.schemas.agent import (
     PendingOperationRead,
     PendingProposalRead,
 )
+from app.models.agent_run import AgentRun
+from app.models.chat_thread import ChatThread
+from app.services.agent_event_bus import publish_run_status_event
 from app.services.agent_rate_limit_service import AgentRateLimitService
 from app.services.agent_service import AgentService
+from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.capability_policy import risk_tier_for_kind
 from app.services.capability_registry import describe_capabilities
 from app.services.pending_execution_service import preview_for_proposal_kind
@@ -55,6 +59,55 @@ async def get_agent_run(
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return run
+
+
+@router.post("/runs/{run_id}/stop", response_model=AgentRunRead)
+async def stop_agent_run(
+    run_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AgentRunRead:
+    run_row = await db.get(AgentRun, run_id)
+    if not run_row or run_row.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run_row.status not in ("pending", "running"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run is not active.",
+        )
+    if run_row.status == "pending":
+        run_row.status = "cancelled"
+        run_row.assistant_reply = (run_row.assistant_reply or "").strip() or "Stopped."
+        run_row.cancel_requested = False
+        await db.commit()
+        read = await AgentService.get_run(db, current_user, run_id)
+        tid = run_row.chat_thread_id
+        if read and tid is not None:
+            thread = await db.get(ChatThread, tid)
+            if thread and thread.user_id == current_user.id:
+                await apply_agent_run_to_placeholder(
+                    db, thread, agent_run_id=run_id, run_read=read
+                )
+                await db.commit()
+        await publish_run_status_event(
+            user_id=current_user.id,
+            run_id=run_id,
+            status="cancelled",
+            error=None,
+            step_count=0,
+            chat_thread_id=tid,
+            terminal=True,
+        )
+        if not read:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+        return read
+
+    run_row.cancel_requested = True
+    await db.commit()
+    read = await AgentService.get_run(db, current_user, run_id)
+    if not read:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return read
 
 
 @router.get("/runs/{run_id}/trace-events", response_model=list[AgentTraceEventRead])

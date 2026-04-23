@@ -7,6 +7,7 @@ export type SettingsSectionId =
   | "appearance"
   | "language"
   | "connectors"
+  | "telegram"
   | "telemetry"
   | "memory"
   | "skills"
@@ -41,6 +42,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "core",
     titleKey: "settings.hub.section.connectors.title",
     descriptionKey: "settings.hub.section.connectors.description"
+  },
+  {
+    id: "telegram",
+    href: "/settings/telegram",
+    group: "core",
+    titleKey: "settings.hub.section.telegram.title",
+    descriptionKey: "settings.hub.section.telegram.description"
   },
   {
     id: "appearance",
@@ -152,6 +160,13 @@ export function SettingsSectionIcon({
           <path d="M16 12a3 3 0 0 1-3 3h-2" />
           <path d="M9 9 7 7a3 3 0 1 0-4 4l2 2" />
           <path d="m15 15 2 2a3 3 0 0 0 4-4l-2-2" />
+        </svg>
+      );
+    case "telegram":
+      return (
+        <svg {...base}>
+          <path d="M21 5 3 12l5 2 2 5 4-8 4 2z" />
+          <path d="m10 14 1 4 2-2" />
         </svg>
       );
     case "telemetry":

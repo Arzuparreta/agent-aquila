@@ -2691,6 +2691,12 @@ class AgentService:
             empty_gmail_search_streak = 0
             empty_gmail_queries: list[str] = []
             for _ in range(max_steps):
+                await db.refresh(run)
+                if run.cancel_requested:
+                    run.cancel_requested = False
+                    run.status = "cancelled"
+                    run.assistant_reply = (run.assistant_reply or "").strip() or "Generation stopped."
+                    break
                 parse_errors: list[str] = []
                 llm_span = new_span_id()
                 await emit_trace_event(

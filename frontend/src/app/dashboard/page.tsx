@@ -251,8 +251,8 @@ export default function DashboardPage() {
             </>
           ) : (
             <p className="text-sm text-fg-muted">
-              Set TELEGRAM_BOT_TOKEN in the API/worker environment and keep the worker running — inbound
-              messages use Telegram long polling (no tunnel). Refresh this page after changing env.
+              Open Settings → Telegram bot, paste your BotFather token (long polling is on by default), and keep
+              the worker running. Then refresh this page.
             </p>
           )}
         </Card>

@@ -83,7 +83,9 @@ async def get_user_for_telegram_chat(db: AsyncSession, telegram_chat_id: str) ->
     return await db.get(User, link.user_id)
 
 
-async def dispatch_telegram_bot_update(db: AsyncSession, update: dict[str, Any]) -> None:
+async def dispatch_telegram_bot_update(
+    db: AsyncSession, update: dict[str, Any], *, bot_token: str
+) -> None:
     """Handle one Telegram Update object (webhook body or getUpdates element)."""
     msg = update.get("message") or update.get("edited_message")
     if not isinstance(msg, dict):
@@ -93,10 +95,12 @@ async def dispatch_telegram_bot_update(db: AsyncSession, update: dict[str, Any])
     if not cid:
         return
     text = str(msg.get("text") or msg.get("caption") or "")
-    await handle_telegram_text_message(db, telegram_chat_id=cid, text=text)
+    await handle_telegram_text_message(db, telegram_chat_id=cid, text=text, bot_token=bot_token)
 
 
-async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: str, text: str) -> None:
+async def handle_telegram_text_message(
+    db: AsyncSession, *, telegram_chat_id: str, text: str, bot_token: str
+) -> None:
     text = (text or "").strip()
     if not text:
         return
@@ -107,16 +111,22 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
             await send_telegram_text(
                 telegram_chat_id,
                 "Generate a code in the app dashboard (Telegram section), then send:\n/start YOUR_CODE",
+                bot_token=bot_token,
             )
             return
         code = parts[1].strip()
         ok = await link_chat_with_code(db, code=code, telegram_chat_id=telegram_chat_id)
         if ok:
-            await send_telegram_text(telegram_chat_id, "Connected! You can chat with your agent here.")
+            await send_telegram_text(
+                telegram_chat_id,
+                "Connected! You can chat with your agent here.",
+                bot_token=bot_token,
+            )
         else:
             await send_telegram_text(
                 telegram_chat_id,
                 "Invalid or expired code. Generate a fresh code in the dashboard.",
+                bot_token=bot_token,
             )
         return
 
@@ -125,6 +135,7 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
         await send_telegram_text(
             telegram_chat_id,
             "Not linked yet. Open the dashboard → Telegram, then send /start YOUR_CODE here.",
+            bot_token=bot_token,
         )
         return
 
@@ -177,7 +188,7 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
             ro = await db.get(AgentRun, early.id)
             if ro:
                 await maybe_record_skill_autogenesis_candidate(db, ro)
-        await send_telegram_text(telegram_chat_id, body or "Something went wrong.")
+        await send_telegram_text(telegram_chat_id, body or "Something went wrong.", bot_token=bot_token)
         return
 
     use_async = agent_rt.agent_async_runs and bool(settings.redis_url)
@@ -207,7 +218,9 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
             read = await AgentService.abort_pending_run_queue_unavailable(
                 db, run=run_row, placeholder_message=asst_msg
             )
-            await send_telegram_text(telegram_chat_id, read.error or "Queue unavailable.")
+            await send_telegram_text(
+                telegram_chat_id, read.error or "Queue unavailable.", bot_token=bot_token
+            )
             return
         return
 
@@ -258,4 +271,4 @@ async def handle_telegram_text_message(db: AsyncSession, *, telegram_chat_id: st
         ro = await db.get(AgentRun, run.id)
         if ro:
             await maybe_record_skill_autogenesis_candidate(db, ro)
-    await send_telegram_text(telegram_chat_id, assistant_text or run.error or "")
+    await send_telegram_text(telegram_chat_id, assistant_text or run.error or "", bot_token=bot_token)

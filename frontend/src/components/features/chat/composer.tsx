@@ -31,10 +31,14 @@ const ENTITY_LABEL: Record<string, string> = {
  */
 export function ChatComposer({
   onSend,
+  onStop,
+  showStop,
   disabled,
   busyLabel
 }: {
   onSend: (content: string, references: EntityRef[]) => Promise<void> | void;
+  onStop?: () => void;
+  showStop?: boolean;
   disabled?: boolean;
   busyLabel?: string | null;
 }) {
@@ -85,6 +89,17 @@ export function ChatComposer({
           </div>
         ) : null}
         <div className="flex items-end gap-2">
+          {showStop && onStop ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="flex h-11 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-muted px-3 text-sm font-medium text-fg hover:bg-interactive-hover"
+              aria-label={t("chat.composer.stop")}
+            >
+              <span className="inline-block h-3.5 w-3.5 rounded-sm bg-current" aria-hidden />
+              {t("chat.composer.stop")}
+            </button>
+          ) : null}
           <textarea
             ref={taRef}
             value={value}

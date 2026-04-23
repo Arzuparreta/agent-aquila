@@ -33,7 +33,12 @@ function buildRealtimeWsUrl(token: string): string {
 }
 
 function isTerminalStatus(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "needs_attention";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "needs_attention" ||
+    status === "cancelled"
+  );
 }
 
 /**
@@ -162,7 +167,7 @@ export function waitForRunTerminal(
         return;
       }
       const st = data.status;
-      if (st !== "completed" && st !== "failed") {
+      if (st !== "completed" && st !== "failed" && st !== "cancelled") {
         return;
       }
       settle({

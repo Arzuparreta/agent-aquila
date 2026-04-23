@@ -329,12 +329,7 @@ export function ChatHome() {
     <div className="app-shell bg-surface-base text-fg">
       <ChatTopBar
         title={activeThread?.title ?? t("chat.defaultTitle")}
-        activeThread={activeThread}
         onOpenDrawer={() => setDrawerOpen(true)}
-        onRenameThread={onRenameThread}
-        onTogglePinThread={onTogglePinThread}
-        onToggleArchiveThread={onToggleArchiveThread}
-        onDeleteThread={onDeleteThread}
       />
       {statusMessage ? (
         <StatusToast

@@ -46,7 +46,7 @@ from app.services.agent_service import AgentService
 from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.llm_client import aclose_llm_http_client
 from app.services.telegram_notify import notify_telegram_for_completed_run
-from app.services.telegram_poller import run_telegram_long_poll_loop
+from app.services.telegram_poller import run_telegram_long_poll_supervisor
 from app.services.user_ai_settings_service import UserAISettingsService
 
 logger = logging.getLogger(__name__)
@@ -142,10 +142,10 @@ async def startup(ctx: dict[str, Any]) -> None:
         settings.agent_heartbeat_enabled,
         settings.agent_heartbeat_minutes,
     )
-    if (settings.telegram_bot_token or "").strip() and settings.telegram_polling_enabled:
+    if settings.telegram_polling_enabled:
         _telegram_poll_stop = asyncio.Event()
         _telegram_poll_task = asyncio.create_task(
-            run_telegram_long_poll_loop(_telegram_poll_stop),
+            run_telegram_long_poll_supervisor(_telegram_poll_stop),
             name="telegram_long_poll",
         )
 
@@ -181,8 +181,43 @@ async def run_chat_agent_turn(
             if not user or not run_row or run_row.user_id != user_id:
                 logger.warning("run_chat_agent_turn skipped: missing user or run mismatch")
                 return {"ok": False, "reason": "not_found"}
+            if run_row.status == "cancelled":
+                return {"ok": True, "reason": "cancelled", "status": "cancelled"}
             if run_row.status != "pending":
                 return {"ok": True, "reason": "already_started", "status": run_row.status}
+            await db.refresh(run_row)
+            if run_row.cancel_requested:
+                run_row.cancel_requested = False
+                run_row.status = "cancelled"
+                run_row.assistant_reply = (run_row.assistant_reply or "").strip() or "Stopped."
+                await db.commit()
+                read = await AgentService.get_run(db, user, run_id)
+                tid = run_row.chat_thread_id
+                if read and tid is not None:
+                    thread = await db.get(ChatThread, tid)
+                    if thread and thread.user_id == user_id:
+                        await apply_agent_run_to_placeholder(
+                            db, thread, agent_run_id=run_id, run_read=read
+                        )
+                        await notify_telegram_for_completed_run(
+                            db,
+                            user_id=user_id,
+                            thread_id=tid,
+                            assistant_reply=read.assistant_reply,
+                            error=read.error,
+                        )
+                        await db.commit()
+                await publish_run_status_event(
+                    user_id=user_id,
+                    run_id=run_id,
+                    status="cancelled",
+                    error=None,
+                    step_count=0,
+                    chat_thread_id=tid,
+                    terminal=True,
+                )
+                return {"ok": True, "run_id": run_id, "status": "cancelled"}
+
             run_row.status = "running"
             await db.commit()
             await publish_run_status_event(
@@ -271,7 +306,7 @@ async def run_chat_agent_turn(
             async with AsyncSessionLocal() as db:
                 user = await db.get(User, user_id)
                 run_row = await db.get(AgentRun, run_id)
-                if run_row and run_row.status not in ("completed", "failed"):
+                if run_row and run_row.status not in ("completed", "failed", "cancelled"):
                     run_row.status = "failed"
                     run_row.error = (str(exc) or "Background agent job crashed.")[:2000]
                     await db.commit()

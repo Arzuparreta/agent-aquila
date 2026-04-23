@@ -31,6 +31,7 @@ class AgentRun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    cancel_requested: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     steps = relationship("AgentRunStep", back_populates="run", order_by="AgentRunStep.step_index", cascade="all, delete-orphan")
     trace_events = relationship(

@@ -65,6 +65,12 @@ class UserAISettings(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # Telegram bot (inbound DMs + replies): token encrypted like legacy secrets; optional webhook secret.
+    telegram_bot_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_polling_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    telegram_poll_timeout: Mapped[int] = mapped_column(default=45, nullable=False)
+    telegram_webhook_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     # Mirror of the active provider config — DO NOT WRITE DIRECTLY. Use
     # AIProviderConfigService.set_active() / upsert_config() so the mirror
     # stays in sync with user_ai_provider_configs (the canonical source).
