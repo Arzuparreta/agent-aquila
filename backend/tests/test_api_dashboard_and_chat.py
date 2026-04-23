@@ -90,6 +90,13 @@ async def test_dashboard_endpoints_and_chat_message(
             metrics_payload = r_d2.json()
             assert "agent_runs_needs_attention_last_24h" in metrics_payload
 
+            r_dbg = await ac.get("/api/v1/dashboard/context-budget")
+            assert r_dbg.status_code == 200, r_dbg.text
+            dbg = r_dbg.json()
+            assert "model" in dbg
+            assert "context_window" in dbg
+            assert "reserved_output_tokens" in dbg
+
             r_runs = await ac.get("/api/v1/agent/runs?limit=5")
             assert r_runs.status_code == 200, r_runs.text
 

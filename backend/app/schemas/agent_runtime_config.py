@@ -24,6 +24,9 @@ class AgentRuntimeConfigPartial(BaseModel):
     agent_tool_palette: AgentToolPalette | None = None
     agent_prompt_tier: AgentPromptTier | None = None
     agent_include_harness_facts: bool | None = None
+    context_budget_v2: bool | None = None
+    token_aware_history: bool | None = None
+    dynamic_model_limits: bool | None = None
     agent_connector_gated_tools: bool | None = None
     agent_prompted_compact_json: bool | None = None
     agent_history_turns: int | None = Field(default=None, ge=1, le=64)
@@ -92,6 +95,9 @@ class AgentRuntimeConfigResolved(BaseModel):
     agent_tool_palette: AgentToolPalette
     agent_prompt_tier: AgentPromptTier
     agent_include_harness_facts: bool
+    context_budget_v2: bool
+    token_aware_history: bool
+    dynamic_model_limits: bool
     agent_connector_gated_tools: bool
     agent_prompted_compact_json: bool
     agent_history_turns: int = Field(ge=1, le=64)

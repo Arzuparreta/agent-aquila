@@ -19,6 +19,19 @@ class DashboardMetricsRead(BaseModel):
     agent_runs_needs_attention_last_24h: int
 
 
+class ContextBudgetDebugRead(BaseModel):
+    provider_kind: str
+    model: str
+    model_limits_source: str
+    context_window: int
+    max_output_tokens_default: int
+    estimated_input_tokens: int
+    input_budget_tokens: int
+    reserved_output_tokens: int
+    would_compact: bool
+    runtime_flags: dict[str, bool]
+
+
 class OnboardingStatusRead(BaseModel):
     database_ok: bool
     redis_ok: bool

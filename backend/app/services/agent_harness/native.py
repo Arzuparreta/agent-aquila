@@ -13,6 +13,7 @@ async def chat_turn_native(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     temperature: float,
+    max_tokens: int | None = None,
 ) -> ChatResponse:
     return await LLMClient.chat_with_tools(
         api_key,
@@ -21,4 +22,5 @@ async def chat_turn_native(
         tools=tools,
         tool_choice="required",
         temperature=temperature,
+        max_tokens=max_tokens,
     )

@@ -146,6 +146,7 @@ from app.services.gmail_metadata_cache import (
 )
 from app.services.llm_client import ChatResponse, ChatToolCall, LLMClient
 from app.services.llm_errors import LLMProviderError, NoActiveProviderError
+from app.services.model_limits_service import resolve_model_limits
 from app.services.connector_setup_service import (
     submit_discord_bot_credentials as submit_discord_bot_credentials_service,
     submit_github_credentials as submit_github_credentials_service,
@@ -170,6 +171,12 @@ from app.services.user_ai_settings_service import (
     merge_calendar_timezone_from_user_prefs,
 )
 from app.services.user_time_context import normalize_time_format, session_time_result
+from app.services.token_budget_service import (
+    clamp_tool_content_by_tokens,
+    estimate_message_tokens,
+    plan_budget,
+    select_history_by_budget,
+)
 
 # Provider id sets used by ``_resolve_connection``.
 _GMAIL_PROVIDERS = ("google_gmail", "gmail")
@@ -316,6 +323,80 @@ def _approx_prompt_tokens(messages: list[dict[str, Any]]) -> int:
     except (TypeError, ValueError):
         raw = ""
     return max(1, len(raw) // 4)
+
+
+def _is_context_overflow(exc: LLMProviderError) -> bool:
+    detail = str(exc.detail or "").lower()
+    return any(
+        marker in detail
+        for marker in (
+            "maximum context length",
+            "context length",
+            "requested",
+            "input_tokens",
+            "prompt is too long",
+        )
+    )
+
+
+def _reduce_conversation_for_budget(
+    conversation: list[dict[str, Any]],
+    *,
+    input_budget_tokens: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    if not conversation:
+        return conversation, False
+    if estimate_message_tokens(conversation) <= input_budget_tokens:
+        return conversation, False
+    reduced = list(conversation)
+    changed = False
+    # Keep system prompt + latest user turn, compact middle history first.
+    if len(reduced) > 2:
+        head = reduced[:1]
+        middle = reduced[1:-1]
+        tail = reduced[-1:]
+        dropped_count = max(0, len(middle) - 8)
+        compact_middle = select_history_by_budget(
+            history=[
+                {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+                for m in middle
+                if isinstance(m.get("content"), str)
+            ],
+            budget_tokens=max(256, input_budget_tokens - estimate_message_tokens(head + tail)),
+            keep_tail_messages=4,
+        )
+        if dropped_count > 0:
+            summary = {
+                "role": "system",
+                "content": (
+                    "Context compression summary:\n"
+                    f"- Active Task: Continue the current user request.\n"
+                    f"- Completed Actions: Earlier tool/assistant exchanges were compacted ({dropped_count} msgs).\n"
+                    "- Pending Requests: Prior unresolved asks remain in compacted history.\n"
+                    "- Constraints/Preferences: Preserve user constraints and provider/tool limitations.\n"
+                    "- Open Questions: None explicitly tracked."
+                ),
+            }
+            reduced = head + [summary] + compact_middle + tail
+        else:
+            reduced = head + compact_middle + tail
+        changed = True
+    # If still over budget, trim very large message contents.
+    while estimate_message_tokens(reduced) > input_budget_tokens and len(reduced) > 1:
+        idx = 1
+        candidate = reduced[idx]
+        content = candidate.get("content")
+        if not isinstance(content, str) or len(content) < 600:
+            if len(reduced) > 3:
+                reduced.pop(idx)
+                changed = True
+                continue
+            break
+        candidate = dict(candidate)
+        candidate["content"] = clamp_tool_content_by_tokens(content, max(100, len(content) // 10))
+        reduced[idx] = candidate
+        changed = True
+    return reduced, changed
 
 
 def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
@@ -2532,6 +2613,18 @@ class AgentService:
                 + _IDENTITY_AND_MEMORY_TOOL_NUDGE,
             }
 
+        model_limits = await resolve_model_limits(
+            api_key=api_key or "",
+            settings_row=settings_row,
+            model=settings_row.chat_model,
+        )
+        budget = plan_budget(messages=conversation, limits=model_limits)
+        if rt.context_budget_v2 and budget.compacted:
+            conversation, _ = _reduce_conversation_for_budget(
+                conversation, input_budget_tokens=budget.input_budget
+            )
+            budget = plan_budget(messages=conversation, limits=model_limits)
+
         step_idx = 0
         proposals_created: list[PendingProposal] = []
         if thread_id is not None:
@@ -2552,6 +2645,7 @@ class AgentService:
         try:
             final_answer_text: str | None = None
             max_steps = eff_max
+            overflow_retried = False
             for _ in range(max_steps):
                 parse_errors: list[str] = []
                 llm_span = new_span_id()
@@ -2564,6 +2658,9 @@ class AgentService:
                     parent_span_id=root_span,
                     payload={
                         "approx_prompt_tokens": _approx_prompt_tokens(conversation),
+                        "estimated_prompt_tokens": estimate_message_tokens(conversation),
+                        "input_budget_tokens": budget.input_budget,
+                        "reserved_output_tokens": budget.reserved_output_tokens,
                         "tool_defs_count": len(turn_tools),
                         "harness_mode": effective,
                         "turn_profile": tp,
@@ -2571,29 +2668,46 @@ class AgentService:
                     },
                 )
                 _llm_t0 = time.monotonic()
-                if effective == "native":
-                    response = await chat_turn_native(
-                        api_key or "",
-                        settings_row,
-                        messages=conversation,
-                        tools=turn_tools,
-                        temperature=0.15,
-                    )
-                else:
-                    raw_text, finish_reason, raw_msg, usage_cf = await LLMClient.chat_completion_full(
-                        api_key or "",
-                        settings_row,
-                        messages=conversation,
-                        temperature=0.15,
-                    )
-                    calls, parse_errors = parse_tool_calls_from_content(raw_text)
-                    response = ChatResponse(
-                        content=raw_text,
-                        tool_calls=calls,
-                        raw_message=raw_msg,
-                        finish_reason=finish_reason,
-                        usage=usage_cf,
-                    )
+                try:
+                    if effective == "native":
+                        response = await chat_turn_native(
+                            api_key or "",
+                            settings_row,
+                            messages=conversation,
+                            tools=turn_tools,
+                            temperature=0.15,
+                            max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
+                        )
+                    else:
+                        raw_text, finish_reason, raw_msg, usage_cf = await LLMClient.chat_completion_full(
+                            api_key or "",
+                            settings_row,
+                            messages=conversation,
+                            temperature=0.15,
+                            max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
+                        )
+                        calls, parse_errors = parse_tool_calls_from_content(raw_text)
+                        response = ChatResponse(
+                            content=raw_text,
+                            tool_calls=calls,
+                            raw_message=raw_msg,
+                            finish_reason=finish_reason,
+                            usage=usage_cf,
+                        )
+                except LLMProviderError as exc:
+                    if rt.context_budget_v2 and _is_context_overflow(exc) and not overflow_retried:
+                        overflow_retried = True
+                        tighter_output = max(256, budget.reserved_output_tokens // 2)
+                        budget = plan_budget(
+                            messages=conversation,
+                            limits=model_limits,
+                            requested_output_tokens=tighter_output,
+                        )
+                        conversation, _ = _reduce_conversation_for_budget(
+                            conversation, input_budget_tokens=budget.input_budget
+                        )
+                        continue
+                    raise
                 _llm_duration_ms = int((time.monotonic() - _llm_t0) * 1000)
 
                 if (
@@ -2611,6 +2725,7 @@ class AgentService:
                         settings_row,
                         messages=conversation,
                         temperature=0.15,
+                        max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
                     )
                     _llm_duration_ms = int((time.monotonic() - _llm_t0_fb) * 1000)
                     calls, parse_errors = parse_tool_calls_from_content(raw_text)
@@ -2732,12 +2847,13 @@ class AgentService:
                     )
                     tool_result_dicts.append(result if isinstance(result, dict) else {"result": result})
                     if effective == "native":
+                        tool_payload = json.dumps(result, ensure_ascii=False, default=str)
                         conversation.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": call.id,
                                 "name": tool_name,
-                                "content": json.dumps(result, ensure_ascii=False)[:12000],
+                                "content": clamp_tool_content_by_tokens(tool_payload, 3000),
                             }
                         )
                     try:
@@ -2777,6 +2893,13 @@ class AgentService:
                             ),
                         }
                     )
+                if rt.context_budget_v2:
+                    budget = plan_budget(messages=conversation, limits=model_limits)
+                    if budget.compacted:
+                        conversation, _ = _reduce_conversation_for_budget(
+                            conversation, input_budget_tokens=budget.input_budget
+                        )
+                        budget = plan_budget(messages=conversation, limits=model_limits)
 
                 if final_answer_text is not None:
                     run.assistant_reply = final_answer_text

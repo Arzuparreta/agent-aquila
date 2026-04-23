@@ -31,6 +31,23 @@ type DashboardMetrics = {
   agent_runs_needs_attention_last_24h: number;
 };
 
+type ContextBudgetDebug = {
+  provider_kind: string;
+  model: string;
+  model_limits_source: string;
+  context_window: number;
+  max_output_tokens_default: number;
+  estimated_input_tokens: number;
+  input_budget_tokens: number;
+  reserved_output_tokens: number;
+  would_compact: boolean;
+  runtime_flags: {
+    context_budget_v2: boolean;
+    token_aware_history: boolean;
+    dynamic_model_limits: boolean;
+  };
+};
+
 type AgentRunSummary = {
   id: number;
   status: string;
@@ -49,6 +66,7 @@ export default function DashboardPage() {
   const [st, setSt] = useState<DashboardStatus | null>(null);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [runs, setRuns] = useState<AgentRunSummary[]>([]);
+  const [budget, setBudget] = useState<ContextBudgetDebug | null>(null);
   const [ai, setAi] = useState<AISettings | null>(null);
   const [pair, setPair] = useState<{ code: string; expires_at: string } | null>(null);
   const [tgLinked, setTgLinked] = useState<boolean | null>(null);
@@ -57,18 +75,20 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     setErr(null);
     try {
-      const [o, s, m, r, settings] = await Promise.all([
+      const [o, s, m, r, settings, b] = await Promise.all([
         apiFetch<OnboardingStatus>("/onboarding/status"),
         apiFetch<DashboardStatus>("/dashboard/status"),
         apiFetch<DashboardMetrics>("/dashboard/metrics"),
         apiFetch<AgentRunSummary[]>("/agent/runs?limit=20"),
         apiFetch<AISettings>("/ai/settings"),
+        apiFetch<ContextBudgetDebug>("/dashboard/context-budget"),
       ]);
       setOnb(o);
       setSt(s);
       setMetrics(m);
       setRuns(r);
       setAi(settings);
+      setBudget(b);
       if (o.telegram_configured) {
         const ls = await apiFetch<{ linked: boolean }>("/telegram/link-status");
         setTgLinked(ls.linked);
@@ -177,6 +197,31 @@ export default function DashboardPage() {
               <li>Completed: {metrics.agent_runs_completed_last_24h}</li>
               <li>Failed: {metrics.agent_runs_failed_last_24h}</li>
               <li>Needs attention: {metrics.agent_runs_needs_attention_last_24h}</li>
+            </ul>
+          ) : (
+            <p className="text-sm text-fg-muted">Loading…</p>
+          )}
+        </Card>
+
+        <Card className="space-y-2 p-4">
+          <h2 className="font-medium">Context budget (debug)</h2>
+          {budget ? (
+            <ul className="list-inside list-disc text-sm text-fg-muted">
+              <li>
+                Provider/model: {budget.provider_kind} / {budget.model}
+              </li>
+              <li>Limits source: {budget.model_limits_source}</li>
+              <li>Context window: {budget.context_window}</li>
+              <li>Default output cap: {budget.max_output_tokens_default}</li>
+              <li>Reserved output tokens: {budget.reserved_output_tokens}</li>
+              <li>Input budget tokens: {budget.input_budget_tokens}</li>
+              <li>Estimated input tokens (sample): {budget.estimated_input_tokens}</li>
+              <li>Would compact: {budget.would_compact ? "yes" : "no"}</li>
+              <li>
+                Flags: budget_v2={String(budget.runtime_flags.context_budget_v2)}, history=
+                {String(budget.runtime_flags.token_aware_history)}, dynamic_limits=
+                {String(budget.runtime_flags.dynamic_model_limits)}
+              </li>
             </ul>
           ) : (
             <p className="text-sm text-fg-muted">Loading…</p>

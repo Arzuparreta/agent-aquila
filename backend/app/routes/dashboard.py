@@ -14,7 +14,12 @@ from app.core.deps import get_current_user
 from app.models.agent_run import AgentRun
 from app.models.user import User
 from app.schemas.cockpit import DashboardMetricsRead, DashboardStatusRead
+from app.schemas.cockpit import ContextBudgetDebugRead
 from app.services.job_queue import _get_pool
+from app.services.model_limits_service import resolve_model_limits
+from app.services.token_budget_service import plan_budget
+from app.services.user_ai_settings_service import UserAISettingsService
+from app.services.agent_runtime_config_service import resolve_for_user
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(get_current_user)])
 
@@ -121,4 +126,42 @@ async def dashboard_metrics(
         agent_runs_completed_last_24h=done,
         agent_runs_failed_last_24h=failed,
         agent_runs_needs_attention_last_24h=needs_attention,
+    )
+
+
+@router.get("/context-budget", response_model=ContextBudgetDebugRead)
+async def dashboard_context_budget(
+    message: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContextBudgetDebugRead:
+    settings_row = await UserAISettingsService.get_or_create(db, current_user)
+    runtime = await resolve_for_user(db, current_user)
+    api_key = await UserAISettingsService.get_api_key(db, current_user)
+    model = settings_row.chat_model
+    limits = await resolve_model_limits(
+        api_key=api_key or "",
+        settings_row=settings_row,
+        model=model,
+    )
+    sample_messages = [
+        {"role": "system", "content": "Context-budget debug request for dashboard introspection."},
+        {"role": "user", "content": message or "Quick budget check"},
+    ]
+    budget = plan_budget(messages=sample_messages, limits=limits)
+    return ContextBudgetDebugRead(
+        provider_kind=settings_row.provider_kind,
+        model=model,
+        model_limits_source=limits.source,
+        context_window=limits.context_window,
+        max_output_tokens_default=limits.max_output_tokens_default,
+        estimated_input_tokens=budget.estimated_input_tokens,
+        input_budget_tokens=budget.input_budget,
+        reserved_output_tokens=budget.reserved_output_tokens,
+        would_compact=budget.compacted,
+        runtime_flags={
+            "context_budget_v2": runtime.context_budget_v2,
+            "token_aware_history": runtime.token_aware_history,
+            "dynamic_model_limits": runtime.dynamic_model_limits,
+        },
     )

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
 from app.services.agent_runtime_config_service import merge_stored_with_env
+from app.services.token_budget_service import select_history_by_budget
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.models.user import User
@@ -233,6 +234,7 @@ async def history_for_agent(
     *,
     runtime: AgentRuntimeConfigResolved | None = None,
     limit: int | None = None,
+    token_budget: int | None = None,
 ) -> list[dict[str, str]]:
     """Returns prior turns as the OpenAI-compatible ``[{role, content}, ...]`` list.
 
@@ -246,6 +248,18 @@ async def history_for_agent(
     rt = _effective_runtime(runtime)
     cap_pairs = rt.agent_history_turns if limit is None else limit
     msgs = await thread_messages_window_raw(db, thread, runtime=runtime, limit=limit)
+    if rt.token_aware_history:
+        effective_budget = token_budget if token_budget is not None and token_budget > 0 else cap_pairs * 700
+        selected = select_history_by_budget(history=msgs, budget_tokens=effective_budget)
+        if len(selected) < len(msgs):
+            selected = [
+                {
+                    "role": "system",
+                    "content": "[Earlier messages omitted to stay within the context window.]",
+                },
+                *selected,
+            ]
+        return selected
     if len(msgs) > cap_pairs * 2:
         msgs = msgs[-(cap_pairs * 2) :]
         if rt.agent_thread_compact_after_pairs > 0:

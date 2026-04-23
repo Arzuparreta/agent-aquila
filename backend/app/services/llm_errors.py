@@ -133,6 +133,15 @@ def hint_for_http_error(
         )
     if status_code == 429:
         return f"{label} is rate-limiting you. Wait a moment and try again."
+    if status_code == 400 and (
+        "maximum context length" in lowered_body
+        or "context length" in lowered_body
+        or "input_tokens" in lowered_body
+    ):
+        return (
+            "The request exceeded the model context window. Reduce prior context or output tokens, "
+            "or switch to a higher-context model."
+        )
     if 500 <= status_code < 600:
         return f"{label} is having trouble (HTTP {status_code}). Try again in a minute."
     return (

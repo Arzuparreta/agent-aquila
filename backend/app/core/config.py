@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     agent_prompt_tier: str = Field(default="full", validation_alias="AGENT_PROMPT_TIER")
     # When true, inject a short "harness facts" markdown block (limits, connector list).
     agent_include_harness_facts: bool = Field(default=True, validation_alias="AGENT_INCLUDE_HARNESS_FACTS")
+    # Feature flag: enable model-aware context budgeting and overflow retries.
+    context_budget_v2: bool = Field(default=True, validation_alias="CONTEXT_BUDGET_V2")
+    # Feature flag: prefer token-budgeted history selection over fixed turn counts.
+    token_aware_history: bool = Field(default=True, validation_alias="TOKEN_AWARE_HISTORY")
+    # Feature flag: fetch and cache provider model limits (OpenRouter).
+    dynamic_model_limits: bool = Field(default=True, validation_alias="DYNAMIC_MODEL_LIMITS")
     # Omit tool schemas for providers the user has not connected (reduces confusion + tokens).
     agent_connector_gated_tools: bool = Field(default=False, validation_alias="AGENT_CONNECTOR_GATED_TOOLS")
     # In prompted harness mode, use shorter JSON (tighter descriptions, no indent) for tool embed.

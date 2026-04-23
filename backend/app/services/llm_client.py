@@ -146,6 +146,7 @@ class LLMClient:
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.2,
+        max_tokens: int | None = None,
     ) -> tuple[str, str | None, dict[str, Any], dict[str, Any] | None]:
         """Chat completion without tools; returns content, finish_reason, raw message dict, usage."""
         effective_key = api_key
@@ -156,6 +157,8 @@ class LLMClient:
             "messages": messages,
             "temperature": temperature,
         }
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         data = await LLMClient._post(effective_key, settings_row, body=body)
         choice = data["choices"][0]
         message = choice.get("message") or {}
@@ -173,6 +176,7 @@ class LLMClient:
         tool_choice: str | dict[str, Any] = "auto",
         model: str | None = None,
         temperature: float = 0.2,
+        max_tokens: int | None = None,
     ) -> ChatResponse:
         """Chat completion with native function/tool calling.
 
@@ -195,6 +199,8 @@ class LLMClient:
             "tools": tools,
             "tool_choice": tool_choice,
         }
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         data = await LLMClient._post(effective_key, settings_row, body=body)
         choice = data["choices"][0]
         message = choice["message"]

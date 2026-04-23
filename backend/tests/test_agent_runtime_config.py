@@ -21,6 +21,9 @@ def test_merge_stored_with_env_uses_defaults_when_no_overrides() -> None:
     r = merge_stored_with_env(None)
     assert r.agent_max_tool_steps == int(settings.agent_max_tool_steps)
     assert isinstance(r.agent_async_runs, bool)
+    assert isinstance(r.context_budget_v2, bool)
+    assert isinstance(r.token_aware_history, bool)
+    assert isinstance(r.dynamic_model_limits, bool)
 
 
 def test_merge_stored_with_env_partial_override() -> None:
