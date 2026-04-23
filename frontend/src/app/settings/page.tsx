@@ -1,232 +1,63 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-
-import { AgentRuntimeSection } from "@/components/features/ai-settings/agent-runtime-section";
-import { ProviderForm } from "@/components/features/ai-settings/provider-form";
-import { ProviderList } from "@/components/features/ai-settings/provider-list";
-import { useProviderConfigs } from "@/components/features/ai-settings/use-provider-configs";
-import { ConnectorsSection } from "@/components/features/connectors/connectors-section";
-import { LanguageSection } from "@/components/features/language/language-section";
-import { MaintenanceSection } from "@/components/features/maintenance/maintenance-section";
-import { MemorySection } from "@/components/features/memory/memory-section";
 import { ProtectedPage } from "@/components/features/protected-page";
-import { SkillsSection } from "@/components/features/skills/skills-section";
-import { TelemetrySection } from "@/components/features/telemetry/telemetry-section";
-import { ThemeSection } from "@/components/features/theme/theme-section";
+import {
+  SETTINGS_GROUPS,
+  SETTINGS_SECTIONS,
+  SettingsSectionIcon,
+  type SettingsSection
+} from "@/components/features/settings/settings-sections";
+import { SettingsLayout } from "@/components/features/settings/settings-shell";
 import { Card } from "@/components/ui/card";
-import { StatusToast } from "@/components/ui/status-toast";
-import { useProviderRegistry } from "@/lib/ai-providers";
 import { useTranslation } from "@/lib/i18n";
-import { listIanaTimeZones } from "@/lib/timezones";
-import type { TimeFormatPreference } from "@/types/api";
 
 /**
- * Technical / advanced settings.
- *
- * Hidden behind the top-bar menu; the artist should rarely come here.
- *
- * The AI section is now a list-rail + form-pane layout that owns every
- * saved provider for the user (`/ai/providers/configs`). Switching the
- * rail selection no longer overwrites the previously-saved row, so keys
- * survive seamlessly when toggling between e.g. Google AI Studio and
- * Ollama.
+ * Settings hub with grouped sections and dedicated subpages.
  */
 export default function SettingsPage() {
   const { t } = useTranslation();
-  const { providers, loading: providersLoading } = useProviderRegistry();
-  const api = useProviderConfigs({ providers, providersLoading });
-  const [aiToggleSaving, setAiToggleSaving] = useState(false);
-  const [tzDraft, setTzDraft] = useState("");
-  const tzOptions = useMemo(() => listIanaTimeZones(), []);
-
-  useEffect(() => {
-    setTzDraft(api.userTimezone);
-  }, [api.userTimezone]);
 
   return (
     <ProtectedPage>
-      <div className="min-h-screen bg-surface-base text-fg">
-        <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-surface-elevated px-4 py-3 shadow-sm">
-          <Link
-            href="/"
-            className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-muted"
-          >
-            {t("settings.technical.backToChat")}
-          </Link>
-          <h1 className="text-base font-semibold">{t("settings.technical.title")}</h1>
-        </header>
-        <main className="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-4">
-          <Card>
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold">{t("settings.technical.aiModelsTitle")}</h2>
-                <p className="mt-1 text-xs text-fg-subtle">{t("settings.technical.aiModelsIntro")}</p>
-              </div>
-              <label className="inline-flex items-center gap-2 text-sm text-fg">
-                <input
-                  type="checkbox"
-                  checked={api.aiDisabled}
-                  disabled={aiToggleSaving}
-                  onChange={async (e) => {
-                    setAiToggleSaving(true);
-                    try {
-                      await api.setAIDisabled(e.target.checked);
-                    } finally {
-                      setAiToggleSaving(false);
-                    }
-                  }}
-                />
-                {t("settings.technical.disableAiTemp")}
-              </label>
-              <label className="flex flex-col gap-1 text-sm text-fg">
-                <span className="text-fg-muted">{t("settings.technical.harnessLabel")}</span>
-                <select
-                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
-                  value={api.harnessMode}
-                  onChange={async (e) => {
-                    const v = e.target.value as "auto" | "native" | "prompted";
-                    await api.setHarnessMode(v);
-                  }}
-                >
-                  <option value="auto">{t("settings.technical.harness.auto")}</option>
-                  <option value="native">{t("settings.technical.harness.native")}</option>
-                  <option value="prompted">{t("settings.technical.harness.prompted")}</option>
-                </select>
-                <span className="text-xs text-fg-subtle">{t("settings.technical.harnessHint")}</span>
-              </label>
-              <div className="flex min-w-[16rem] flex-col gap-1 text-sm text-fg">
-                <span className="text-fg-muted">{t("settings.technical.timezoneLabel")}</span>
-                <input
-                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
-                  list="iana-timezones"
-                  value={tzDraft}
-                  onChange={(e) => setTzDraft(e.target.value)}
-                  onBlur={() => {
-                    const t = tzDraft.trim();
-                    if (t !== (api.userTimezone || "").trim()) {
-                      void api.setUserTimezone(t || null);
-                    }
-                  }}
-                  placeholder="Europe/Madrid"
-                  autoComplete="off"
-                />
-                <datalist id="iana-timezones">
-                  {tzOptions.map((z) => (
-                    <option key={z} value={z} />
+      <SettingsLayout
+        title={t("settings.hub.title")}
+        intro={t("settings.hub.intro")}
+        backHref="/"
+        backLabel={t("settings.technical.backToChat")}
+      >
+        <div className="space-y-4">
+          {SETTINGS_GROUPS.map((group) => {
+            const sections = SETTINGS_SECTIONS.filter((section) => section.group === group.id);
+            return (
+              <section key={group.id} aria-label={t(group.titleKey)}>
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-muted">{t(group.titleKey)}</h2>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {sections.map((section) => (
+                    <SettingsHubCard key={section.id} section={section} />
                   ))}
-                </datalist>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md border border-border bg-surface-muted px-2 py-1 text-xs text-fg hover:bg-surface-base"
-                    onClick={() => void api.applyBrowserTimeZone()}
-                  >
-                    {t("settings.technical.useBrowserTz")}
-                  </button>
                 </div>
-                <span className="text-xs text-fg-subtle">{t("settings.technical.timezoneHint")}</span>
-              </div>
-              <label className="flex min-w-[12rem] flex-col gap-1 text-sm text-fg">
-                <span className="text-fg-muted">{t("settings.technical.timeFormatLabel")}</span>
-                <select
-                  className="rounded-md border border-border bg-surface-base px-2 py-1.5 text-fg"
-                  value={api.timeFormat}
-                  onChange={(e) => {
-                    const v = e.target.value as TimeFormatPreference;
-                    void api.setTimeFormat(v);
-                  }}
-                >
-                  <option value="auto">{t("settings.technical.timeFormat.auto")}</option>
-                  <option value="24">{t("settings.technical.timeFormat.24")}</option>
-                  <option value="12">{t("settings.technical.timeFormat.12")}</option>
-                </select>
-              </label>
-            </div>
-
-            {api.loadError ? (
-              <p
-                role="alert"
-                className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-200"
-              >
-                {api.loadError}
-              </p>
-            ) : null}
-
-            {api.loading && providers.length === 0 ? (
-              <p className="text-sm text-fg-subtle">{t("settings.providersLoading")}</p>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-[16rem_1fr]">
-                <ProviderList
-                  providers={providers}
-                  configs={api.configs}
-                  activeKind={api.activeKind}
-                  selectedKind={api.selectedKind}
-                  onSelect={api.selectKind}
-                  onStartNew={api.startNew}
-                />
-                <ProviderForm api={api} />
-              </div>
-            )}
-
-            {api.toast ? (
-              <StatusToast
-                kind="ok"
-                text={api.toast}
-                onDismiss={api.dismissToast}
-                dismissAriaLabel={t("chat.dismissToast")}
-              />
-            ) : null}
-          </Card>
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("settings.agentRuntime.title")}</h2>
-            <p className="mb-3 text-xs text-fg-subtle">{t("settings.agentRuntime.intro")}</p>
-            <AgentRuntimeSection
-              agentRuntime={api.agentRuntime}
-              formKey={api.agentRuntimeFormKey}
-              saving={api.agentRuntimeSaving}
-              error={api.agentRuntimeError}
-              patchAgentRuntime={api.patchAgentRuntime}
-              resetAllAgentRuntimeOverrides={api.resetAllAgentRuntimeOverrides}
-            />
-          </Card>
-
-          <TelemetrySection />
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("theme.sectionTitle")}</h2>
-            <ThemeSection />
-          </Card>
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("language.sectionTitle")}</h2>
-            <LanguageSection />
-          </Card>
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("settings.connectorsCardTitle")}</h2>
-            <p className="mb-3 text-xs text-fg-subtle">{t("settings.connectorsCardIntro")}</p>
-            <ConnectorsSection />
-          </Card>
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("settings.memorySectionTitle")}</h2>
-            <MemorySection />
-          </Card>
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("settings.skillsSectionTitle")}</h2>
-            <SkillsSection />
-          </Card>
-
-          <Card>
-            <h2 className="mb-1 text-base font-semibold">{t("settings.maintenanceSectionTitle")}</h2>
-            <MaintenanceSection />
-          </Card>
-        </main>
-      </div>
+              </section>
+            );
+          })}
+        </div>
+      </SettingsLayout>
     </ProtectedPage>
+  );
+}
+
+function SettingsHubCard({ section }: { section: SettingsSection }) {
+  const { t } = useTranslation();
+
+  return (
+    <Link href={section.href} className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <Card className="h-full transition-colors hover:border-primary hover:bg-surface-muted">
+        <div className="mb-3 inline-flex rounded-md border border-border bg-surface-base p-2 text-fg">
+          <SettingsSectionIcon sectionId={section.id} />
+        </div>
+        <h3 className="text-sm font-semibold text-fg">{t(section.titleKey)}</h3>
+        <p className="mt-1 text-sm text-fg-muted">{t(section.descriptionKey)}</p>
+      </Card>
+    </Link>
   );
 }
