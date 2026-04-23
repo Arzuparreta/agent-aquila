@@ -28,6 +28,9 @@ Return ONLY valid JSON: {{"proposals":[{{"key":"...","content":"...","importance
 Rules:
 - Propose durable, stable facts that will matter in future sessions (identity, preferences, standing decisions, user-specific conventions, recurring workflows).
 - Use dot-separated keys: user.profile.*, memory.durable.*, agent.identity.*, memory.daily.YYYY-MM-DD, prefs.*.
+- Do not propose memory.durable.* (or prefs.*) for transient tool outcomes (e.g. one Gmail search returned no rows, query strings from a single attempt) unless the user asked to remember that — use high ephemeral signal or omit; dated-only noise may use memory.daily.* if truly useful.
+- Do not propose prefs.* for generic assistant playbooks the user never stated (default procedures belong in system/workspace rules, not USER memory).
+- When unsure whether a user-specific fact could help later, propose it anyway — bias toward capture; judges and downstream cleanup can trim noise.
 - importance 0-10 (initial estimate; judge may change).
 - signals are soft scores in [0,1] for the rubric dimensions; ephemeral should be high for throwaway/one-off details.
 - If nothing is worth persisting, return {{"proposals":[]}}.
@@ -44,7 +47,9 @@ Return ONLY valid JSON: {{"approved":[{{"key":"...","content":"...","importance"
 
 Rules:
 - Approve only entries that are truly durable; drop trivia, one-off chit-chat, and raw dumps.
+- Drop (or downgrade to daily-only) proposals that are only transient API/tool diagnostics or empty-search logs unless the user asked to remember them; drop prefs.* that restate generic procedures the user never requested.
 - Merge duplicates; fix keys to be canonical; adjust importance 0-10. Prefer fewer, higher-signal entries.
+- When choosing between dropping a borderline user-specific fact and keeping it, prefer **approve** — noise is acceptable.
 - Approve agent.identity.* when names are assigned or confirmed.
 - If all proposals are low-value, return {{"approved":[], "dropped":[{{"key":"*","reason":"..."}}]}}.
 - "dropped" can include objects with "key" and "reason" strings.

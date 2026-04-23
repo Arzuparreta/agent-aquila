@@ -90,6 +90,7 @@ Rules:
 - Keys: lowercase, dot-separated segments, max 200 characters. Use prefixes such as
   user.profile.*, agent.identity.*, memory.durable.*, prefs.* — never raw PII buckets.
 - Content: short plain text; one main fact per entry.
+- Skip memory.durable.* (and prefs.*) for one-off tool outcomes that will go stale (e.g. a single empty Gmail search and its query list) unless the user asked to remember; skip prefs.* for generic how-to lines the user never stated. If torn about a user-specific fact, include it — noise is tolerable.
 - importance: integer 0-10 (use 8-10 when the user explicitly asked to remember, or for stable identity).
 - Do NOT store passwords, API keys, tokens, or full third-party message bodies.
 - Do NOT assert that "scheduled" or "automatic" or "background" help is impossible — the stack supports **heartbeat** (scheduled agent turns) when configured; if the user only stated a wish (e.g. daily digest), store the wish without a false limitation.
