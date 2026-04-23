@@ -194,7 +194,7 @@ export function Combobox<T extends string>({
         onClick={() => setOpen(true)}
         onKeyDown={onKeyDown}
         className={cn(
-          "w-full rounded border border-border bg-surface-inset px-3 py-2 pr-8 text-sm text-fg",
+          "w-full rounded border border-border bg-surface-inset px-3 py-2 pr-8 text-base leading-normal text-fg md:text-sm",
           "focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring",
           disabled && "cursor-not-allowed bg-surface-muted text-fg-subtle"
         )}

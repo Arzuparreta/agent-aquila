@@ -6,7 +6,7 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
   return (
     <select
       className={cn(
-        "w-full rounded border border-border bg-surface-inset px-3 py-2 text-sm text-fg",
+        "w-full rounded border border-border bg-surface-inset px-3 py-2 text-base leading-normal text-fg md:text-sm",
         className
       )}
       {...props}

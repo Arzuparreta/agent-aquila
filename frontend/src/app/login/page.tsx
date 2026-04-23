@@ -9,7 +9,10 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
 import { useTranslation } from "@/lib/i18n";
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, "");
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(
+  /\/$/,
+  "",
+);
 
 function messageFromFastApiDetail(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
@@ -17,8 +20,10 @@ function messageFromFastApiDetail(body: unknown): string | null {
   if (typeof detail === "string" && detail.trim()) return detail.trim();
   if (detail && typeof detail === "object" && !Array.isArray(detail)) {
     const rec = detail as Record<string, unknown>;
-    if (typeof rec.message === "string" && rec.message.trim()) return rec.message.trim();
-    if (typeof rec.detail === "string" && rec.detail.trim()) return rec.detail.trim();
+    if (typeof rec.message === "string" && rec.message.trim())
+      return rec.message.trim();
+    if (typeof rec.detail === "string" && rec.detail.trim())
+      return rec.detail.trim();
     const kind = typeof rec.kind === "string" ? rec.kind : "";
     if (kind) {
       try {
@@ -49,7 +54,7 @@ function messageFromFastApiDetail(body: unknown): string | null {
 /** Read error body: Next/proxies sometimes omit or mislabel Content-Type on 5xx. */
 async function messageFromErrorResponse(
   response: Response,
-  htmlFallback: string
+  htmlFallback: string,
 ): Promise<string | null> {
   const raw = await response.text();
   const trimmed = raw.trim();
@@ -84,13 +89,13 @@ export default function LoginPage() {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password }),
       });
 
       if (!response.ok) {
         let message: string | null = await messageFromErrorResponse(
           response,
-          t("login.errorHtmlResponse")
+          t("login.errorHtmlResponse"),
         );
         if (!message) {
           message =
@@ -116,23 +121,30 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="mx-auto mt-24 max-w-md px-4">
-      <Card>
-        <h1 className="mb-4 text-xl font-semibold">{t("login.title")}</h1>
-        <form className="space-y-3" onSubmit={onSubmit}>
-          <Input placeholder={t("login.email")} type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <Input
-            placeholder={t("login.password")}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          <Button className="w-full" type="submit">
-            {t("login.signIn")}
-          </Button>
-        </form>
-      </Card>
+    <main className="page-scroll bg-surface-base text-fg">
+      <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col justify-center px-4 pb-10 pt-[max(2.5rem,env(safe-area-inset-top))]">
+        <Card>
+          <h1 className="mb-4 text-xl font-semibold">{t("login.title")}</h1>
+          <form className="space-y-3" onSubmit={onSubmit}>
+            <Input
+              placeholder={t("login.email")}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <Input
+              placeholder={t("login.password")}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            <Button className="w-full" type="submit">
+              {t("login.signIn")}
+            </Button>
+          </form>
+        </Card>
+      </div>
     </main>
   );
 }

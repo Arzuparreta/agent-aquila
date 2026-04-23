@@ -18,11 +18,19 @@ export function ProtectedPage({ children }: { children: React.ReactNode }) {
   }, [authHydrated, isAuthenticated, router]);
 
   if (!authHydrated) {
-    return <div className="p-6">{t("auth.loadingSession")}</div>;
+    return (
+      <div className="page-scroll bg-surface-base p-6 text-fg">
+        {t("auth.loadingSession")}
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
-    return <div className="p-6">{t("auth.redirecting")}</div>;
+    return (
+      <div className="page-scroll bg-surface-base p-6 text-fg">
+        {t("auth.redirecting")}
+      </div>
+    );
   }
 
   return <>{children}</>;

@@ -22,7 +22,7 @@ export function SettingsLayout({
   contentClassName?: string;
 }) {
   return (
-    <div className="min-h-screen bg-surface-base text-fg">
+    <div className="page-scroll bg-surface-base text-fg">
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-surface-elevated px-4 py-3 shadow-sm">
         <Link href={backHref} className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-surface-muted">
           {backLabel}

@@ -724,7 +724,7 @@ export function ConnectorsSection() {
         <label className="mt-2 block text-xs font-medium text-fg">
           {t("connectors.publicUrlLabel")}
           <Input
-            className="mt-1 font-mono text-xs"
+            className="mt-1 font-mono text-base md:text-xs"
             value={oauthPublicBase}
             onChange={(e) => setOauthPublicBase(e.target.value)}
             placeholder={t("connectors.publicUrlPlaceholder")}
@@ -803,7 +803,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.google.clientId")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               value={googleFormClientId}
               onChange={(e) => setGoogleFormClientId(e.target.value)}
               placeholder={t("connectors.google.clientIdPlaceholder")}
@@ -813,7 +813,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.google.clientSecret")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={googleFormSecret}
               onChange={(e) => setGoogleFormSecret(e.target.value)}
@@ -944,7 +944,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.ms.clientId")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               value={msFormClientId}
               onChange={(e) => setMsFormClientId(e.target.value)}
               placeholder={t("connectors.ms.clientIdPlaceholder")}
@@ -954,7 +954,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             <RichText text={t("connectors.ms.tenant")} />
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               value={msFormTenant}
               onChange={(e) => setMsFormTenant(e.target.value)}
               placeholder={t("connectors.ms.tenantPlaceholder")}
@@ -967,7 +967,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.ms.clientSecret")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={msFormSecret}
               onChange={(e) => setMsFormSecret(e.target.value)}
@@ -1047,7 +1047,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.whatsapp.accessToken")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={waAccessToken}
               onChange={(e) => setWaAccessToken(e.target.value)}
@@ -1057,7 +1057,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.whatsapp.phoneNumberId")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               value={waPhoneId}
               onChange={(e) => setWaPhoneId(e.target.value)}
               autoComplete="off"
@@ -1066,7 +1066,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.whatsapp.graphVersion")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               value={waGraphVer}
               onChange={(e) => setWaGraphVer(e.target.value)}
               placeholder="v21.0"
@@ -1117,7 +1117,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.icloud.appleId")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="email"
               value={icloudAppleId}
               onChange={(e) => setIcloudAppleId(e.target.value)}
@@ -1127,7 +1127,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.icloud.appPassword")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={icloudAppPassword}
               onChange={(e) => setIcloudAppPassword(e.target.value)}
@@ -1189,7 +1189,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.github.pat")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={ghPat}
               onChange={(e) => setGhPat(e.target.value)}
@@ -1237,7 +1237,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.slack.botToken")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={slackBotToken}
               onChange={(e) => setSlackBotToken(e.target.value)}
@@ -1285,7 +1285,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.linear.apiKey")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={linearApiKey}
               onChange={(e) => setLinearApiKey(e.target.value)}
@@ -1333,7 +1333,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.notion.secret")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={notionSecret}
               onChange={(e) => setNotionSecret(e.target.value)}
@@ -1381,7 +1381,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.telegram.botToken")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={telegramBotToken}
               onChange={(e) => setTelegramBotToken(e.target.value)}
@@ -1429,7 +1429,7 @@ export function ConnectorsSection() {
           <label className="text-xs font-medium text-fg">
             {t("connectors.discord.botToken")}
             <Input
-              className="mt-1 font-mono text-xs"
+              className="mt-1 font-mono text-base md:text-xs"
               type="password"
               value={discordBotToken}
               onChange={(e) => setDiscordBotToken(e.target.value)}
@@ -1493,7 +1493,7 @@ export function ConnectorsSection() {
           <label className="text-sm font-medium text-fg">
             {t("connectors.advanced.credentials")}
             <textarea
-              className="mt-1 min-h-[120px] w-full rounded-md border border-border bg-surface-elevated px-3 py-2 font-mono text-xs"
+              className="mt-1 min-h-[120px] w-full rounded-md border border-border bg-surface-elevated px-3 py-2 font-mono text-base md:text-xs"
               value={credentialsJson}
               onChange={(e) => setCredentialsJson(e.target.value)}
               spellCheck={false}

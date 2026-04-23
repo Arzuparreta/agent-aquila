@@ -68,7 +68,9 @@ export default function DashboardPage() {
   const [runs, setRuns] = useState<AgentRunSummary[]>([]);
   const [budget, setBudget] = useState<ContextBudgetDebug | null>(null);
   const [ai, setAi] = useState<AISettings | null>(null);
-  const [pair, setPair] = useState<{ code: string; expires_at: string } | null>(null);
+  const [pair, setPair] = useState<{ code: string; expires_at: string } | null>(
+    null,
+  );
   const [tgLinked, setTgLinked] = useState<boolean | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -117,169 +119,212 @@ export default function DashboardPage() {
 
   const genTelegramCode = async () => {
     setPair(null);
-    const p = await apiFetch<{ code: string; expires_at: string }>("/telegram/pairing-code", {
-      method: "POST",
-    });
+    const p = await apiFetch<{ code: string; expires_at: string }>(
+      "/telegram/pairing-code",
+      {
+        method: "POST",
+      },
+    );
     setPair(p);
     void load();
   };
 
   return (
     <ProtectedPage>
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h1 className="text-xl font-semibold">Dashboard</h1>
-          <div className="flex gap-2">
-            <Link href="/" className="text-sm text-fg-muted underline">
-              Chat
-            </Link>
-            <Link href="/settings" className="text-sm text-fg-muted underline">
-              Settings
-            </Link>
-          </div>
-        </div>
-
-        {err ? (
-          <Card className="border-rose-700/50 bg-rose-950/20 p-3 text-sm text-rose-200">{err}</Card>
-        ) : null}
-
-        <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Agent control</h2>
-          {ai ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm text-fg-muted">
-                Status: {ai.agent_processing_paused ? "Paused" : "Running"}
-              </span>
-              <Button className="text-xs" onClick={() => void togglePause()}>
-                {ai.agent_processing_paused ? "Resume agent" : "Pause agent"}
-              </Button>
+      <div className="page-scroll">
+        <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 pb-safe-plus">
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="text-xl font-semibold">Dashboard</h1>
+            <div className="flex gap-2">
+              <Link href="/" className="text-sm text-fg-muted underline">
+                Chat
+              </Link>
+              <Link
+                href="/settings"
+                className="text-sm text-fg-muted underline"
+              >
+                Settings
+              </Link>
             </div>
-          ) : (
-            <p className="text-sm text-fg-muted">Loading…</p>
-          )}
-        </Card>
+          </div>
 
-        <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Setup checklist</h2>
-          {onb ? (
-            <ul className="list-inside list-disc text-sm text-fg-muted">
-              <li>Database: {onb.database_ok ? "OK" : "unreachable"}</li>
-              <li>Redis: {onb.redis_ok ? "OK" : "not reachable (async chat may fall back to sync)"}</li>
-              <li>AI provider selected: {onb.has_ai_provider ? "yes" : "no — open Settings → AI"}</li>
-              <li>Connectors linked: {onb.connector_count}</li>
-              <li>Telegram bot configured: {onb.telegram_configured ? "yes" : "no (TELEGRAM_BOT_TOKEN)"}</li>
-              <li>Async agent runs: {onb.agent_async_runs ? "enabled" : "disabled or missing Redis"}</li>
-            </ul>
-          ) : (
-            <p className="text-sm text-fg-muted">Loading…</p>
-          )}
-        </Card>
+          {err ? (
+            <Card className="border-rose-700/50 bg-rose-950/20 p-3 text-sm text-rose-200">
+              {err}
+            </Card>
+          ) : null}
 
-        <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Live status</h2>
-          {st ? (
-            <ul className="list-inside list-disc text-sm text-fg-muted">
-              <li>DB ping: {st.database_ok ? "OK" : "failed"}</li>
-              <li>Redis URL set: {st.redis_configured ? "yes" : "no"}</li>
-              <li>Redis ping: {st.redis_ping_ok ? "OK" : "failed"}</li>
-              <li>ARQ pool: {st.arq_pool_ok ? "OK" : "not available"}</li>
-            </ul>
-          ) : (
-            <p className="text-sm text-fg-muted">Loading…</p>
-          )}
-        </Card>
+          <Card className="space-y-2 p-4">
+            <h2 className="font-medium">Agent control</h2>
+            {ai ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-fg-muted">
+                  Status: {ai.agent_processing_paused ? "Paused" : "Running"}
+                </span>
+                <Button className="text-xs" onClick={() => void togglePause()}>
+                  {ai.agent_processing_paused ? "Resume agent" : "Pause agent"}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            )}
+          </Card>
 
-        <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Last 24h activity</h2>
-          {metrics ? (
-            <ul className="text-sm text-fg-muted">
-              <li>Runs: {metrics.agent_runs_last_24h}</li>
-              <li>Completed: {metrics.agent_runs_completed_last_24h}</li>
-              <li>Failed: {metrics.agent_runs_failed_last_24h}</li>
-              <li>Needs attention: {metrics.agent_runs_needs_attention_last_24h}</li>
-            </ul>
-          ) : (
-            <p className="text-sm text-fg-muted">Loading…</p>
-          )}
-        </Card>
+          <Card className="space-y-2 p-4">
+            <h2 className="font-medium">Setup checklist</h2>
+            {onb ? (
+              <ul className="list-inside list-disc text-sm text-fg-muted">
+                <li>Database: {onb.database_ok ? "OK" : "unreachable"}</li>
+                <li>
+                  Redis:{" "}
+                  {onb.redis_ok
+                    ? "OK"
+                    : "not reachable (async chat may fall back to sync)"}
+                </li>
+                <li>
+                  AI provider selected:{" "}
+                  {onb.has_ai_provider ? "yes" : "no — open Settings → AI"}
+                </li>
+                <li>Connectors linked: {onb.connector_count}</li>
+                <li>
+                  Telegram bot configured:{" "}
+                  {onb.telegram_configured ? "yes" : "no (TELEGRAM_BOT_TOKEN)"}
+                </li>
+                <li>
+                  Async agent runs:{" "}
+                  {onb.agent_async_runs
+                    ? "enabled"
+                    : "disabled or missing Redis"}
+                </li>
+              </ul>
+            ) : (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            )}
+          </Card>
 
-        <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Context budget (debug)</h2>
-          {budget ? (
-            <ul className="list-inside list-disc text-sm text-fg-muted">
-              <li>
-                Provider/model: {budget.provider_kind} / {budget.model}
-              </li>
-              <li>Limits source: {budget.model_limits_source}</li>
-              <li>Context window: {budget.context_window}</li>
-              <li>Default output cap: {budget.max_output_tokens_default}</li>
-              <li>Reserved output tokens: {budget.reserved_output_tokens}</li>
-              <li>Input budget tokens: {budget.input_budget_tokens}</li>
-              <li>Estimated input tokens (sample): {budget.estimated_input_tokens}</li>
-              <li>Would compact: {budget.would_compact ? "yes" : "no"}</li>
-              <li>
-                Flags: budget_v2={String(budget.runtime_flags.context_budget_v2)}, history=
-                {String(budget.runtime_flags.token_aware_history)}, dynamic_limits=
-                {String(budget.runtime_flags.dynamic_model_limits)}
-              </li>
-            </ul>
-          ) : (
-            <p className="text-sm text-fg-muted">Loading…</p>
-          )}
-        </Card>
+          <Card className="space-y-2 p-4">
+            <h2 className="font-medium">Live status</h2>
+            {st ? (
+              <ul className="list-inside list-disc text-sm text-fg-muted">
+                <li>DB ping: {st.database_ok ? "OK" : "failed"}</li>
+                <li>Redis URL set: {st.redis_configured ? "yes" : "no"}</li>
+                <li>Redis ping: {st.redis_ping_ok ? "OK" : "failed"}</li>
+                <li>ARQ pool: {st.arq_pool_ok ? "OK" : "not available"}</li>
+              </ul>
+            ) : (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            )}
+          </Card>
 
-        <Card className="space-y-3 p-4">
-          <h2 className="font-medium">Telegram</h2>
-          {onb?.telegram_configured ? (
-            <>
-              <p className="text-sm text-fg-muted">
-                Linked: {tgLinked === null ? "…" : tgLinked ? "yes" : "no"}
-              </p>
-              <Button className="text-xs" onClick={() => void genTelegramCode()}>
-                Generate link code
-              </Button>
-              {pair ? (
-                <p className="rounded-md bg-surface-muted p-2 font-mono text-sm">
-                  Send to the bot:{" "}
-                  <strong>
-                    /start {pair.code}
-                  </strong>
-                  <br />
-                  <span className="text-fg-muted">Expires: {pair.expires_at}</span>
+          <Card className="space-y-2 p-4">
+            <h2 className="font-medium">Last 24h activity</h2>
+            {metrics ? (
+              <ul className="text-sm text-fg-muted">
+                <li>Runs: {metrics.agent_runs_last_24h}</li>
+                <li>Completed: {metrics.agent_runs_completed_last_24h}</li>
+                <li>Failed: {metrics.agent_runs_failed_last_24h}</li>
+                <li>
+                  Needs attention: {metrics.agent_runs_needs_attention_last_24h}
+                </li>
+              </ul>
+            ) : (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            )}
+          </Card>
+
+          <Card className="space-y-2 p-4">
+            <h2 className="font-medium">Context budget (debug)</h2>
+            {budget ? (
+              <ul className="list-inside list-disc text-sm text-fg-muted">
+                <li>
+                  Provider/model: {budget.provider_kind} / {budget.model}
+                </li>
+                <li>Limits source: {budget.model_limits_source}</li>
+                <li>Context window: {budget.context_window}</li>
+                <li>Default output cap: {budget.max_output_tokens_default}</li>
+                <li>Reserved output tokens: {budget.reserved_output_tokens}</li>
+                <li>Input budget tokens: {budget.input_budget_tokens}</li>
+                <li>
+                  Estimated input tokens (sample):{" "}
+                  {budget.estimated_input_tokens}
+                </li>
+                <li>Would compact: {budget.would_compact ? "yes" : "no"}</li>
+                <li>
+                  Flags: budget_v2=
+                  {String(budget.runtime_flags.context_budget_v2)}, history=
+                  {String(budget.runtime_flags.token_aware_history)},
+                  dynamic_limits=
+                  {String(budget.runtime_flags.dynamic_model_limits)}
+                </li>
+              </ul>
+            ) : (
+              <p className="text-sm text-fg-muted">Loading…</p>
+            )}
+          </Card>
+
+          <Card className="space-y-3 p-4">
+            <h2 className="font-medium">Telegram</h2>
+            {onb?.telegram_configured ? (
+              <>
+                <p className="text-sm text-fg-muted">
+                  Linked: {tgLinked === null ? "…" : tgLinked ? "yes" : "no"}
                 </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm text-fg-muted">
-              Open Settings → Telegram bot, paste your BotFather token (long polling is on by default), and keep
-              the worker running. Then refresh this page.
-            </p>
-          )}
-        </Card>
-
-        <Card className="space-y-2 p-4">
-          <h2 className="font-medium">Recent agent runs</h2>
-          <ul className="space-y-2 text-sm">
-            {runs.map((r) => (
-              <li key={r.id} className="rounded-md border border-border-subtle p-2">
-                <div className="flex justify-between gap-2">
-                  <span className="font-mono text-xs text-fg-muted">#{r.id}</span>
-                  <span className="text-xs uppercase text-fg-muted">{r.status}</span>
-                </div>
-                <p className="mt-1 text-fg">{r.user_message_preview}</p>
-                {r.root_trace_id ? (
-                  <Link
-                    className="mt-1 inline-block text-xs text-accent underline"
-                    href={`/settings`}
-                    title="Open run in API client or add trace viewer here"
-                  >
-                    trace {r.root_trace_id.slice(0, 8)}…
-                  </Link>
+                <Button
+                  className="text-xs"
+                  onClick={() => void genTelegramCode()}
+                >
+                  Generate link code
+                </Button>
+                {pair ? (
+                  <p className="rounded-md bg-surface-muted p-2 font-mono text-sm">
+                    Send to the bot: <strong>/start {pair.code}</strong>
+                    <br />
+                    <span className="text-fg-muted">
+                      Expires: {pair.expires_at}
+                    </span>
+                  </p>
                 ) : null}
-              </li>
-            ))}
-          </ul>
-        </Card>
+              </>
+            ) : (
+              <p className="text-sm text-fg-muted">
+                Open Settings → Telegram bot, paste your BotFather token (long
+                polling is on by default), and keep the worker running. Then
+                refresh this page.
+              </p>
+            )}
+          </Card>
+
+          <Card className="space-y-2 p-4">
+            <h2 className="font-medium">Recent agent runs</h2>
+            <ul className="space-y-2 text-sm">
+              {runs.map((r) => (
+                <li
+                  key={r.id}
+                  className="rounded-md border border-border-subtle p-2"
+                >
+                  <div className="flex justify-between gap-2">
+                    <span className="font-mono text-xs text-fg-muted">
+                      #{r.id}
+                    </span>
+                    <span className="text-xs uppercase text-fg-muted">
+                      {r.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-fg">{r.user_message_preview}</p>
+                  {r.root_trace_id ? (
+                    <Link
+                      className="mt-1 inline-block text-xs text-accent underline"
+                      href={`/settings`}
+                      title="Open run in API client or add trace viewer here"
+                    >
+                      trace {r.root_trace_id.slice(0, 8)}…
+                    </Link>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
       </div>
     </ProtectedPage>
   );

@@ -384,7 +384,7 @@ export function AgentRuntimeSection({
           <label className="flex min-w-[18rem] max-w-full flex-1 flex-col gap-1 text-sm text-fg">
             <span className="text-fg-muted">{t("settings.agentRuntime.emailDomainAllowlist")}</span>
             <textarea
-              className="min-h-[4rem] rounded-md border border-border bg-surface-base px-2 py-1.5 font-mono text-xs text-fg"
+              className="min-h-[4rem] rounded-md border border-border bg-surface-base px-2 py-1.5 font-mono text-base text-fg md:text-xs"
               defaultValue={agentRuntime.agent_email_domain_allowlist}
               disabled={saving}
               key={`allow-${formKey}`}

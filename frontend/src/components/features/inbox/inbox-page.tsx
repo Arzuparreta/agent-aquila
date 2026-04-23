@@ -520,7 +520,7 @@ function SearchBar({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={t("inbox.searchPlaceholder")}
-          className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
+          className="min-w-0 flex-1 bg-transparent text-base text-fg outline-none placeholder:text-fg-subtle md:text-sm"
         />
         <button
           type="submit"
