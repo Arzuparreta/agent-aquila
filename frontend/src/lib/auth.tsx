@@ -18,23 +18,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const [authHydrated, setAuthHydrated] = useState(false);
 
-  // Sync token with api.ts module
-  const syncToken = useCallback((newToken: string | null) => {
-    setTokenState(newToken);
-    setApiAccessToken(newToken);
-  }, []);
-
-  // Expose token setter globally for api.ts refresh logic
+  // Sync token with api.ts module using callback pattern
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      (window as any).__setAuthToken = syncToken;
-    }
-    return () => {
-      if (typeof window !== "undefined") {
-        delete (window as any).__setAuthToken;
-      }
-    };
-  }, [syncToken]);
+    // Import setApiAccessToken from api.ts
+    import("@/lib/api").then((api) => {
+      api.setApiAccessToken(token);
+    }).catch(() => {
+      // Ignore import errors
+    });
+  }, [token]);
 
   // Restore session on mount by trying to refresh with HTTP-only cookie
   useEffect(() => {
@@ -42,11 +34,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setToken = (value: string | null) => {
-    syncToken(value);
+    setTokenState(value);
   };
 
   const logout = useCallback(async () => {
-    syncToken(null);
+    setTokenState(null);
     try {
       await fetch("/api/v1/auth/logout", {
         method: "POST",
@@ -59,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== "undefined") {
       localStorage.removeItem("token"); // Clean up old tokens if any
     }
-  }, [syncToken]);
+  }, []);
 
   const refreshSession = useCallback(async (): Promise<boolean> => {
     try {
@@ -70,21 +62,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (response.ok) {
         const data = await response.json();
-        syncToken(data.access_token);
+        setTokenState(data.access_token);
         setAuthHydrated(true);
         return true;
       } else {
         // Refresh failed - user needs to log in again
-        syncToken(null);
+        setTokenState(null);
         setAuthHydrated(true);
         return false;
       }
     } catch {
-      syncToken(null);
+      setTokenState(null);
       setAuthHydrated(true);
       return false;
     }
-  }, [syncToken]);
+  }, []);
 
   const value = useMemo(
     () => ({
