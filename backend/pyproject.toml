@@ -4,6 +4,7 @@ version = "0.0.4"
 description = "FastAPI backend for CRM + AI Cockpit MVP"
 requires-python = ">=3.11"
 dependencies = [
+  "sentry-sdk[fastapi]>=2.0.0",
   "alembic>=1.14.0",
   "arq>=0.26.1",
   "asyncpg>=0.30.0",

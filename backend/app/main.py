@@ -26,6 +26,23 @@ from app.services.ws_broker import aclose_subscriber_redis, run_redis_subscriber
 
 logger = logging.getLogger(__name__)
 
+# Initialize Sentry if DSN is configured
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        integrations=[
+            FastApiIntegration(),
+            StarletteIntegration(),
+        ],
+    )
+    print("✓ Sentry initialized with DSN:", settings.sentry_dsn[:30] + "...")
+
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
@@ -117,6 +134,7 @@ async def sqlalchemy_exception_handler(request, exc: SQLAlchemyError):
         content={"detail": "Internal server error — see backend logs for details."},
     )
 
+
 @app.exception_handler(LLMProviderError)
 async def llm_provider_exception_handler(request, exc: LLMProviderError):
     """Translate upstream provider failures into a structured 502 response.
@@ -179,7 +197,9 @@ async def key_decrypt_exception_handler(request, exc: KeyDecryptError):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
+    allow_origins=[
+        origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -191,3 +211,8 @@ app.include_router(api_router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0

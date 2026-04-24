@@ -161,6 +161,10 @@ class Settings(BaseSettings):
     # Telegram bot (optional). Webhook path uses secret; leave empty to disable routes.
     telegram_bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str = Field(default="", validation_alias="TELEGRAM_WEBHOOK_SECRET")
+    # Sentry DSN for error monitoring (optional). Leave empty to disable.
+    sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
+    sentry_environment: str = Field(default="production", validation_alias="SENTRY_ENVIRONMENT")
+    sentry_traces_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0, validation_alias="SENTRY_TRACES_SAMPLE_RATE")
     # Long polling in the ARQ worker (OpenClaw-style): no public URL / tunnel for inbound DMs.
     telegram_polling_enabled: bool = Field(default=True, validation_alias="TELEGRAM_POLLING_ENABLED")
     telegram_poll_timeout: int = Field(
