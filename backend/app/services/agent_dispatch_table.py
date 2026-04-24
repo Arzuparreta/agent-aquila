@@ -62,6 +62,7 @@ AGENT_TOOL_DISPATCH: dict[str, tuple[str, bool]] = {
     "notion_get_page": ("_tool_notion_get_page", False),
     "telegram_get_me": ("_tool_telegram_get_me", False),
     "telegram_get_updates": ("_tool_telegram_get_updates", False),
+    "telegram_send_message": ("_tool_telegram_send_message", False),
     "discord_list_guilds": ("_tool_discord_list_guilds", False),
     "discord_list_guild_channels": ("_tool_discord_list_guild_channels", False),
     "discord_get_channel_messages": ("_tool_discord_get_channel_messages", False),

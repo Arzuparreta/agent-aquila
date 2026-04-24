@@ -1000,6 +1000,24 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         },
         required=["setup_token", "bot_token"],
     ),
+    # ---- Telegram send (auto-apply) ------------------------------------
+    _fn(
+        "telegram_send_message",
+        "Send a Telegram message to a **chat_id** immediately (no approval needed). "
+        "Use for scheduled summaries, alerts, or any proactive notification the user expects. "
+        "``chat_id`` may be numeric id (e.g. 8671136588) or @channelusername for public channels. "
+        "``text`` is the message body (max 4096 chars). Optional ``connection_id`` for "
+        "users with multiple Telegram bots.",
+        {
+            **_CONNECTION_ID,
+            "chat_id": {
+                "anyOf": [{"type": "string"}, {"type": "integer"}],
+                "description": "Telegram chat_id (numeric) or @channelusername.",
+            },
+            "text": {"type": "string", "maxLength": 4096},
+        },
+        required=["chat_id", "text"],
+    ),
     _fn(
         "submit_discord_bot_credentials",
         "After ``start_connector_setup`` for **discord_bot**, persist **bot_token**. Auto-applies.",

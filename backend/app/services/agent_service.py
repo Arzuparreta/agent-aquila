@@ -1375,6 +1375,22 @@ class AgentService:
         )
 
     @staticmethod
+    async def _tool_telegram_send_message(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Send a Telegram message immediately (auto-apply, no approval needed)."""
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return {"error": "text is required"}
+        cid = args.get("chat_id")
+        if cid is None:
+            return {"error": "chat_id is required"}
+        row = await _resolve_connection(db, user, args, TELEGRAM_TOOL_PROVIDERS, label="Telegram")
+        client = await _telegram_client(db, row)
+        result = await client.send_message(cid, text[:4096])
+        return {"ok": True, "result": result}
+
+    @staticmethod
     async def _tool_discord_list_guilds(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
