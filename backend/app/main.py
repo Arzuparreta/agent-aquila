@@ -40,8 +40,8 @@ if settings.sentry_dsn:
             FastApiIntegration(),
             StarletteIntegration(),
         ],
+        release="crm-ai-cockpit-backend@0.0.4",
     )
-    print("✓ Sentry initialized with DSN:", settings.sentry_dsn[:30] + "...")
 
 
 @asynccontextmanager
@@ -213,6 +213,3 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/sentry-debug")
-async def trigger_error():
-    division_by_zero = 1 / 0
