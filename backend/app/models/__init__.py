@@ -5,6 +5,7 @@ After the OpenClaw refactor the data model is intentionally tiny:
   PendingProposal, AuditLog.
 - Connector credentials: ConnectorConnection.
 - User account + AI provider settings.
+- Refresh tokens for secure session management.
 
 No CRM (contacts/deals/events), no email/calendar/drive mirrors, no
 push subscriptions, no automations, no rag_chunks, no executed_actions.
@@ -23,6 +24,7 @@ from app.models.chat_thread import ChatThread
 from app.models.connector_connection import ConnectorConnection
 from app.models.instance_oauth_settings import InstanceOAuthSettings
 from app.models.pending_proposal import PendingProposal
+from app.models.refresh_token import RefreshToken
 from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_ai_settings import UserAISettings
@@ -42,6 +44,7 @@ __all__ = [
     "ConnectorConnection",
     "InstanceOAuthSettings",
     "PendingProposal",
+    "RefreshToken",
     "User",
     "UserAIProviderConfig",
     "UserAISettings",

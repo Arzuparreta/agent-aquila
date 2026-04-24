@@ -90,6 +90,7 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
+        credentials: "include", // Important: accept the HTTP-only cookie
       });
 
       if (!response.ok) {
@@ -107,7 +108,7 @@ export default function LoginPage() {
         return;
       }
 
-      const data: { access_token: string } = await response.json();
+      const data: { access_token: string; token_type: string } = await response.json();
       setToken(data.access_token);
       const params = new URLSearchParams(window.location.search);
       let dest = params.get("next") || "/";

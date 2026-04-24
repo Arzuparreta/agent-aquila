@@ -14,6 +14,51 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, ""
 
 const SLOW_REQUEST_MS = 4000;
 
+// Module-level access token (synchronized with AuthContext)
+let _accessToken: string | null = null;
+let _isRefreshing = false;
+let _refreshPromise: Promise<boolean> | null = null;
+
+export function setApiAccessToken(token: string | null): void {
+  _accessToken = token;
+}
+
+async function refreshAccessToken(): Promise<boolean> {
+  // Prevent multiple simultaneous refresh attempts
+  if (_isRefreshing && _refreshPromise) {
+    return _refreshPromise;
+  }
+
+  _isRefreshing = true;
+  _refreshPromise = (async () => {
+    try {
+      // Use relative URL since we're proxying through Next.js
+      const response = await fetch("/api/v1/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        _accessToken = data.access_token;
+        // Notify auth context (if available globally)
+        if (typeof window !== "undefined" && (window as any).__setAuthToken) {
+          (window as any).__setAuthToken(data.access_token);
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      _isRefreshing = false;
+      _refreshPromise = null;
+    }
+  })();
+
+  return _refreshPromise;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   /**
@@ -134,19 +179,25 @@ async function readErrorPayload(
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const method = (init?.method || "GET").toUpperCase();
   const t0 = typeof performance !== "undefined" ? performance.now() : 0;
+
+  // Build headers with access token if available
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers || {}) as Record<string, string>,
+  };
+  
+  if (_accessToken) {
+    headers["Authorization"] = `Bearer ${_accessToken}`;
+  }
 
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(init?.headers || {})
-      }
+      headers,
+      credentials: "include", // Include HTTP-only cookies (refresh token)
     });
   } catch (err) {
     recordTelemetryNetworkError({ path, method, error: err });
@@ -155,6 +206,34 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   const durationMs =
     typeof performance !== "undefined" ? performance.now() - t0 : 0;
+
+  if (response.status === 401) {
+    // Try to refresh the token
+    const refreshed = await refreshAccessToken();
+    
+    if (refreshed && _accessToken) {
+      // Retry the request with new token
+      const retryHeaders = {
+        ...headers,
+        "Authorization": `Bearer ${_accessToken}`,
+      };
+      response = await fetch(`${API_URL}${path}`, {
+        ...init,
+        headers: retryHeaders,
+        credentials: "include",
+      });
+    } else {
+      // Refresh failed - redirect to login
+      if (typeof window !== "undefined") {
+        // Clear token
+        _accessToken = null;
+        if ((window as any).__setAuthToken) {
+          (window as any).__setAuthToken(null);
+        }
+        window.location.href = "/login";
+      }
+    }
+  }
 
   if (!response.ok) {
     const { message, detail } = await readErrorPayload(response);
@@ -178,7 +257,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       (detail as Record<string, unknown>).kind === "needs_reauth";
 
     if (response.status === 401 && !isConnectorReauth && typeof window !== "undefined") {
-      localStorage.removeItem("token");
+      _accessToken = null;
+      if ((window as any).__setAuthToken) {
+        (window as any).__setAuthToken(null);
+      }
       window.location.href = "/login";
       throw new ApiError("Unauthorized", 401, detail);
     }

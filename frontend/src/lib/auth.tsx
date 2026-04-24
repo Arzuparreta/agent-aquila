@@ -1,14 +1,15 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 
 type AuthContextValue = {
   token: string | null;
   isAuthenticated: boolean;
-  /** False until the client has read `token` from localStorage (avoids a bogus redirect to /login on hard navigation). */
+  /** False until the client has tried to restore the session. */
   authHydrated: boolean;
   setToken: (token: string | null) => void;
   logout: () => void;
+  refreshSession: () => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -17,24 +18,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const [authHydrated, setAuthHydrated] = useState(false);
 
+  // Sync token with api.ts module
+  const syncToken = useCallback((newToken: string | null) => {
+    setTokenState(newToken);
+    setApiAccessToken(newToken);
+  }, []);
+
+  // Expose token setter globally for api.ts refresh logic
   useEffect(() => {
-    const stored = localStorage.getItem("token");
-    if (stored) {
-      setTokenState(stored);
+    if (typeof window !== "undefined") {
+      (window as any).__setAuthToken = syncToken;
     }
-    setAuthHydrated(true);
+    return () => {
+      if (typeof window !== "undefined") {
+        delete (window as any).__setAuthToken;
+      }
+    };
+  }, [syncToken]);
+
+  // Restore session on mount by trying to refresh with HTTP-only cookie
+  useEffect(() => {
+    refreshSession();
   }, []);
 
   const setToken = (value: string | null) => {
-    setTokenState(value);
-    if (value) {
-      localStorage.setItem("token", value);
-    } else {
-      localStorage.removeItem("token");
-    }
+    syncToken(value);
   };
 
-  const logout = () => setToken(null);
+  const logout = useCallback(async () => {
+    syncToken(null);
+    try {
+      await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        credentials: "include", // Include cookies
+      });
+    } catch {
+      // Ignore errors on logout
+    }
+    // Clear any stale data
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("token"); // Clean up old tokens if any
+    }
+  }, [syncToken]);
+
+  const refreshSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/v1/auth/refresh", {
+        method: "POST",
+        credentials: "include", // Include HTTP-only cookie
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        syncToken(data.access_token);
+        setAuthHydrated(true);
+        return true;
+      } else {
+        // Refresh failed - user needs to log in again
+        syncToken(null);
+        setAuthHydrated(true);
+        return false;
+      }
+    } catch {
+      syncToken(null);
+      setAuthHydrated(true);
+      return false;
+    }
+  }, [syncToken]);
 
   const value = useMemo(
     () => ({
@@ -42,9 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated: Boolean(token),
       authHydrated,
       setToken,
-      logout
+      logout,
+      refreshSession,
     }),
-    [token, authHydrated]
+    [token, authHydrated, logout, refreshSession]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

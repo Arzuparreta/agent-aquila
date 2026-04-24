@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.refresh_token import RefreshToken
 
 
 class User(Base, TimestampMixin):
@@ -18,6 +19,11 @@ class User(Base, TimestampMixin):
     ai_settings = relationship("UserAISettings", back_populates="user", uselist=False)
     ai_provider_configs = relationship(
         "UserAIProviderConfig",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    refresh_tokens = relationship(
+        "RefreshToken",
         back_populates="user",
         cascade="all, delete-orphan",
     )

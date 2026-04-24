@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change_me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    refresh_token_expire_days: int = 30
     # POST /auth/register — disable after your account exists on a private instance.
     registration_open: bool = Field(default=True, validation_alias="REGISTRATION_OPEN")
     # Comma-separated lowercase domains (no @). Empty = any domain when registration_open is true.

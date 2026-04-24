@@ -35,6 +35,19 @@ def create_access_token(subject: str, expires_minutes: int | None = None) -> str
     return token if isinstance(token, str) else token.decode("utf-8")
 
 
+def create_refresh_token(subject: str) -> str:
+    """Create a refresh token with longer expiry (30 days)."""
+    expires_delta = timedelta(days=settings.refresh_token_expire_days)
+    expires_at = datetime.now(UTC) + expires_delta
+    payload: dict[str, Any] = {
+        "sub": subject,
+        "exp": timegm(expires_at.utctimetuple()),
+        "type": "refresh",
+    }
+    token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return token if isinstance(token, str) else token.decode("utf-8")
+
+
 def decode_token(token: str) -> dict[str, Any] | None:
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
