@@ -58,8 +58,15 @@ def _fn(
     description: str,
     properties: dict[str, dict[str, Any]] | None = None,
     required: list[str] | None = None,
+    palette_modes: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Build one OpenAI-format function tool definition."""
+    """Build one OpenAI-format function tool definition.
+    
+    Args:
+        palette_modes: Set of palette modes this tool belongs to.
+                        If None, defaults to {"full"} (excluded from compact).
+                        Add "compact" to include in compact palette.
+    """
     schema: dict[str, Any] = {
         "type": "object",
         "properties": properties or {},
@@ -67,7 +74,7 @@ def _fn(
     }
     if required:
         schema["required"] = required
-    return {
+    tool: dict[str, Any] = {
         "type": "function",
         "function": {
             "name": name,
@@ -75,6 +82,10 @@ def _fn(
             "parameters": schema,
         },
     }
+    # Store palette_modes at top level (not in "function" to avoid API issues)
+    if palette_modes:
+        tool["_palette_modes"] = frozenset(palette_modes)
+    return tool
 
 
 _IDEMPOTENCY = {
@@ -1452,43 +1463,55 @@ AGENT_TOOLS: list[dict[str, Any]] = [
 
 AGENT_TOOL_NAMES: frozenset[str] = frozenset(t["function"]["name"] for t in AGENT_TOOLS)
 
-# Smaller palette for ``AGENT_TOOL_PALETTE=compact`` — memory, skills, time, Gmail read,
-# calendar list, OAuth setup, plus terminator (see ``tools_for_palette_mode``).
-_COMPACT_NAMES: frozenset[str] = frozenset(
-    {
-        "final_answer",
-        "get_session_time",
-        "list_skills",
-        "load_skill",
-        "list_memory",
-        "recall_memory",
-        "memory_search",
-        "memory_get",
-        "upsert_memory",
-        "delete_memory",
-        "gmail_list_messages",
-        "gmail_get_message",
-        "gmail_get_thread",
-        "calendar_list_events",
-        "calendar_list_calendars",
-        "start_connector_setup",
-        "start_oauth_flow",
-        "submit_connector_credentials",
-        "list_connectors",
-        "describe_harness",
-        "list_workspace_files",
-        "read_workspace_file",
-        "web_search",
-        "web_fetch",
-    }
-)
+# Tools that should be in compact palette - source of truth is here
+_COMPACT_PALETTE_TOOLS = frozenset({
+    "final_answer",
+    "get_session_time",
+    "list_skills",
+    "load_skill",
+    "list_memory",
+    "recall_memory",
+    "memory_search",
+    "memory_get",
+    "upsert_memory",
+    "delete_memory",
+    "gmail_list_messages",
+    "gmail_get_message",
+    "gmail_get_thread",
+    "calendar_list_events",
+    "calendar_list_calendars",
+    "start_connector_setup",
+    "start_oauth_flow",
+    "submit_connector_credentials",
+    "list_connectors",
+    "describe_harness",
+    "list_workspace_files",
+    "read_workspace_file",
+    "web_search",
+    "web_fetch",
+    "telegram_send_message",
+})
+
+# Add palette_modes metadata to tools
+for _tool in AGENT_TOOLS:
+    _name = _tool.get("function", {}).get("name")
+    if _name in _COMPACT_PALETTE_TOOLS:
+        _tool["_palette_modes"] = {"full", "compact"}
 
 
 def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
-    """Return the tool list for ``full`` (default) or ``compact`` (fewer tools, lower token use)."""
+    """Return the tool list for ``full`` (default) or ``compact`` (fewer tools, lower token use).
+    
+    The source of truth for palette membership is each tool's ``_palette_modes`` metadata.
+    Tools without ``_palette_modes`` default to ``{"full"}`` (excluded from compact).
+    """
     m = (mode or "full").strip().lower()
     if m == "compact":
-        return [t for t in AGENT_TOOLS if t["function"]["name"] in _COMPACT_NAMES]
+        # Return tools that self-declare "compact" in their _palette_modes
+        return [
+            t for t in AGENT_TOOLS
+            if "compact" in (t.get("_palette_modes") or frozenset())
+        ]
     return list(AGENT_TOOLS)
 
 
