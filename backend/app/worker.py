@@ -90,9 +90,6 @@ async def agent_heartbeat(ctx: dict[str, Any]) -> dict[str, Any]:
     cannot send email without an approval (so even a misbehaving
     heartbeat can't auto-send replies).
     """
-    if not settings.agent_heartbeat_enabled:
-        return {"skipped": True, "reason": "AGENT_HEARTBEAT_ENABLED=false"}
-
     del ctx
     summaries: list[dict[str, Any]] = []
     async with AsyncSessionLocal() as db:

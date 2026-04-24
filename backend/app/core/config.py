@@ -81,10 +81,11 @@ class Settings(BaseSettings):
     # Per-user canonical memory (MEMORY.md, USER.md) under ``data/users/<id>/`` by default.
     aquila_user_data_dir: str = Field(default="", validation_alias="AQUILA_USER_DATA_DIR")
     # Heartbeat: when true, the worker runs ``agent_heartbeat`` every
-    # ``agent_heartbeat_minutes`` minutes (defaults to off so freshly
-    # cloned dev setups never spawn surprise LLM calls).
+    # ``agent_heartbeat_minutes`` minutes. Defaults to True so that per-user
+    # settings (configured via the UI) are respected. Set to False to
+    # completely disable heartbeat for all users (e.g., in dev setups).
     agent_heartbeat_enabled: bool = Field(
-        default=False, validation_alias="AGENT_HEARTBEAT_ENABLED"
+        default=True, validation_alias="AGENT_HEARTBEAT_ENABLED"
     )
     agent_heartbeat_minutes: int = Field(
         default=15, ge=1, le=1440, validation_alias="AGENT_HEARTBEAT_MINUTES"
