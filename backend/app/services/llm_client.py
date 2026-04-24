@@ -192,11 +192,14 @@ class LLMClient:
         effective_key = api_key
         if isinstance(settings_row, LlmProviderContext):
             effective_key = api_key or (settings_row.api_key or "")
+        # Strip internal metadata (_palette_modes) before sending to LLM
+        clean_tools = [{k: v for k, v in t.items() if k != "_palette_modes"} for t in tools]
+        
         body: dict[str, Any] = {
             "model": model or _default_chat_model(settings_row),
             "messages": messages,
             "temperature": temperature,
-            "tools": tools,
+            "tools": clean_tools,
             "tool_choice": tool_choice,
         }
         if max_tokens is not None:

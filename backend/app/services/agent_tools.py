@@ -1496,7 +1496,7 @@ _COMPACT_PALETTE_TOOLS = frozenset({
 for _tool in AGENT_TOOLS:
     _name = _tool.get("function", {}).get("name")
     if _name in _COMPACT_PALETTE_TOOLS:
-        _tool["_palette_modes"] = {"full", "compact"}
+        _tool["_palette_modes"] = frozenset({"full", "compact"})
 
 
 def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
