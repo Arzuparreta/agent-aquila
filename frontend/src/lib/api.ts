@@ -14,16 +14,10 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, ""
 
 const SLOW_REQUEST_MS = 4000;
 
-// Module-level access token (synchronized with AuthContext)
-let _accessToken: string | null = null;
 let _isRefreshing = false;
-let _refreshPromise: Promise<boolean> | null = null;
+let _refreshPromise: Promise<string | null> | null = null;
 
-export function setApiAccessToken(token: string | null): void {
-  _accessToken = token;
-}
-
-async function refreshAccessToken(): Promise<boolean> {
+async function refreshAccessToken(): Promise<string | null> {
   // Prevent multiple simultaneous refresh attempts
   if (_isRefreshing && _refreshPromise) {
     return _refreshPromise;
@@ -32,7 +26,6 @@ async function refreshAccessToken(): Promise<boolean> {
   _isRefreshing = true;
   _refreshPromise = (async () => {
     try {
-      // Use relative URL since we're proxying through Next.js
       const response = await fetch("/api/v1/auth/refresh", {
         method: "POST",
         credentials: "include",
@@ -40,16 +33,16 @@ async function refreshAccessToken(): Promise<boolean> {
 
       if (response.ok) {
         const data = await response.json();
-        _accessToken = data.access_token;
-        // Notify auth context (if available globally)
-        if (typeof window !== "undefined" && (window as any).__setAuthToken) {
-          (window as any).__setAuthToken(data.access_token);
+        const newToken = data.access_token;
+        // Save to localStorage
+        if (typeof window !== "undefined") {
+          localStorage.setItem("token", newToken);
         }
-        return true;
+        return newToken;
       }
-      return false;
+      return null;
     } catch {
-      return false;
+      return null;
     } finally {
       _isRefreshing = false;
       _refreshPromise = null;
@@ -182,14 +175,17 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const method = (init?.method || "GET").toUpperCase();
   const t0 = typeof performance !== "undefined" ? performance.now() : 0;
 
+  // Read token from localStorage (like original working code)
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+
   // Build headers with access token if available
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(init?.headers || {}) as Record<string, string>,
   };
   
-  if (_accessToken) {
-    headers["Authorization"] = `Bearer ${_accessToken}`;
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   let response: Response;
@@ -209,13 +205,13 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (response.status === 401) {
     // Try to refresh the token
-    const refreshed = await refreshAccessToken();
+    const newToken = await refreshAccessToken();
     
-    if (refreshed && _accessToken) {
+    if (newToken) {
       // Retry the request with new token
       const retryHeaders = {
         ...headers,
-        "Authorization": `Bearer ${_accessToken}`,
+        "Authorization": `Bearer ${newToken}`,
       };
       response = await fetch(`${API_URL}${path}`, {
         ...init,
@@ -225,11 +221,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     } else {
       // Refresh failed - redirect to login
       if (typeof window !== "undefined") {
-        // Clear token
-        _accessToken = null;
-        if ((window as any).__setAuthToken) {
-          (window as any).__setAuthToken(null);
-        }
+        localStorage.removeItem("token");
         window.location.href = "/login";
       }
     }
@@ -257,10 +249,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       (detail as Record<string, unknown>).kind === "needs_reauth";
 
     if (response.status === 401 && !isConnectorReauth && typeof window !== "undefined") {
-      _accessToken = null;
-      if ((window as any).__setAuthToken) {
-        (window as any).__setAuthToken(null);
-      }
+      localStorage.removeItem("token");
       window.location.href = "/login";
       throw new ApiError("Unauthorized", 401, detail);
     }

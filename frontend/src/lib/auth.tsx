@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 type AuthContextValue = {
   token: string | null;
@@ -18,65 +18,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const [authHydrated, setAuthHydrated] = useState(false);
 
-  // Sync token with api.ts module using callback pattern
+  // Restore session on mount: check localStorage first, then try refresh token
   useEffect(() => {
-    // Import setApiAccessToken from api.ts
-    import("@/lib/api").then((api) => {
-      api.setApiAccessToken(token);
-    }).catch(() => {
-      // Ignore import errors
-    });
-  }, [token]);
-
-  // Restore session on mount by trying to refresh with HTTP-only cookie
-  useEffect(() => {
-    refreshSession();
-  }, []);
+    const stored = localStorage.getItem("token");
+    if (stored) {
+      setTokenState(stored);
+      setAuthHydrated(true);
+    } else {
+      // No token in localStorage, try to refresh using HTTP-only cookie
+      refreshSession();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setToken = (value: string | null) => {
     setTokenState(value);
+    if (value) {
+      localStorage.setItem("token", value);
+    } else {
+      localStorage.removeItem("token");
+    }
   };
 
-  const logout = useCallback(async () => {
-    setTokenState(null);
-    try {
-      await fetch("/api/v1/auth/logout", {
-        method: "POST",
-        credentials: "include", // Include cookies
-      });
-    } catch {
-      // Ignore errors on logout
-    }
-    // Clear any stale data
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("token"); // Clean up old tokens if any
-    }
-  }, []);
+  const logout = () => {
+    setToken(null);
+    // Call logout endpoint to revoke refresh token
+    fetch("/api/v1/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
+  };
 
-  const refreshSession = useCallback(async (): Promise<boolean> => {
+  const refreshSession = async (): Promise<boolean> => {
     try {
       const response = await fetch("/api/v1/auth/refresh", {
         method: "POST",
-        credentials: "include", // Include HTTP-only cookie
+        credentials: "include",
       });
 
       if (response.ok) {
         const data = await response.json();
-        setTokenState(data.access_token);
+        setToken(data.access_token);
         setAuthHydrated(true);
         return true;
       } else {
-        // Refresh failed - user needs to log in again
-        setTokenState(null);
+        setToken(null);
         setAuthHydrated(true);
         return false;
       }
     } catch {
-      setTokenState(null);
+      setToken(null);
       setAuthHydrated(true);
       return false;
     }
-  }, []);
+  };
 
   const value = useMemo(
     () => ({
@@ -87,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       refreshSession,
     }),
-    [token, authHydrated, logout, refreshSession]
+    [token, authHydrated]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
