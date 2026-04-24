@@ -14,44 +14,6 @@ const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api/v1").replace(/\/$/, ""
 
 const SLOW_REQUEST_MS = 4000;
 
-let _isRefreshing = false;
-let _refreshPromise: Promise<string | null> | null = null;
-
-async function refreshAccessToken(): Promise<string | null> {
-  // Prevent multiple simultaneous refresh attempts
-  if (_isRefreshing && _refreshPromise) {
-    return _refreshPromise;
-  }
-
-  _isRefreshing = true;
-  _refreshPromise = (async () => {
-    try {
-      const response = await fetch("/api/v1/auth/refresh", {
-        method: "POST",
-        credentials: "include",
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const newToken = data.access_token;
-        // Save to localStorage
-        if (typeof window !== "undefined") {
-          localStorage.setItem("token", newToken);
-        }
-        return newToken;
-      }
-      return null;
-    } catch {
-      return null;
-    } finally {
-      _isRefreshing = false;
-      _refreshPromise = null;
-    }
-  })();
-
-  return _refreshPromise;
-}
-
 export class ApiError extends Error {
   readonly status: number;
   /**
@@ -172,28 +134,19 @@ async function readErrorPayload(
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const method = (init?.method || "GET").toUpperCase();
   const t0 = typeof performance !== "undefined" ? performance.now() : 0;
-
-  // Read token from localStorage (like original working code)
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-
-  // Build headers with access token if available
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(init?.headers || {}) as Record<string, string>,
-  };
-  
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
 
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers,
-      credentials: "include", // Include HTTP-only cookies (refresh token)
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers || {})
+      }
     });
   } catch (err) {
     recordTelemetryNetworkError({ path, method, error: err });
@@ -202,30 +155,6 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   const durationMs =
     typeof performance !== "undefined" ? performance.now() - t0 : 0;
-
-  if (response.status === 401) {
-    // Try to refresh the token
-    const newToken = await refreshAccessToken();
-    
-    if (newToken) {
-      // Retry the request with new token
-      const retryHeaders = {
-        ...headers,
-        "Authorization": `Bearer ${newToken}`,
-      };
-      response = await fetch(`${API_URL}${path}`, {
-        ...init,
-        headers: retryHeaders,
-        credentials: "include",
-      });
-    } else {
-      // Refresh failed - redirect to login
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("token");
-        window.location.href = "/login";
-      }
-    }
-  }
 
   if (!response.ok) {
     const { message, detail } = await readErrorPayload(response);
