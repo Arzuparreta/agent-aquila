@@ -1403,16 +1403,20 @@ _INTROSPECTION_TOOLS: list[dict[str, Any]] = [
         "Create a user-defined recurring scheduled task. Use when the user asks "
         "for automation like 'every night check iCloud photos' or any repeating "
         "workflow. Inputs: ``name`` (required), ``instruction`` (required), "
-        "``schedule_type`` ('interval' or 'daily'), and schedule fields: "
+        "``schedule_type`` ('interval', 'daily', 'cron', or 'rrule'), and schedule fields: "
         "for interval use ``interval_minutes``; for daily use ``hour_local``, "
-        "``minute_local``, optional ``timezone`` and optional ``weekdays`` (0=Mon..6=Sun).",
+        "``minute_local``, optional ``timezone`` and optional ``weekdays`` (0=Mon..6=Sun); "
+        "for cron use ``cron_expr`` (+ optional ``timezone``); for rrule use ``rrule_expr`` "
+        "(+ optional ``timezone``).",
         {
             "name": {"type": "string"},
             "instruction": {"type": "string"},
-            "schedule_type": {"type": "string", "enum": ["interval", "daily"]},
+            "schedule_type": {"type": "string", "enum": ["interval", "daily", "cron", "rrule"]},
             "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
             "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
             "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
+            "cron_expr": {"type": "string"},
+            "rrule_expr": {"type": "string"},
             "timezone": {"type": "string"},
             "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
             "enabled": {"type": "boolean"},
@@ -1435,10 +1439,12 @@ _INTROSPECTION_TOOLS: list[dict[str, Any]] = [
             "task_id": {"type": "integer"},
             "name": {"type": "string"},
             "instruction": {"type": "string"},
-            "schedule_type": {"type": "string", "enum": ["interval", "daily"]},
+            "schedule_type": {"type": "string", "enum": ["interval", "daily", "cron", "rrule"]},
             "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
             "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
             "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
+            "cron_expr": {"type": "string"},
+            "rrule_expr": {"type": "string"},
             "timezone": {"type": "string"},
             "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
             "enabled": {"type": "boolean"},

@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from croniter import croniter
+from dateutil.rrule import rrulestr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,11 +65,13 @@ class ScheduledTaskService:
         interval_minutes: int | None = None,
         hour_local: int | None = None,
         minute_local: int | None = None,
+        cron_expr: str | None = None,
+        rrule_expr: str | None = None,
         weekdays: list[int] | None = None,
     ) -> dict[str, Any]:
         st = str(schedule_type or "").strip().lower()
-        if st not in {"interval", "daily"}:
-            raise ValueError("schedule_type must be 'interval' or 'daily'")
+        if st not in {"interval", "daily", "cron", "rrule"}:
+            raise ValueError("schedule_type must be one of: interval, daily, cron, rrule")
         if st == "interval":
             mins = int(interval_minutes or 0)
             if mins < 1 or mins > 10080:
@@ -78,6 +82,54 @@ class ScheduledTaskService:
                 "interval_minutes": mins,
                 "hour_local": None,
                 "minute_local": None,
+                "cron_expr": None,
+                "rrule_expr": None,
+                "weekdays": None,
+            }
+        if st == "cron":
+            expr = str(cron_expr or "").strip()
+            if not expr:
+                raise ValueError("cron schedule requires cron_expr")
+            tz_name = str(timezone or "").strip() or "UTC"
+            tz = _safe_tz(tz_name)
+            now_local = datetime.now(tz)
+            try:
+                # Validate expression by asking the parser for next datetime.
+                croniter(expr, now_local).get_next(datetime)
+            except Exception as exc:
+                raise ValueError(f"invalid cron_expr: {exc}") from exc
+            return {
+                "schedule_type": "cron",
+                "timezone": tz_name,
+                "interval_minutes": None,
+                "hour_local": None,
+                "minute_local": None,
+                "cron_expr": expr,
+                "rrule_expr": None,
+                "weekdays": None,
+            }
+        if st == "rrule":
+            expr = str(rrule_expr or "").strip()
+            if not expr:
+                raise ValueError("rrule schedule requires rrule_expr")
+            tz_name = str(timezone or "").strip() or "UTC"
+            tz = _safe_tz(tz_name)
+            now_local = datetime.now(tz)
+            try:
+                rule = rrulestr(expr, dtstart=now_local)
+                nxt = rule.after(now_local, inc=False)
+                if nxt is None:
+                    raise ValueError("rrule does not produce future occurrences")
+            except Exception as exc:
+                raise ValueError(f"invalid rrule_expr: {exc}") from exc
+            return {
+                "schedule_type": "rrule",
+                "timezone": tz_name,
+                "interval_minutes": None,
+                "hour_local": None,
+                "minute_local": None,
+                "cron_expr": None,
+                "rrule_expr": expr,
                 "weekdays": None,
             }
         h = int(hour_local if hour_local is not None else -1)
@@ -101,6 +153,8 @@ class ScheduledTaskService:
             "interval_minutes": None,
             "hour_local": h,
             "minute_local": m,
+            "cron_expr": None,
+            "rrule_expr": None,
             "weekdays": cleaned_weekdays,
         }
 
@@ -110,6 +164,24 @@ class ScheduledTaskService:
         if st == "interval":
             mins = int(task.interval_minutes or 1)
             return now_utc + timedelta(minutes=max(1, mins))
+        if st == "cron":
+            tz = _safe_tz(task.timezone)
+            local_now = now_utc.astimezone(tz)
+            itr = croniter(str(task.cron_expr or "").strip(), local_now)
+            nxt_local = itr.get_next(datetime)
+            if nxt_local.tzinfo is None:
+                nxt_local = nxt_local.replace(tzinfo=tz)
+            return nxt_local.astimezone(UTC)
+        if st == "rrule":
+            tz = _safe_tz(task.timezone)
+            local_now = now_utc.astimezone(tz)
+            rule = rrulestr(str(task.rrule_expr or "").strip(), dtstart=local_now)
+            nxt_local = rule.after(local_now, inc=False)
+            if nxt_local is None:
+                raise ValueError("rrule schedule has no future occurrences")
+            if nxt_local.tzinfo is None:
+                nxt_local = nxt_local.replace(tzinfo=tz)
+            return nxt_local.astimezone(UTC)
         return _next_daily_local_run(
             now_utc=now_utc,
             timezone=task.timezone,
@@ -130,6 +202,8 @@ class ScheduledTaskService:
         interval_minutes: int | None = None,
         hour_local: int | None = None,
         minute_local: int | None = None,
+        cron_expr: str | None = None,
+        rrule_expr: str | None = None,
         weekdays: list[int] | None = None,
         enabled: bool = True,
         metadata_json: dict[str, Any] | None = None,
@@ -141,6 +215,8 @@ class ScheduledTaskService:
             interval_minutes=interval_minutes,
             hour_local=hour_local,
             minute_local=minute_local,
+            cron_expr=cron_expr,
+            rrule_expr=rrule_expr,
             weekdays=weekdays,
         )
         row = ScheduledTask(
@@ -152,6 +228,8 @@ class ScheduledTaskService:
             interval_minutes=normalized["interval_minutes"],
             hour_local=normalized["hour_local"],
             minute_local=normalized["minute_local"],
+            cron_expr=normalized["cron_expr"],
+            rrule_expr=normalized["rrule_expr"],
             weekdays=normalized["weekdays"],
             metadata_json=metadata_json if isinstance(metadata_json, dict) else None,
             enabled=bool(enabled),

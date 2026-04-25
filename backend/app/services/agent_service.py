@@ -582,6 +582,8 @@ class AgentService:
             "interval_minutes": task.interval_minutes,
             "hour_local": task.hour_local,
             "minute_local": task.minute_local,
+            "cron_expr": task.cron_expr,
+            "rrule_expr": task.rrule_expr,
             "weekdays": task.weekdays,
             "enabled": bool(task.enabled),
             "next_run_at": task.next_run_at.isoformat() if task.next_run_at else None,
@@ -2121,6 +2123,8 @@ class AgentService:
                 interval_minutes=args.get("interval_minutes"),
                 hour_local=args.get("hour_local"),
                 minute_local=args.get("minute_local"),
+                cron_expr=args.get("cron_expr"),
+                rrule_expr=args.get("rrule_expr"),
                 weekdays=args.get("weekdays") if isinstance(args.get("weekdays"), list) else None,
                 enabled=bool(args.get("enabled", True)),
             )
@@ -2163,7 +2167,16 @@ class AgentService:
 
         schedule_fields = {
             k: args.get(k)
-            for k in ("schedule_type", "timezone", "interval_minutes", "hour_local", "minute_local", "weekdays")
+            for k in (
+                "schedule_type",
+                "timezone",
+                "interval_minutes",
+                "hour_local",
+                "minute_local",
+                "cron_expr",
+                "rrule_expr",
+                "weekdays",
+            )
             if k in args
         }
         if schedule_fields:
@@ -2190,6 +2203,16 @@ class AgentService:
                         if schedule_fields.get("minute_local") is not None
                         else task.minute_local
                     ),
+                    cron_expr=(
+                        str(schedule_fields.get("cron_expr"))
+                        if schedule_fields.get("cron_expr") is not None
+                        else task.cron_expr
+                    ),
+                    rrule_expr=(
+                        str(schedule_fields.get("rrule_expr"))
+                        if schedule_fields.get("rrule_expr") is not None
+                        else task.rrule_expr
+                    ),
                     weekdays=(
                         schedule_fields.get("weekdays")
                         if isinstance(schedule_fields.get("weekdays"), list)
@@ -2204,6 +2227,8 @@ class AgentService:
             task.interval_minutes = normalized["interval_minutes"]
             task.hour_local = normalized["hour_local"]
             task.minute_local = normalized["minute_local"]
+            task.cron_expr = normalized["cron_expr"]
+            task.rrule_expr = normalized["rrule_expr"]
             task.weekdays = normalized["weekdays"]
             task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
         await db.commit()

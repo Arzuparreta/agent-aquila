@@ -21,11 +21,15 @@ class ScheduledTask(Base, TimestampMixin):
     # schedule_type:
     # - interval: every N minutes
     # - daily: once per day at hh:mm in timezone (optionally restricted weekdays)
+    # - cron: cron expression evaluated in timezone
+    # - rrule: iCalendar RRULE string
     schedule_type: Mapped[str] = mapped_column(String(16), nullable=False)
     timezone: Mapped[str | None] = mapped_column(String(128), nullable=True)
     interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hour_local: Mapped[int | None] = mapped_column(Integer, nullable=True)
     minute_local: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cron_expr: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    rrule_expr: Mapped[str | None] = mapped_column(Text, nullable=True)
     weekdays: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
