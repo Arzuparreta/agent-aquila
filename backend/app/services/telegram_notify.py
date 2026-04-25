@@ -60,3 +60,33 @@ async def notify_telegram_for_completed_run(
         return
     tok = await get_effective_bot_token_for_user(db, user)
     await send_telegram_text(chat_id, body, bot_token=tok)
+
+
+async def notify_user_telegram(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    message: str,
+) -> bool:
+    """Send a Telegram message to the user's primary Telegram chat.
+
+    Returns True if sent, False if user has no Telegram connected.
+    """
+    r = await db.execute(
+        select(ChannelThreadBinding.external_key).where(
+            ChannelThreadBinding.user_id == user_id,
+            ChannelThreadBinding.channel == "telegram",
+        )
+    )
+    chat_id = r.scalar_one_or_none()
+    if not chat_id:
+        return False
+    chat_id = (chat_id or "").strip()
+    if not chat_id:
+        return False
+    user = await db.get(User, user_id)
+    if not user:
+        return False
+    tok = await get_effective_bot_token_for_user(db, user)
+    await send_telegram_text(chat_id, message[:4090], bot_token=tok)
+    return True

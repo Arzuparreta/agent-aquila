@@ -27,6 +27,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.agent_run import AgentRun
 from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
+from app.models.channel_thread_binding import ChannelThreadBinding
 from app.models.scheduled_task import ScheduledTask
 from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
@@ -48,7 +49,7 @@ from app.services.agent_service import AgentService
 from app.services.scheduled_task_service import ScheduledTaskService
 from app.services.chat_service import apply_agent_run_to_placeholder, append_message
 from app.services.llm_client import aclose_llm_http_client
-from app.services.telegram_notify import notify_telegram_for_completed_run, send_telegram_text
+from app.services.telegram_notify import notify_telegram_for_completed_run, notify_user_telegram, send_telegram_text
 from app.services.telegram_poller import run_telegram_long_poll_supervisor
 from app.services.telegram_integration_service import get_effective_bot_token_for_user
 from app.services.user_ai_settings_service import UserAISettingsService
@@ -538,8 +539,6 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
 
                 telegram_chat_id = None
                 if delivery_channel == "telegram":
-                    from sqlalchemy import select
-                    from app.models.channel_thread_binding import ChannelThreadBinding
                     result = await db.execute(
                         select(ChannelThreadBinding.external_key).where(
                             ChannelThreadBinding.user_id == user.id,
@@ -554,13 +553,11 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                             run.assistant_reply or run.error or "(no output)",
                         )
                 else:
-                    await notify_telegram_for_completed_run(
-                        db,
-                        user_id=user.id,
-                        thread_id=thread.id,
-                        assistant_reply=run.assistant_reply,
-                        error=run.error,
-                    )
+                    message = run.assistant_reply or run.error or "(no output)"
+                    if await notify_user_telegram(db, user_id=user.id, message=message):
+                        logger.info("Telegram notification sent for task_id=%s", task_id)
+                    else:
+                        logger.info("No Telegram connection for user_id=%s, skipping notification", user.id)
 
                 await db.refresh(task)
                 task.last_run_at = datetime.now(UTC)

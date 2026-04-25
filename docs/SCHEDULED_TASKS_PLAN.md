@@ -240,8 +240,23 @@ Uses the `name` field from the task creation (e.g., "Reminder: pick up groceries
   - [x] 4.2 Create migration `0036_scheduled_task_source_channel.py`
   - [x] 4.3 Pass `source_channel` from web/telegram/channel routes via `agent_ctx`
   - [x] 4.4 Implement `_parse_delivery_preference()` to detect "send to telegram"/"email me"
-  - [x] 4.5 Implement smart routing: instruction > source_channel > web fallback
+  - [x] 4.5 Implement smart routing: instruction > source_channel > fallback
+  - [x] 4.6 Add `notify_user_telegram()` helper for user-level Telegram delivery
   - [x] Tests pass (99 passed, 36 skipped)
+
+## Bug Fix: UnboundLocalError
+
+**Issue:** Worker crashed every minute with `UnboundLocalError: cannot access local variable 'select'`
+
+**Cause:** Local import `from sqlalchemy import select` inside an `if` block shadowed the module-level import, making `select` local to the entire function.
+
+**Fix:** Removed local import, used module-level import and proper module-level import of `ChannelThreadBinding`.
+
+**Timeline:**
+- 19:15:31 - Task created for 19:18 UTC
+- 19:18-19:30 - Task never executed (worker crashed)
+- 19:31:55 - After fix, task executed successfully
+- 19:38:34 - Telegram delivery confirmed working
 
 ---
 
