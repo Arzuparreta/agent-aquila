@@ -7,8 +7,8 @@ import ipaddress
 import re
 import socket
 import time
+from urllib.parse import parse_qs, unquote, urlparse
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
@@ -215,7 +215,46 @@ class WebSearchClient:
                     "source": "duckduckgo",
                 }
             )
+        if not out:
+            out = await self._search_duckduckgo_html(query, limit=limit)
         return {"provider": "duckduckgo", "query": query, "results": out[:limit]}
+
+    async def _search_duckduckgo_html(self, query: str, *, limit: int) -> list[dict[str, Any]]:
+        params = {"q": query}
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+            )
+        }
+        async with httpx.AsyncClient(timeout=self._timeout, headers=headers, follow_redirects=True) as client:
+            resp = await client.get("https://html.duckduckgo.com/html/", params=params)
+        if resp.status_code >= 400:
+            raise WebSearchAPIError(resp.status_code, f"DuckDuckGo HTML error: {resp.text[:200]}")
+        body = resp.text if isinstance(resp.text, str) else str(resp.text)
+        pattern = re.compile(
+            r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+            flags=re.I | re.S,
+        )
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for href, raw_title in pattern.findall(body):
+            if len(out) >= limit:
+                break
+            url = _normalize_ddg_result_url(href)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            title = _strip_html(raw_title).strip()[:180] or url
+            out.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": "",
+                    "source": "duckduckgo_html",
+                }
+            )
+        return out
 
     async def _search_serper(self, query: str, *, limit: int) -> dict[str, Any]:
         key = (settings.web_search_api_key or "").strip()
@@ -274,6 +313,34 @@ def _extract_title(raw_html: str) -> str | None:
         return None
     title = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
     return title[:300] if title else None
+
+
+def _normalize_ddg_result_url(raw_url: str) -> str | None:
+    txt = html.unescape((raw_url or "").strip())
+    if not txt:
+        return None
+    if txt.startswith("//"):
+        txt = f"https:{txt}"
+    if txt.startswith("/"):
+        parsed = urlparse(txt)
+        qs = parse_qs(parsed.query)
+        uddg = (qs.get("uddg") or [""])[0]
+        if uddg:
+            txt = unquote(uddg)
+        else:
+            return None
+    parsed = urlparse(txt)
+    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        qs = parse_qs(parsed.query)
+        uddg = (qs.get("uddg") or [""])[0]
+        if uddg:
+            txt = unquote(uddg)
+            parsed = urlparse(txt)
+    if parsed.netloc.endswith("duckduckgo.com"):
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    return txt
 
 
 def debug_cache_snapshot() -> dict[str, Any]:

@@ -32,7 +32,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -41,6 +41,7 @@ from app.models.agent_run import AgentRun, AgentRunStep, AgentTraceEvent
 from app.models.chat_message import ChatMessage
 from app.models.connector_connection import ConnectorConnection
 from app.models.pending_proposal import PendingProposal
+from app.models.scheduled_task import ScheduledTask
 from app.models.user import User
 from app.schemas.agent import (
     AgentRunAttentionRead,
@@ -187,6 +188,7 @@ from app.services.proposal_service import proposal_to_read
 from app.services.skills_service import _skills_dir
 from app.services.skills_service import list_skills as _list_skills
 from app.services.skills_service import load_skill as _load_skill
+from app.services.scheduled_task_service import ScheduledTaskService
 from app.services.user_ai_settings_service import (
     UserAISettingsService,
     coerce_harness_mode,
@@ -569,6 +571,26 @@ async def _discord_client(db: AsyncSession, row: ConnectorConnection) -> Discord
 
 
 class AgentService:
+    @staticmethod
+    def _scheduled_task_to_dict(task: ScheduledTask) -> dict[str, Any]:
+        return {
+            "id": task.id,
+            "name": task.name,
+            "instruction": task.instruction,
+            "schedule_type": task.schedule_type,
+            "timezone": task.timezone,
+            "interval_minutes": task.interval_minutes,
+            "hour_local": task.hour_local,
+            "minute_local": task.minute_local,
+            "weekdays": task.weekdays,
+            "enabled": bool(task.enabled),
+            "next_run_at": task.next_run_at.isoformat() if task.next_run_at else None,
+            "last_run_at": task.last_run_at.isoformat() if task.last_run_at else None,
+            "run_count": int(task.run_count or 0),
+            "last_status": task.last_status,
+            "last_error": task.last_error,
+        }
+
     # ------------------------------------------------------------------
     # Gmail tools
     # ------------------------------------------------------------------
@@ -1904,6 +1926,24 @@ class AgentService:
         rt = await resolve_for_user(db, user)
         provs = await linked_connector_providers(db, user.id)
         palette = await resolve_turn_tool_palette(db, user)
+        scheduled_total = int(
+            (
+                await db.execute(
+                    select(func.count()).select_from(ScheduledTask).where(ScheduledTask.user_id == user.id)
+                )
+            ).scalar_one()
+            or 0
+        )
+        scheduled_enabled = int(
+            (
+                await db.execute(
+                    select(func.count()).select_from(ScheduledTask).where(
+                        ScheduledTask.user_id == user.id, ScheduledTask.enabled.is_(True)
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
         hbm = max(1, min(60, int(getattr(settings, "agent_heartbeat_minutes", 15) or 15)))
         minute_marks = sorted({m for m in range(0, 60, hbm)})
 
@@ -1926,6 +1966,11 @@ class AgentService:
                 "fetch_max_chars": int(settings.web_fetch_max_chars or 12000),
             },
             "background_automation": {
+                "scheduled_tasks": {
+                    "supported": True,
+                    "tasks_total": scheduled_total,
+                    "tasks_enabled": scheduled_enabled,
+                },
                 "heartbeat": {
                     "server_master_enabled": bool(settings.agent_heartbeat_enabled),
                     "worker_cron_fires_at_minute_marks_each_hour": minute_marks,
@@ -2055,6 +2100,131 @@ class AgentService:
             provider=str(args.get("provider") or ""),
             service=str(args.get("service") or "all"),
         )
+
+    @staticmethod
+    async def _tool_scheduled_task_create(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        name = str(args.get("name") or "").strip()
+        instruction = str(args.get("instruction") or "").strip()
+        schedule_type = str(args.get("schedule_type") or "").strip().lower()
+        if not name or not instruction:
+            return {"error": "name and instruction are required"}
+        try:
+            task = await ScheduledTaskService.create_task(
+                db,
+                user,
+                name=name,
+                instruction=instruction,
+                schedule_type=schedule_type,
+                timezone=args.get("timezone"),
+                interval_minutes=args.get("interval_minutes"),
+                hour_local=args.get("hour_local"),
+                minute_local=args.get("minute_local"),
+                weekdays=args.get("weekdays") if isinstance(args.get("weekdays"), list) else None,
+                enabled=bool(args.get("enabled", True)),
+            )
+            await db.commit()
+            await db.refresh(task)
+            return {"task": AgentService._scheduled_task_to_dict(task)}
+        except ValueError as exc:
+            await db.rollback()
+            return {"error": str(exc)}
+
+    @staticmethod
+    async def _tool_scheduled_task_list(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        tasks = await ScheduledTaskService.list_tasks(
+            db, user, enabled_only=bool(args.get("enabled_only", False))
+        )
+        return {"tasks": [AgentService._scheduled_task_to_dict(t) for t in tasks]}
+
+    @staticmethod
+    async def _tool_scheduled_task_update(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        tid_raw = args.get("task_id")
+        try:
+            tid = int(tid_raw)
+        except (TypeError, ValueError):
+            return {"error": "task_id is required"}
+        task = await db.get(ScheduledTask, tid)
+        if task is None or task.user_id != user.id:
+            return {"error": "task_not_found"}
+        if "name" in args:
+            task.name = str(args.get("name") or "").strip()[:255] or task.name
+        if "instruction" in args:
+            instr = str(args.get("instruction") or "").strip()
+            if instr:
+                task.instruction = instr
+        if "enabled" in args:
+            task.enabled = bool(args.get("enabled"))
+
+        schedule_fields = {
+            k: args.get(k)
+            for k in ("schedule_type", "timezone", "interval_minutes", "hour_local", "minute_local", "weekdays")
+            if k in args
+        }
+        if schedule_fields:
+            try:
+                normalized = ScheduledTaskService.normalize_schedule(
+                    schedule_type=str(schedule_fields.get("schedule_type") or task.schedule_type),
+                    timezone=(
+                        str(schedule_fields.get("timezone"))
+                        if schedule_fields.get("timezone") is not None
+                        else task.timezone
+                    ),
+                    interval_minutes=(
+                        int(schedule_fields.get("interval_minutes"))
+                        if schedule_fields.get("interval_minutes") is not None
+                        else task.interval_minutes
+                    ),
+                    hour_local=(
+                        int(schedule_fields.get("hour_local"))
+                        if schedule_fields.get("hour_local") is not None
+                        else task.hour_local
+                    ),
+                    minute_local=(
+                        int(schedule_fields.get("minute_local"))
+                        if schedule_fields.get("minute_local") is not None
+                        else task.minute_local
+                    ),
+                    weekdays=(
+                        schedule_fields.get("weekdays")
+                        if isinstance(schedule_fields.get("weekdays"), list)
+                        else task.weekdays
+                    ),
+                )
+            except (TypeError, ValueError) as exc:
+                await db.rollback()
+                return {"error": str(exc)}
+            task.schedule_type = normalized["schedule_type"]
+            task.timezone = normalized["timezone"]
+            task.interval_minutes = normalized["interval_minutes"]
+            task.hour_local = normalized["hour_local"]
+            task.minute_local = normalized["minute_local"]
+            task.weekdays = normalized["weekdays"]
+            task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
+        await db.commit()
+        await db.refresh(task)
+        return {"task": AgentService._scheduled_task_to_dict(task)}
+
+    @staticmethod
+    async def _tool_scheduled_task_delete(
+        db: AsyncSession, user: User, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        tid_raw = args.get("task_id")
+        try:
+            tid = int(tid_raw)
+        except (TypeError, ValueError):
+            return {"error": "task_id is required"}
+        task = await db.get(ScheduledTask, tid)
+        if task is None or task.user_id != user.id:
+            return {"error": "task_not_found"}
+        await db.delete(task)
+        await db.commit()
+        return {"ok": True, "deleted_task_id": tid}
 
     # ------------------------------------------------------------------
     # Proposal tools (email / WhatsApp / YouTube upload — human approval)
@@ -2785,6 +2955,7 @@ class AgentService:
             final_answer_text: str | None = None
             max_steps = eff_max
             overflow_retried = False
+            empty_response_retried = False
             empty_gmail_search_streak = 0
             empty_gmail_queries: list[str] = []
             for _ in range(max_steps):
@@ -2934,6 +3105,25 @@ class AgentService:
                         run.assistant_reply = plain_reply
                         run.status = "completed"
                     else:
+                        if not empty_response_retried:
+                            empty_response_retried = True
+                            conversation.append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Your previous reply was empty. Return either a short final answer "
+                                        "or continue with needed tools, but do not return empty content."
+                                    ),
+                                }
+                            )
+                            if rt.context_budget_v2:
+                                budget = plan_budget(messages=conversation, limits=model_limits)
+                                if budget.compacted:
+                                    conversation, _ = _reduce_conversation_for_budget(
+                                        conversation, input_budget_tokens=budget.input_budget
+                                    )
+                                    budget = plan_budget(messages=conversation, limits=model_limits)
+                            continue
                         run.status = "failed"
                         run.error = (
                             "Model returned an empty response without tool calls. "

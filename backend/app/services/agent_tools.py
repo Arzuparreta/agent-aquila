@@ -1398,6 +1398,61 @@ _INTROSPECTION_TOOLS: list[dict[str, Any]] = [
         "whether recurring/scheduled/background work (e.g. daily inbox digests) is available.",
         {},
     ),
+    _fn(
+        "scheduled_task_create",
+        "Create a user-defined recurring scheduled task. Use when the user asks "
+        "for automation like 'every night check iCloud photos' or any repeating "
+        "workflow. Inputs: ``name`` (required), ``instruction`` (required), "
+        "``schedule_type`` ('interval' or 'daily'), and schedule fields: "
+        "for interval use ``interval_minutes``; for daily use ``hour_local``, "
+        "``minute_local``, optional ``timezone`` and optional ``weekdays`` (0=Mon..6=Sun).",
+        {
+            "name": {"type": "string"},
+            "instruction": {"type": "string"},
+            "schedule_type": {"type": "string", "enum": ["interval", "daily"]},
+            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
+            "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
+            "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
+            "timezone": {"type": "string"},
+            "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
+            "enabled": {"type": "boolean"},
+        },
+        required=["name", "instruction", "schedule_type"],
+    ),
+    _fn(
+        "scheduled_task_list",
+        "List the user's scheduled tasks. Use before updates/deletes, and to confirm "
+        "what automations are active. Optional input: ``enabled_only``.",
+        {
+            "enabled_only": {"type": "boolean"},
+        },
+    ),
+    _fn(
+        "scheduled_task_update",
+        "Update an existing scheduled task (name, instruction, enabled, or schedule). "
+        "Pass ``task_id`` and only the fields that need changing.",
+        {
+            "task_id": {"type": "integer"},
+            "name": {"type": "string"},
+            "instruction": {"type": "string"},
+            "schedule_type": {"type": "string", "enum": ["interval", "daily"]},
+            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
+            "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
+            "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
+            "timezone": {"type": "string"},
+            "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
+            "enabled": {"type": "boolean"},
+        },
+        required=["task_id"],
+    ),
+    _fn(
+        "scheduled_task_delete",
+        "Delete a scheduled task permanently. Use when the user asks to remove/stop a recurring task.",
+        {
+            "task_id": {"type": "integer"},
+        },
+        required=["task_id"],
+    ),
 ]
 
 
@@ -1490,6 +1545,10 @@ _COMPACT_PALETTE_TOOLS = frozenset({
     "web_search",
     "web_fetch",
     "telegram_send_message",
+    "scheduled_task_create",
+    "scheduled_task_list",
+    "scheduled_task_update",
+    "scheduled_task_delete",
 })
 
 # Add palette_modes metadata to tools

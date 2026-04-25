@@ -25,6 +25,7 @@ from app.models.connector_connection import ConnectorConnection
 from app.models.instance_oauth_settings import InstanceOAuthSettings
 from app.models.pending_proposal import PendingProposal
 from app.models.refresh_token import RefreshToken
+from app.models.scheduled_task import ScheduledTask
 from app.models.user import User
 from app.models.user_ai_provider_config import UserAIProviderConfig
 from app.models.user_ai_settings import UserAISettings
@@ -45,6 +46,7 @@ __all__ = [
     "InstanceOAuthSettings",
     "PendingProposal",
     "RefreshToken",
+    "ScheduledTask",
     "User",
     "UserAIProviderConfig",
     "UserAISettings",

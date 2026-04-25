@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.agent_run import AgentRun
 from app.models.chat_thread import ChatThread
+from app.models.scheduled_task import ScheduledTask
 from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
 from app.services.agent_event_bus import publish_run_status_event
@@ -41,8 +42,9 @@ from app.services.agent_run_attention import (
     should_mark_needs_attention,
     stage_age_seconds,
 )
-from app.schemas.agent_turn_profile import TURN_PROFILE_HEARTBEAT
+from app.schemas.agent_turn_profile import TURN_PROFILE_AUTOMATION, TURN_PROFILE_HEARTBEAT
 from app.services.agent_service import AgentService
+from app.services.scheduled_task_service import ScheduledTaskService
 from app.services.chat_service import apply_agent_run_to_placeholder
 from app.services.llm_client import aclose_llm_http_client
 from app.services.telegram_notify import notify_telegram_for_completed_run
@@ -412,6 +414,89 @@ def _heartbeat_minutes() -> set[int]:
     return set(range(0, 60, step))
 
 
+def _scheduled_task_prompt(task: ScheduledTask, *, now_utc: datetime) -> str:
+    return (
+        f"SCHEDULED_TASK_RUN id={task.id} name={task.name}\n"
+        f"now_utc={now_utc.isoformat()}\n"
+        "Execute this user-defined recurring task instruction:\n"
+        f"{task.instruction}\n\n"
+        "Rules: run the requested workflow using available tools; "
+        "if one source fails, continue with partial output and explicitly mention gaps. "
+        "Use the user's preferred delivery channel if specified in the instruction."
+    )
+
+
+async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
+    del ctx
+    now_utc = datetime.now(UTC)
+    async with AsyncSessionLocal() as db:
+        due_ids = list(
+            (
+                await db.execute(
+                    select(ScheduledTask.id)
+                    .where(
+                        ScheduledTask.enabled.is_(True),
+                        ScheduledTask.next_run_at <= now_utc,
+                    )
+                    .order_by(ScheduledTask.next_run_at.asc(), ScheduledTask.id.asc())
+                    .limit(200)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if not due_ids:
+        return {"ok": True, "processed": 0}
+
+    processed = 0
+    failures = 0
+    for task_id in due_ids:
+        try:
+            async with AsyncSessionLocal() as db:
+                task = await db.get(ScheduledTask, task_id)
+                if task is None or not task.enabled or task.next_run_at > datetime.now(UTC):
+                    continue
+                # Claim first to prevent duplicate execution on next tick.
+                task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
+                task.last_status = "running"
+                task.last_error = None
+                await db.commit()
+
+                user = await db.get(User, task.user_id)
+                if user is None or not user.is_active:
+                    task.enabled = False
+                    task.last_status = "disabled"
+                    task.last_error = "User is inactive or missing."
+                    await db.commit()
+                    continue
+                run = await AgentService.run_agent(
+                    db,
+                    user,
+                    _scheduled_task_prompt(task, now_utc=datetime.now(UTC)),
+                    turn_profile=TURN_PROFILE_AUTOMATION,
+                )
+                await db.refresh(task)
+                task.last_run_at = datetime.now(UTC)
+                task.run_count = int(task.run_count or 0) + 1
+                task.last_status = run.status
+                task.last_error = (run.error or "")[:2000] if run.status != "completed" else None
+                await db.commit()
+                processed += 1
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            logger.exception("scheduled task execution failed task_id=%s: %s", task_id, exc)
+            try:
+                async with AsyncSessionLocal() as db:
+                    task = await db.get(ScheduledTask, task_id)
+                    if task is not None:
+                        task.last_status = "failed"
+                        task.last_error = str(exc)[:2000]
+                        await db.commit()
+            except Exception:
+                logger.exception("scheduled task failure-state update failed task_id=%s", task_id)
+    return {"ok": True, "processed": processed, "failures": failures}
+
+
 async def agent_memory_consolidation_tick(ctx: dict[str, Any]) -> dict[str, Any]:
     """Minute-level cron: run global consolidation when the time slot matches ``AGENT_MEMORY_CONSOLIDATION_MINUTES``."""
     del ctx
@@ -426,9 +511,16 @@ async def agent_memory_consolidation_tick(ctx: dict[str, Any]) -> dict[str, Any]
 class WorkerSettings:
     """ARQ discovers this class. Referenced as ``app.worker.WorkerSettings``."""
 
-    functions = [agent_heartbeat, run_chat_agent_turn, flag_stuck_agent_runs, agent_memory_consolidation_tick]
+    functions = [
+        agent_heartbeat,
+        run_chat_agent_turn,
+        flag_stuck_agent_runs,
+        agent_memory_consolidation_tick,
+        run_scheduled_tasks,
+    ]
     cron_jobs = [
         cron(agent_heartbeat, minute=_heartbeat_minutes(), run_at_startup=False),
+        cron(run_scheduled_tasks, minute=set(range(60)), run_at_startup=False),
         cron(flag_stuck_agent_runs, minute=set(range(60)), run_at_startup=False),
         cron(agent_memory_consolidation_tick, minute=set(range(60)), run_at_startup=False),
     ]
