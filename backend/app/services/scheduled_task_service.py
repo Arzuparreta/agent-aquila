@@ -68,10 +68,11 @@ class ScheduledTaskService:
         cron_expr: str | None = None,
         rrule_expr: str | None = None,
         weekdays: list[int] | None = None,
+        scheduled_at: datetime | None = None,
     ) -> dict[str, Any]:
         st = str(schedule_type or "").strip().lower()
-        if st not in {"interval", "daily", "cron", "rrule"}:
-            raise ValueError("schedule_type must be one of: interval, daily, cron, rrule")
+        if st not in {"interval", "daily", "cron", "rrule", "once"}:
+            raise ValueError("schedule_type must be one of: interval, daily, cron, rrule, once")
         if st == "interval":
             mins = int(interval_minutes or 0)
             if mins < 1 or mins > 10080:
@@ -132,6 +133,22 @@ class ScheduledTaskService:
                 "rrule_expr": expr,
                 "weekdays": None,
             }
+        if st == "once":
+            if scheduled_at is None:
+                raise ValueError("once schedule requires scheduled_at")
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=UTC)
+            return {
+                "schedule_type": "once",
+                "timezone": None,
+                "interval_minutes": None,
+                "hour_local": None,
+                "minute_local": None,
+                "cron_expr": None,
+                "rrule_expr": None,
+                "weekdays": None,
+                "scheduled_at": scheduled_at,
+            }
         h = int(hour_local if hour_local is not None else -1)
         m = int(minute_local if minute_local is not None else -1)
         if h < 0 or h > 23 or m < 0 or m > 59:
@@ -161,6 +178,13 @@ class ScheduledTaskService:
     @staticmethod
     def compute_next_run(*, now_utc: datetime, task: ScheduledTask) -> datetime:
         st = (task.schedule_type or "").strip().lower()
+        if st == "once":
+            if task.scheduled_at is None:
+                raise ValueError("once task requires scheduled_at")
+            scheduled = task.scheduled_at
+            if scheduled.tzinfo is None:
+                scheduled = scheduled.replace(tzinfo=UTC)
+            return scheduled
         if st == "interval":
             mins = int(task.interval_minutes or 1)
             return now_utc + timedelta(minutes=max(1, mins))
@@ -205,8 +229,10 @@ class ScheduledTaskService:
         cron_expr: str | None = None,
         rrule_expr: str | None = None,
         weekdays: list[int] | None = None,
+        scheduled_at: datetime | None = None,
         enabled: bool = True,
         metadata_json: dict[str, Any] | None = None,
+        source_channel: str | None = None,
     ) -> ScheduledTask:
         now_utc = datetime.now(UTC)
         normalized = ScheduledTaskService.normalize_schedule(
@@ -218,6 +244,7 @@ class ScheduledTaskService:
             cron_expr=cron_expr,
             rrule_expr=rrule_expr,
             weekdays=weekdays,
+            scheduled_at=scheduled_at,
         )
         row = ScheduledTask(
             user_id=user.id,
@@ -231,9 +258,11 @@ class ScheduledTaskService:
             cron_expr=normalized["cron_expr"],
             rrule_expr=normalized["rrule_expr"],
             weekdays=normalized["weekdays"],
+            scheduled_at=normalized.get("scheduled_at"),
             metadata_json=metadata_json if isinstance(metadata_json, dict) else None,
             enabled=bool(enabled),
             next_run_at=now_utc,
+            source_channel=source_channel,
         )
         row.next_run_at = ScheduledTaskService.compute_next_run(now_utc=now_utc, task=row)
         db.add(row)

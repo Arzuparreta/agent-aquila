@@ -232,6 +232,7 @@ async def handle_telegram_text_message(
         thread_id=thread.id,
         thread_context_hint=hint,
         turn_profile=TURN_PROFILE_CHANNEL_INBOUND,
+        agent_ctx={"source_channel": "telegram"},
     )
     cards = attachments_from_agent_run_read(run)
     has_error_card = any(

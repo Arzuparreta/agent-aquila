@@ -49,6 +49,7 @@ async def gateway_deliver(
         thread_id=thread.id,
         thread_context_hint=f"Channel {payload.channel.value} (external: {payload.external_key[:80]})",
         turn_profile=TURN_PROFILE_CHANNEL_INBOUND,
+        agent_ctx={"source_channel": payload.channel.value},
     )
     return ChannelDeliverResult(
         run_id=run.id,

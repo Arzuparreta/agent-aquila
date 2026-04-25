@@ -500,6 +500,7 @@ async def send_message(
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
+        agent_ctx={"source_channel": "web"},
     )
     await publish_run_status_event(
         user_id=current_user.id,
@@ -730,6 +731,7 @@ async def retry_failed_message(
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
+        agent_ctx={"source_channel": "web"},
     )
     await publish_run_status_event(
         user_id=current_user.id,

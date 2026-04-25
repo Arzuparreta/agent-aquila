@@ -25,6 +25,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.agent_run import AgentRun
+from app.models.chat_message import ChatMessage
 from app.models.chat_thread import ChatThread
 from app.models.scheduled_task import ScheduledTask
 from app.models.user import User
@@ -45,16 +46,25 @@ from app.services.agent_run_attention import (
 from app.schemas.agent_turn_profile import TURN_PROFILE_AUTOMATION, TURN_PROFILE_HEARTBEAT
 from app.services.agent_service import AgentService
 from app.services.scheduled_task_service import ScheduledTaskService
-from app.services.chat_service import apply_agent_run_to_placeholder
+from app.services.chat_service import apply_agent_run_to_placeholder, append_message
 from app.services.llm_client import aclose_llm_http_client
-from app.services.telegram_notify import notify_telegram_for_completed_run
+from app.services.telegram_notify import notify_telegram_for_completed_run, send_telegram_text
 from app.services.telegram_poller import run_telegram_long_poll_supervisor
+from app.services.telegram_integration_service import get_effective_bot_token_for_user
 from app.services.user_ai_settings_service import UserAISettingsService
 
 logger = logging.getLogger(__name__)
 
 _telegram_poll_task: asyncio.Task[None] | None = None
 _telegram_poll_stop: asyncio.Event | None = None
+
+
+async def _get_telegram_token(db: AsyncSession, user_id: int) -> str | None:
+    """Get effective Telegram bot token for user."""
+    user = await db.get(User, user_id)
+    if not user:
+        return None
+    return await get_effective_bot_token_for_user(db, user)
 
 
 def _redis_settings() -> RedisSettings:
@@ -426,6 +436,34 @@ def _scheduled_task_prompt(task: ScheduledTask, *, now_utc: datetime) -> str:
     )
 
 
+def _parse_delivery_preference(instruction: str) -> str | None:
+    """Parse delivery channel preference from task instruction.
+    
+    Returns: 'telegram', 'email', or None for default (web thread).
+    """
+    text = instruction.lower()
+    if "send to telegram" in text or "notify via telegram" in text or "telegram me" in text:
+        return "telegram"
+    if "send to email" in text or "email me" in text or "notify via email" in text:
+        return "email"
+    return None
+
+
+async def _deliver_to_channel(
+    db: AsyncSession,
+    task: ScheduledTask,
+    run_result: str,
+    *,
+    target_channel: str,
+    telegram_chat_id: str | None = None,
+) -> None:
+    """Deliver task result to specified channel."""
+    if target_channel == "telegram" and telegram_chat_id:
+        tok = await _get_telegram_token(db, task.user_id)
+        if tok:
+            await send_telegram_text(telegram_chat_id, run_result, bot_token=tok)
+
+
 async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
     del ctx
     now_utc = datetime.now(UTC)
@@ -456,7 +494,6 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                 task = await db.get(ScheduledTask, task_id)
                 if task is None or not task.enabled or task.next_run_at > datetime.now(UTC):
                     continue
-                # Claim first to prevent duplicate execution on next tick.
                 task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
                 task.last_status = "running"
                 task.last_error = None
@@ -469,17 +506,69 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                     task.last_error = "User is inactive or missing."
                     await db.commit()
                     continue
+
+                instruction_preference = _parse_delivery_preference(task.instruction)
+                delivery_channel = instruction_preference or task.source_channel or "web"
+
+                thread = ChatThread(
+                    user_id=user.id,
+                    kind="automation",
+                    title=task.name[:255],
+                )
+                db.add(thread)
+                await db.flush()
+
                 run = await AgentService.run_agent(
                     db,
                     user,
                     _scheduled_task_prompt(task, now_utc=datetime.now(UTC)),
                     turn_profile=TURN_PROFILE_AUTOMATION,
+                    thread_id=thread.id,
+                    agent_ctx={"source_channel": delivery_channel},
                 )
+
+                asst_msg = await append_message(
+                    db,
+                    thread,
+                    role="assistant",
+                    content=run.assistant_reply or run.error or "",
+                    agent_run_id=run.id,
+                )
+                thread.last_message_at = datetime.now(UTC)
+
+                telegram_chat_id = None
+                if delivery_channel == "telegram":
+                    from sqlalchemy import select
+                    from app.models.channel_thread_binding import ChannelThreadBinding
+                    result = await db.execute(
+                        select(ChannelThreadBinding.external_key).where(
+                            ChannelThreadBinding.user_id == user.id,
+                            ChannelThreadBinding.channel == "telegram",
+                        ).limit(1)
+                    )
+                    binding = result.scalar_one_or_none()
+                    if binding:
+                        telegram_chat_id = binding
+                        await send_telegram_text(
+                            telegram_chat_id,
+                            run.assistant_reply or run.error or "(no output)",
+                        )
+                else:
+                    await notify_telegram_for_completed_run(
+                        db,
+                        user_id=user.id,
+                        thread_id=thread.id,
+                        assistant_reply=run.assistant_reply,
+                        error=run.error,
+                    )
+
                 await db.refresh(task)
                 task.last_run_at = datetime.now(UTC)
                 task.run_count = int(task.run_count or 0) + 1
                 task.last_status = run.status
                 task.last_error = (run.error or "")[:2000] if run.status != "completed" else None
+                if task.schedule_type == "once":
+                    task.enabled = False
                 await db.commit()
                 processed += 1
         except Exception as exc:  # noqa: BLE001

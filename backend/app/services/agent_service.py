@@ -204,6 +204,8 @@ from app.services.token_budget_service import (
 
 _replay_ctx: ContextVar[AgentReplayContext | None] = ContextVar("agent_replay", default=None)
 
+_agent_ctx: ContextVar[dict[str, Any]] = ContextVar("agent_ctx", default={})
+
 _logger_memory_tools = logging.getLogger(__name__)
 
 # When the user turn looks like naming / “remember this” / durable prefs, bias the model toward
@@ -579,6 +581,7 @@ class AgentService:
             "instruction": task.instruction,
             "schedule_type": task.schedule_type,
             "timezone": task.timezone,
+            "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
             "interval_minutes": task.interval_minutes,
             "hour_local": task.hour_local,
             "minute_local": task.minute_local,
@@ -2112,6 +2115,13 @@ class AgentService:
         schedule_type = str(args.get("schedule_type") or "").strip().lower()
         if not name or not instruction:
             return {"error": "name and instruction are required"}
+        scheduled_at = None
+        if args.get("scheduled_at"):
+            from dateutil.parser import parse as parse_dt
+            scheduled_at = parse_dt(str(args.get("scheduled_at")))
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=UTC)
+        source_channel = _agent_ctx.get().get("source_channel")
         try:
             task = await ScheduledTaskService.create_task(
                 db,
@@ -2126,7 +2136,9 @@ class AgentService:
                 cron_expr=args.get("cron_expr"),
                 rrule_expr=args.get("rrule_expr"),
                 weekdays=args.get("weekdays") if isinstance(args.get("weekdays"), list) else None,
+                scheduled_at=scheduled_at,
                 enabled=bool(args.get("enabled", True)),
+                source_channel=source_channel,
             )
             await db.commit()
             await db.refresh(task)
@@ -2176,11 +2188,18 @@ class AgentService:
                 "cron_expr",
                 "rrule_expr",
                 "weekdays",
+                "scheduled_at",
             )
             if k in args
         }
         if schedule_fields:
             try:
+                from dateutil.parser import parse as parse_dt
+                scheduled_at_arg = None
+                if schedule_fields.get("scheduled_at") is not None:
+                    scheduled_at_arg = parse_dt(str(schedule_fields.get("scheduled_at")))
+                    if scheduled_at_arg.tzinfo is None:
+                        scheduled_at_arg = scheduled_at_arg.replace(tzinfo=UTC)
                 normalized = ScheduledTaskService.normalize_schedule(
                     schedule_type=str(schedule_fields.get("schedule_type") or task.schedule_type),
                     timezone=(
@@ -2218,6 +2237,7 @@ class AgentService:
                         if isinstance(schedule_fields.get("weekdays"), list)
                         else task.weekdays
                     ),
+                    scheduled_at=scheduled_at_arg if scheduled_at_arg is not None else task.scheduled_at,
                 )
             except (TypeError, ValueError) as exc:
                 await db.rollback()
@@ -2230,6 +2250,7 @@ class AgentService:
             task.cron_expr = normalized["cron_expr"]
             task.rrule_expr = normalized["rrule_expr"]
             task.weekdays = normalized["weekdays"]
+            task.scheduled_at = normalized.get("scheduled_at")
             task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
         await db.commit()
         await db.refresh(task)
@@ -2804,6 +2825,7 @@ class AgentService:
         thread_context_hint: str | None = None,
         replay: AgentReplayContext | None = None,
         turn_profile: str | None = None,
+        agent_ctx: dict[str, Any] | None = None,
     ) -> AgentRunRead:
         """Run one agent turn.
 
@@ -2816,6 +2838,7 @@ class AgentService:
         ``replay``: when set, non-``final_answer`` tools consume scripted results from
           :class:`~app.services.agent_replay.AgentReplayContext` (regression tests).
         ``turn_profile``: harness kind (``user_chat``, ``channel_inbound``, ``heartbeat``, etc.).
+        ``agent_ctx``: optional dict of context passed to tool handlers (e.g. ``source_channel``).
         """
         early = await AgentService.run_agent_invalid_preflight(db, user, message, thread_id=thread_id)
         if early is not None:
@@ -2833,14 +2856,23 @@ class AgentService:
         )
         db.add(run)
         await db.flush()
-        return await AgentService._execute_agent_loop(
-            db,
-            user,
-            run,
-            prior_messages=prior_messages,
-            thread_context_hint=thread_context_hint,
-            replay=replay,
-        )
+
+        ctx_token = None
+        if agent_ctx:
+            ctx_token = _agent_ctx.set(agent_ctx)
+
+        try:
+            return await AgentService._execute_agent_loop(
+                db,
+                user,
+                run,
+                prior_messages=prior_messages,
+                thread_context_hint=thread_context_hint,
+                replay=replay,
+            )
+        finally:
+            if ctx_token is not None:
+                _agent_ctx.reset(ctx_token)
 
     @staticmethod
     async def _execute_agent_loop(

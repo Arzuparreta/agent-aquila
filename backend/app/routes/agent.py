@@ -46,7 +46,7 @@ async def create_agent_run(
     current_user: User = Depends(get_current_user),
 ) -> AgentRunRead:
     AgentRateLimitService.check(current_user.id)
-    return await AgentService.run_agent(db, current_user, payload.message)
+    return await AgentService.run_agent(db, current_user, payload.message, agent_ctx={"source_channel": "api"})
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunRead)

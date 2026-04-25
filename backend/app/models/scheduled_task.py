@@ -23,7 +23,9 @@ class ScheduledTask(Base, TimestampMixin):
     # - daily: once per day at hh:mm in timezone (optionally restricted weekdays)
     # - cron: cron expression evaluated in timezone
     # - rrule: iCalendar RRULE string
+    # - once: single future execution at scheduled_at
     schedule_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     timezone: Mapped[str | None] = mapped_column(String(128), nullable=True)
     interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hour_local: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -38,3 +40,5 @@ class ScheduledTask(Base, TimestampMixin):
     run_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # source_channel: where the user made the request (e.g. 'web', 'telegram', 'email')
+    source_channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
