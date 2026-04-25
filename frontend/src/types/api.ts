@@ -54,6 +54,15 @@ export type AgentToolPalette = "full" | "compact";
 export type AgentPromptTier = "full" | "minimal" | "none";
 export type AgentMemoryPostTurnMode = "heuristic" | "always" | "committee" | "adaptive";
 
+export type AppUser = {
+  id: number;
+  email: string;
+  full_name: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 /** Effective agent tunables after merging server env defaults with per-user overrides. */
 export type AgentRuntimeConfigResolved = {
   agent_max_runs_per_hour: number;

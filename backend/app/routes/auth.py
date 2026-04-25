@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest, TokenResponse
 from app.schemas.user import UserRead
 from app.services.auth_service import AuthService
 
@@ -103,3 +103,13 @@ async def logout(
 @router.get("/me", response_model=UserRead)
 async def me(current_user: User = Depends(get_current_user)) -> UserRead:
     return UserRead.model_validate(current_user)
+
+
+@router.post("/change-password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    await AuthService.change_password(db, current_user, payload.old_password, payload.new_password)
+    return {"detail": "Password updated"}

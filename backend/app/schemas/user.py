@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import EmailStr
 
-from app.schemas.common import TimestampSchema
+from app.schemas.common import ORMBaseModel, TimestampSchema
 
 
 class UserRead(TimestampSchema):
@@ -10,3 +10,15 @@ class UserRead(TimestampSchema):
     email: EmailStr
     full_name: str | None = None
     is_active: bool
+
+
+class UserCreateRequest(ORMBaseModel):
+    email: EmailStr
+    password: str
+    full_name: str | None = None
+
+
+class UserUpdateRequest(ORMBaseModel):
+    full_name: str | None = None
+    is_active: bool | None = None
+    password: str | None = None

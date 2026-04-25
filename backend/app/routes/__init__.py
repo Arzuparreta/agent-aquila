@@ -28,6 +28,7 @@ from app.routes import (
     teams,
     telegram,
     threads,
+    users,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -53,3 +54,4 @@ api_router.include_router(teams.router)
 # Agent self-state: persistent memory + skill files.
 api_router.include_router(memory.router)
 api_router.include_router(skills.router)
+api_router.include_router(users.router)

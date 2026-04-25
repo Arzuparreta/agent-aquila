@@ -569,6 +569,8 @@ const en = {
   "settings.hub.section.connectors.description": "Link external services and verify account access.",
   "settings.hub.section.telegram.title": "Telegram bot",
   "settings.hub.section.telegram.description": "Bot token, long polling, and optional webhook for DMs.",
+  "settings.hub.section.users.title": "Users",
+  "settings.hub.section.users.description": "Create, deactivate, and manage local user accounts.",
   "settings.telegram.title": "Telegram bot",
   "settings.telegram.intro": "Use Telegram as a first-class channel: no tunnel required when long polling is on (worker must be running).",
   "settings.telegram.cardTitle": "Inbound bot",
@@ -1580,6 +1582,8 @@ const es: Record<keyof typeof en, string> = {
   "settings.hub.section.connectors.description": "Vincula servicios externos y comprueba accesos.",
   "settings.hub.section.telegram.title": "Bot de Telegram",
   "settings.hub.section.telegram.description": "Token del bot, long polling y webhook opcional para MD.",
+  "settings.hub.section.users.title": "Usuarios",
+  "settings.hub.section.users.description": "Crea, desactiva y gestiona cuentas locales de usuario.",
   "settings.telegram.title": "Bot de Telegram",
   "settings.telegram.intro":
     "Usa Telegram como canal principal: no hace falta túnel si el long polling está activo (el worker debe estar en marcha).",

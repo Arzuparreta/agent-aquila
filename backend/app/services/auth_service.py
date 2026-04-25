@@ -78,7 +78,7 @@ class AuthService:
         email_key = _normalize_login_email(payload.email)
         result = await db.execute(select(User).where(func.lower(User.email) == email_key))
         user = result.scalar_one_or_none()
-        if not user or not verify_password(payload.password, user.hashed_password):
+        if not user or not user.is_active or not verify_password(payload.password, user.hashed_password):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
         # Create access token
@@ -177,4 +177,23 @@ class AuthService:
             .where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
             .values(revoked=True)
         )
+        await db.commit()
+
+    @staticmethod
+    async def change_password(
+        db: AsyncSession,
+        user: User,
+        old_password: str,
+        new_password: str,
+    ) -> None:
+        if not verify_password(old_password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Old password is incorrect")
+        if len(new_password or "") < 3:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password is too short")
+        if verify_password(new_password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be different from the old password",
+            )
+        user.hashed_password = hash_password(new_password)
         await db.commit()
