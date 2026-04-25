@@ -2115,12 +2115,22 @@ class AgentService:
         schedule_type = str(args.get("schedule_type") or "").strip().lower()
         if not name or not instruction:
             return {"error": "name and instruction are required"}
+        prefs = await UserAISettingsService.get_or_create(db, user)
+        user_timezone = getattr(prefs, "user_timezone", None)
         scheduled_at = None
         if args.get("scheduled_at"):
             from dateutil.parser import parse as parse_dt
-            scheduled_at = parse_dt(str(args.get("scheduled_at")))
+            from zoneinfo import ZoneInfo
+            from app.services.user_time_context import resolve_user_zone
+            raw_scheduled = str(args.get("scheduled_at"))
+            scheduled_at = parse_dt(raw_scheduled)
             if scheduled_at.tzinfo is None:
-                scheduled_at = scheduled_at.replace(tzinfo=UTC)
+                if user_timezone:
+                    user_zone = resolve_user_zone(user_timezone)
+                    scheduled_at = scheduled_at.replace(tzinfo=user_zone)
+                else:
+                    scheduled_at = scheduled_at.replace(tzinfo=UTC)
+            scheduled_at = scheduled_at.astimezone(UTC)
         source_channel = _agent_ctx.get().get("source_channel")
         try:
             task = await ScheduledTaskService.create_task(

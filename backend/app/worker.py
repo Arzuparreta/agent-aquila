@@ -496,6 +496,8 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                 if task is None or not task.enabled or task.next_run_at > datetime.now(UTC):
                     continue
                 task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
+                if task.schedule_type == "once":
+                    task.enabled = False
                 task.last_status = "running"
                 task.last_error = None
                 await db.commit()
@@ -564,8 +566,6 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                 task.run_count = int(task.run_count or 0) + 1
                 task.last_status = run.status
                 task.last_error = (run.error or "")[:2000] if run.status != "completed" else None
-                if task.schedule_type == "once":
-                    task.enabled = False
                 await db.commit()
                 processed += 1
         except Exception as exc:  # noqa: BLE001

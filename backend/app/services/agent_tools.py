@@ -1401,21 +1401,20 @@ _INTROSPECTION_TOOLS: list[dict[str, Any]] = [
     _fn(
         "scheduled_task_create",
         "Create a user-defined scheduled task. Use for both recurring automation "
-        "(like 'every night check iCloud photos') AND one-time reminders "
-        "(like 'remind me at 7pm to pick up groceries'). For one-time tasks, use "
-        "``schedule_type='once'`` with ``scheduled_at`` (ISO 8601 datetime). "
-        "Inputs: ``name`` (required), ``instruction`` (required), "
-        "``schedule_type`` ('once', 'interval', 'daily', 'cron', or 'rrule'), and schedule fields: "
-        "for once use ``scheduled_at`` (ISO 8601 datetime string); "
-        "for interval use ``interval_minutes``; for daily use ``hour_local``, "
-        "``minute_local``, optional ``timezone`` and optional ``weekdays`` (0=Mon..6=Sun); "
-        "for cron use ``cron_expr`` (+ optional ``timezone``); for rrule use ``rrule_expr`` "
-        "(+ optional ``timezone``). One-time tasks auto-disable after execution.",
+        "(like every every night check iCloud photos) AND one-time reminders "
+        "(like remind me at 7pm to pick up groceries). For one-time tasks, use "
+        "schedule_type=once with scheduled_at (ISO 8601 datetime). CRITICAL: when the user says "
+        "at 22:50 or at 7pm and they have a timezone set in Settings, interpret that time in THEIR local timezone "
+        "(check the clock block in the system prompt for the user's configured timezone). The user means their local time, NOT UTC. "
+        "Inputs: name (required), instruction (required), schedule_type (once/interval/daily/cron/rrule), "
+        "for once use scheduled_at (ISO 8601 datetime string); for interval use interval_minutes; "
+        "for daily use hour_local, minute_local, optional timezone and weekdays (0=Mon..6=Sun); "
+        "for cron use cron_expr; for rrule use rrule_expr. One-time tasks auto-disable after execution.",
         {
             "name": {"type": "string"},
             "instruction": {"type": "string"},
             "schedule_type": {"type": "string", "enum": ["once", "interval", "daily", "cron", "rrule"]},
-            "scheduled_at": {"type": "string", "description": "ISO 8601 datetime for once type, e.g. '2026-04-25T19:00:00'"},
+            "scheduled_at": {"type": "string", "description": "ISO 8601 datetime for once type (interpret in user's local timezone)"},
             "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
             "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
             "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
