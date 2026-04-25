@@ -1,6 +1,6 @@
 [project]
 name = "crm-ai-cockpit-backend"
-version = "0.0.5"
+version = "0.0.6"
 description = "FastAPI backend for CRM + AI Cockpit MVP"
 requires-python = ">=3.11"
 dependencies = [
