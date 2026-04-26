@@ -1,6 +1,6 @@
 Your self-hosted personal operations assistant: **broad connector surface**, **context-first** automated wakes, and a **lean harness** (scoped tool palettes and user context snapshot) so you are not paying the full tool catalogue on every background ping.
 
-<img src="docs/branding/aquila-simpler.png" alt="Agent Aquila" width="138" style="display: block; margin: 0 auto;">
+<img src="docs/branding/aquila-detailed.png" alt="Agent Aquila" width="138" style="display: block; margin: 0 auto;">
 
 
 
