@@ -2,7 +2,11 @@ Your self-hosted personal operations assistant: **broad connector surface**, **c
 
 <img src="docs/branding/aquila-simpler.png" alt="Agent Aquila" width="138" style="display: block; margin: 0 auto;">
 
+
+
 Agent Aquila helps you manage mail, calendar, files, and more across **Gmail, Calendar, Drive, Outlook, Teams**, and many other linked providers while keeping control where it belongs: **your accounts, your keys, your machine**. Multi-channel is a first-class goal (web UI plus gateway and channel adapters). See [`docs/VISION.md`](docs/VISION.md) for how this compares to the harnesses like openclaw and what Aquila optimizes for.
+
+![telegram](https://www.readmecodegen.com/api/social-icon?name=telegram&size=32) ![gmail](https://www.readmecodegen.com/api/social-icon?name=gmail&size=32) ![googlecalendar](https://www.readmecodegen.com/api/social-icon?name=googlecalendar&size=32) ![icloud](https://www.readmecodegen.com/api/social-icon?name=icloud&size=32) ![whatsapp](https://www.readmecodegen.com/api/social-icon?name=whatsapp&size=32) ![github](https://www.readmecodegen.com/api/social-icon?name=github&size=32)
 
 Persistent **memory** and reusable **skills** (markdown playbooks in `backend/skills/`) keep behavior consistent across sessions. An optional heartbeat scheduler can wake the agent on a cadence; by default it does **not** scan Gmail (`AGENT_HEARTBEAT_CHECK_GMAIL=false`) to avoid background quota burn (details in [`docs/GMAIL_QUOTA.md`](docs/GMAIL_QUOTA.md)).
 
