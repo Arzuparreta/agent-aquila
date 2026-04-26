@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.chat_thread import ChatThread
 from app.models.user import User
 from app.services.ai_providers import provider_kind_requires_api_key
+from app.services.agent_event_bus import publish_thread_updated_event
 from app.services.llm_client import LLMClient
 from app.services.user_ai_settings_service import UserAISettingsService
 
@@ -137,3 +138,13 @@ async def maybe_generate_thread_title(
     except Exception:
         logger.exception("chat_thread_title: commit failed user_id=%s thread_id=%s", user.id, thread_id)
         await db.rollback()
+        return
+
+    try:
+        await publish_thread_updated_event(
+            user_id=user.id,
+            thread_id=thread.id,
+            title=thread.title,
+        )
+    except Exception:
+        logger.exception("chat_thread_title: publish event failed user_id=%s thread_id=%s", user.id, thread_id)

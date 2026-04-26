@@ -82,6 +82,46 @@ async def publish_run_status_event(
         logger.exception("Redis publish failed run_id=%s", run_id)
 
 
+async def publish_thread_updated_event(
+    *,
+    user_id: int,
+    thread_id: int,
+    title: str,
+) -> None:
+    """Emit a thread.updated event to Redis for real-time UI updates.
+
+    Call after thread title has been updated and committed to DB.
+    """
+    payload: dict[str, Any] = {
+        "v": 1,
+        "t": "thread.updated",
+        "user_id": user_id,
+        "thread_id": thread_id,
+        "title": title,
+    }
+    try:
+        async with AsyncSessionLocal() as db:
+            db.add(
+                AgentUserEvent(
+                    user_id=user_id,
+                    run_id=None,
+                    kind="thread.updated",
+                    payload=payload,
+                )
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("agent_user_events insert failed thread_id=%s", thread_id)
+
+    r = _get_redis()
+    if r is None:
+        return
+    try:
+        await r.publish(AGENT_EVENTS_CHANNEL, json.dumps(payload, default=str))
+    except Exception:
+        logger.exception("Redis publish failed thread_id=%s", thread_id)
+
+
 async def close_event_bus_redis() -> None:
     global _redis
     if _redis is not None:

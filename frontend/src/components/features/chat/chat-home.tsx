@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useTranslation } from "@/lib/i18n";
+import { useThreadUpdates } from "@/lib/thread-updates";
 import type { ChatThread } from "@/types/api";
 
 import { StatusToast } from "@/components/ui/status-toast";
@@ -146,6 +147,15 @@ export function ChatHome() {
       return next.sort(threadSortFn);
     });
   }, []);
+
+  useThreadUpdates((threadId, title) => {
+    setThreads((prev) => {
+      const next = prev.map((th) =>
+        th.id === threadId ? { ...th, title } : th
+      );
+      return next.sort(threadSortFn);
+    });
+  });
 
   /**
    * After a destructive / state-changing mutation on the active thread,
