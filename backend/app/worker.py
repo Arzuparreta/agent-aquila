@@ -555,11 +555,10 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                             run.assistant_reply or run.error or "(no output)",
                         )
                 else:
-                    message = run.assistant_reply or run.error or "(no output)"
-                    if await notify_user_telegram(db, user_id=user.id, message=message):
-                        logger.info("Telegram notification sent for task_id=%s", task_id)
-                    else:
-                        logger.info("No Telegram connection for user_id=%s, skipping notification", user.id)
+                    logger.info(
+                        "Scheduled task completed for user_id=%s, agent handles delivery",
+                        user.id,
+                    )
 
                 await db.refresh(task)
                 task.last_run_at = datetime.now(UTC)
