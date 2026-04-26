@@ -217,6 +217,8 @@ This turn likely assigns or confirms your display name, or asks you to remember 
 """
 
 
+_logger = logging.getLogger(__name__)
+
 def get_tool_palette(
     user: User,
     *,
@@ -242,7 +244,19 @@ async def resolve_turn_tool_palette(
     rt = await resolve_for_user(db, user)
     mode = effective_tool_palette_mode_for_turn(rt, turn_profile)
     base = tools_for_palette_mode(mode)
+    
+    tool_names = {t.get("function", {}).get("name", "") for t in base}
+    _logger.warning(
+        "DIAG resolve_turn_tool_palette: user_id=%s mode=%s turn_profile=%s tool_count=%s tools=%s",
+        user.id, mode, turn_profile, len(base), sorted(tool_names)
+    )
+    _logger.warning(
+        "DIAG propose_* tools visible: %s",
+        [n for n in tool_names if n.startswith("propose_")]
+    )
+    
     if not rt.agent_connector_gated_tools:
+        _logger.warning("DIAG: no connector gating, returning base tools")
         return base
     filtered = await filter_tools_for_user_connectors(db, user.id, base)
     names = {t["function"]["name"] for t in filtered}
@@ -250,6 +264,7 @@ async def resolve_turn_tool_palette(
         return base
     if len(filtered) < 6:
         return base
+    _logger.warning("DIAG: connector gating active, filtered to %d tools", len(filtered))
     return filtered
 
 
