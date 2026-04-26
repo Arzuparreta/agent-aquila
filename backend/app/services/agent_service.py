@@ -663,16 +663,37 @@ class AgentService:
         return await client.list_filters()
 
     @staticmethod
+    def _parse_label_ids(value: Any) -> list[str] | None:
+        """Parse label_ids from args - handles both array and malformed string input."""
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return [str(x) for x in value if x]
+        if isinstance(value, str):
+            if not value.strip():
+                return None
+            try:
+                parsed = json.loads(value)
+                if isinstance(parsed, list):
+                    return [str(x) for x in parsed if x]
+            except (json.JSONDecodeError, ValueError):
+                pass
+            return [value.strip()]
+        return None
+
+    @staticmethod
     async def _tool_gmail_modify_message(
         db: AsyncSession, user: User, args: dict[str, Any]
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
         mid = str(args["message_id"])
+        add_label_ids = AgentService._parse_label_ids(args.get("add_label_ids"))
+        remove_label_ids = AgentService._parse_label_ids(args.get("remove_label_ids"))
         result = await client.modify_message(
             mid,
-            add_label_ids=args.get("add_label_ids"),
-            remove_label_ids=args.get("remove_label_ids"),
+            add_label_ids=add_label_ids,
+            remove_label_ids=remove_label_ids,
         )
         gmail_cache_invalidate_message(row.id, mid)
         return result
@@ -683,10 +704,12 @@ class AgentService:
     ) -> dict[str, Any]:
         row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
         client = await _gmail_client(db, row)
+        add_label_ids = AgentService._parse_label_ids(args.get("add_label_ids"))
+        remove_label_ids = AgentService._parse_label_ids(args.get("remove_label_ids"))
         result = await client.modify_thread(
             str(args["thread_id"]),
-            add_label_ids=args.get("add_label_ids"),
-            remove_label_ids=args.get("remove_label_ids"),
+            add_label_ids=add_label_ids,
+            remove_label_ids=remove_label_ids,
         )
         gmail_cache_invalidate_connection(row.id)
         return result
