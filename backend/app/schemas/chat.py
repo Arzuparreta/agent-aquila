@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ThreadKind = Literal["general", "entity"]
+ThreadKind = Literal["general", "entity", "automation"]
 # After the OpenClaw refactor we don't mirror external resources locally —
 # Gmail messages, calendar events and Drive files are referenced inside chat
 # message attachments using their provider IDs. Threads are therefore almost
