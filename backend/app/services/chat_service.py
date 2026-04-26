@@ -459,3 +459,42 @@ def render_user_message(content: str, references: Iterable[EntityRef]) -> str:
         f"{r.type}:{r.id}" + (f" ({r.label})" if r.label else "") for r in refs
     ) + "]"
     return content + suffix
+
+
+def memory_receipt_content(stored_items: tuple[dict[str, Any], ...]) -> str:
+    """Build the content for a memory-receipt event message."""
+    if not stored_items:
+        return ""
+    lines = ["**Persisted in memory:**\n"]
+    for item in stored_items:
+        key = item.get("key", "?")
+        content = item.get("content", "")
+        importance = item.get("importance", 5)
+        star = "★" if importance >= 8 else ""
+        lines.append(f"- {star}`{key}` — {content[:120]}")
+    return "\n".join(lines)
+
+
+async def inject_memory_receipt(
+    db: AsyncSession,
+    thread: ChatThread,
+    stored_items: tuple[dict[str, Any], ...],
+) -> None:
+    """Append a role=event memory receipt so the next agent turn knows what was stored."""
+    import logging
+
+    if not stored_items:
+        return
+    _logger = logging.getLogger(__name__)
+    try:
+        content = memory_receipt_content(stored_items)
+        await append_message(
+            db,
+            thread,
+            role="event",
+            content=content,
+            agent_run_id=None,
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        _logger.exception("failed to inject memory receipt for thread_id=%s", thread.id)

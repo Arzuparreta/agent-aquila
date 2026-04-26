@@ -118,6 +118,8 @@ class PostTurnMemoryResult:
     skipped: bool
     reason: str
     upserts: int
+    stored_keys: tuple[str, ...] = ()
+    stored_items: tuple[dict[str, Any], ...] = ()
 
 
 def heuristic_wants_post_turn_extraction(user_message: str, assistant_message: str) -> bool:
@@ -219,6 +221,7 @@ async def maybe_ingest_post_turn_memory(
     user_message: str,
     assistant_message: str,
     run_id: int | None = None,
+    extracted_items: list[dict[str, Any]] | None = None,
 ) -> PostTurnMemoryResult:
     """Optionally extract and upsert memories from the last exchange. Never raises.
 
@@ -233,7 +236,7 @@ async def maybe_ingest_post_turn_memory(
             EV_POST_TURN_SKIPPED,
             {"reason": "disabled", "mode": None, "upserts": 0},
         )
-        return PostTurnMemoryResult(True, "disabled", 0)
+        return PostTurnMemoryResult(skipped=True, reason="disabled", upserts=0)
 
     mode = (rt.agent_memory_post_turn_mode or "committee").strip().lower()
     if mode not in ("heuristic", "always", "committee", "adaptive"):
@@ -248,7 +251,7 @@ async def maybe_ingest_post_turn_memory(
             EV_POST_TURN_SKIPPED,
             {"reason": "empty_assistant", "mode": mode, "upserts": 0},
         )
-        return PostTurnMemoryResult(True, "empty_assistant", 0)
+        return PostTurnMemoryResult(skipped=True, reason="empty_assistant", upserts=0)
 
     if mode == "heuristic" and not heuristic_wants_post_turn_extraction(u, a):
         await _emit_post_turn_trace(
@@ -257,7 +260,7 @@ async def maybe_ingest_post_turn_memory(
             EV_POST_TURN_SKIPPED,
             {"reason": "heuristic_skip", "mode": mode, "upserts": 0},
         )
-        return PostTurnMemoryResult(True, "heuristic_skip", 0)
+        return PostTurnMemoryResult(skipped=True, reason="heuristic_skip", upserts=0)
 
     if mode == "adaptive" and adaptive_trivial_skip(u, a):
         await _emit_post_turn_trace(
@@ -266,7 +269,7 @@ async def maybe_ingest_post_turn_memory(
             EV_POST_TURN_SKIPPED,
             {"reason": "adaptive_trivial_skip", "mode": mode, "upserts": 0},
         )
-        return PostTurnMemoryResult(True, "adaptive_trivial_skip", 0)
+        return PostTurnMemoryResult(skipped=True, reason="adaptive_trivial_skip", upserts=0)
 
     settings_row = await UserAISettingsService.get_or_create(db, user)
     if getattr(settings_row, "agent_processing_paused", False) or settings_row.ai_disabled:
@@ -276,7 +279,7 @@ async def maybe_ingest_post_turn_memory(
             EV_POST_TURN_SKIPPED,
             {"reason": "ai_paused_or_disabled", "mode": mode, "upserts": 0},
         )
-        return PostTurnMemoryResult(True, "ai_paused_or_disabled", 0)
+        return PostTurnMemoryResult(skipped=True, reason="ai_paused_or_disabled", upserts=0)
 
     api_key = await UserAISettingsService.get_api_key(db, user)
     if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
@@ -286,7 +289,7 @@ async def maybe_ingest_post_turn_memory(
             EV_POST_TURN_SKIPPED,
             {"reason": "no_api_key", "mode": mode, "upserts": 0},
         )
-        return PostTurnMemoryResult(True, "no_api_key", 0)
+        return PostTurnMemoryResult(skipped=True, reason="no_api_key", upserts=0)
 
     await _emit_post_turn_trace(
         db,
@@ -312,6 +315,9 @@ async def maybe_ingest_post_turn_memory(
         )
 
     if not items:
+        items = extracted_items or []
+
+    if not items:
         logger.info(
             "post_turn_memory: no items user_id=%s mode=%s reason=empty_extraction",
             user.id,
@@ -325,7 +331,13 @@ async def maybe_ingest_post_turn_memory(
         )
         if mode != "heuristic":
             await maybe_adapt_rubric_after_turn(db, user, approved_count=0)
-        return PostTurnMemoryResult(True, "empty_extraction", 0)
+        return PostTurnMemoryResult(
+            skipped=True,
+            reason="empty_extraction",
+            upserts=0,
+            stored_keys=(),
+            stored_items=(),
+        )
 
     upserts = 0
     for it in items:
@@ -358,7 +370,12 @@ async def maybe_ingest_post_turn_memory(
         db,
         run_id,
         EV_POST_TURN_COMPLETED,
-        {"reason": "ok", "mode": mode, "upserts": upserts},
+        {
+            "reason": "ok",
+            "mode": mode,
+            "upserts": upserts,
+            "stored_keys": [it["key"] for it in items[:upserts]] if upserts else [],
+        },
     )
     if upserts > 0:
         try:
@@ -367,7 +384,14 @@ async def maybe_ingest_post_turn_memory(
             await maybe_refresh_after_post_turn(db, user)
         except Exception:  # noqa: BLE001
             logger.exception("post_turn: user context snapshot refresh failed user_id=%s", user.id)
-    return PostTurnMemoryResult(False, "ok", upserts)
+    stored = tuple(it for it in items[:upserts]) if upserts else ()
+    return PostTurnMemoryResult(
+        skipped=False,
+        reason="ok",
+        upserts=upserts,
+        stored_keys=tuple(it["key"] for it in stored),
+        stored_items=stored,
+    )
 
 
 async def _run_legacy_extraction(

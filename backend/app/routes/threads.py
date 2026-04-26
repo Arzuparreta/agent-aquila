@@ -39,7 +39,10 @@ from app.schemas.chat import (
     ThreadRead,
 )
 from app.services.agent_attachments import attachments_from_agent_run_read
-from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.agent_memory_post_turn_service import (
+    PostTurnMemoryResult,
+    maybe_ingest_post_turn_memory,
+)
 from app.services.agent_skill_autogenesis import maybe_record_skill_autogenesis_candidate
 from app.services.chat_thread_title_service import maybe_generate_thread_title
 from app.services.agent_runtime_config_service import resolve_for_user
@@ -56,6 +59,7 @@ from app.services.chat_service import (
     get_thread,
     get_thread_message,
     history_for_agent,
+    inject_memory_receipt,
     preview_memory_flush_dropped,
     latest_prior_user_message,
     list_messages,
@@ -68,6 +72,7 @@ from app.services.chat_service import (
 )
 from app.services.job_queue import enqueue
 from app.models.agent_run import AgentRun
+from app.models.chat_thread import ChatThread
 
 logger = logging.getLogger(__name__)
 
@@ -84,21 +89,29 @@ async def _post_turn_memory_if_completed(
     assistant_text: str,
     run_status: str,
     agent_run_id: int | None = None,
-) -> None:
-    """Persist durable facts from the last exchange after a successful agent run."""
+    thread: ChatThread | None = None,
+) -> PostTurnMemoryResult | None:
+    """Persist durable facts from the last exchange after a successful agent run.
+
+    When memories are stored, injects an ``event`` message into the thread so the agent
+    sees what was actually persisted on the very next turn (fixes "I forgot" false alarms).
+    """
     if run_status != "completed":
-        return
-    await maybe_ingest_post_turn_memory(
+        return None
+    result = await maybe_ingest_post_turn_memory(
         db,
         user,
         user_message=rendered_user_message,
         assistant_message=assistant_text or "",
         run_id=agent_run_id,
     )
+    if result.stored_keys and thread is not None:
+        await inject_memory_receipt(db, thread, result.stored_items)
     if agent_run_id is not None:
         run_obj = await db.get(AgentRun, agent_run_id)
         if run_obj and run_obj.user_id == user.id:
             await maybe_record_skill_autogenesis_candidate(db, run_obj)
+    return result
 
 
 async def _enqueue_chat_agent_turn(
@@ -422,6 +435,7 @@ async def send_message(
             assistant_text=assistant_text,
             run_status=early.status,
             agent_run_id=early.id,
+            thread=thread,
         )
         await maybe_generate_thread_title(
             db,
@@ -540,6 +554,7 @@ async def send_message(
         assistant_text=assistant_text,
         run_status=run.status,
         agent_run_id=run.id,
+        thread=thread,
     )
     await maybe_generate_thread_title(
         db,
@@ -652,6 +667,7 @@ async def retry_failed_message(
             assistant_text=assistant_text,
             run_status=early.status,
             agent_run_id=early.id,
+            thread=thread,
         )
         await maybe_generate_thread_title(
             db,
@@ -772,6 +788,7 @@ async def retry_failed_message(
         assistant_text=assistant_text,
         run_status=run.status,
         agent_run_id=run.id,
+        thread=thread,
     )
     await maybe_generate_thread_title(
         db,

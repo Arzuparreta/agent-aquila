@@ -32,7 +32,9 @@ from app.models.scheduled_task import ScheduledTask
 from app.models.user import User
 from app.core.schema_probe import fail_fast_if_schema_stale
 from app.services.agent_event_bus import publish_run_status_event
-from app.services.agent_memory_post_turn_service import maybe_ingest_post_turn_memory
+from app.services.agent_memory_post_turn_service import (
+    maybe_ingest_post_turn_memory,
+)
 from app.services.agent_skill_autogenesis import maybe_record_skill_autogenesis_candidate
 from app.services.agent_memory_consolidation import run_consolidation_for_all_active_users
 from app.services.chat_thread_title_service import maybe_generate_thread_title
@@ -301,13 +303,19 @@ async def run_chat_agent_turn(
                     assistant_message=read.assistant_reply or "",
                     run_status=read.status,
                 )
-                await maybe_ingest_post_turn_memory(
+                result = await maybe_ingest_post_turn_memory(
                     db,
                     user,
                     user_message=run_row.user_message or "",
                     assistant_message=read.assistant_reply or "",
                     run_id=run_id,
                 )
+                if result and result.stored_keys and tid is not None:
+                    thread = await db.get(ChatThread, tid)
+                    if thread and thread.user_id == user_id:
+                        from app.services.chat_service import inject_memory_receipt
+
+                        await inject_memory_receipt(db, thread, result.stored_items)
                 await maybe_record_skill_autogenesis_candidate(db, run_row)
             return {"ok": True, "run_id": run_id, "status": read.status}
     except Exception as exc:
