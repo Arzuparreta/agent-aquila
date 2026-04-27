@@ -23,6 +23,7 @@ class StatePayload:
     intent: str
     scopes: list[str]
     redirect_after: str | None = None
+    redirect_base: str = ""
 
     def to_json(self) -> str:
         return json.dumps(
@@ -32,6 +33,7 @@ class StatePayload:
                 "intent": self.intent,
                 "scopes": self.scopes,
                 "redirect_after": self.redirect_after,
+                "redirect_base": self.redirect_base,
             }
         )
 
@@ -44,6 +46,7 @@ class StatePayload:
             intent=str(data["intent"]),
             scopes=list(data.get("scopes") or []),
             redirect_after=data.get("redirect_after"),
+            redirect_base=data.get("redirect_base", ""),
         )
 
 

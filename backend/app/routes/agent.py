@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -42,11 +42,20 @@ async def list_agent_runs(
 @router.post("/runs", response_model=AgentRunRead)
 async def create_agent_run(
     payload: AgentRunCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AgentRunRead:
     AgentRateLimitService.check(current_user.id)
-    return await AgentService.run_agent(db, current_user, payload.message, agent_ctx={"source_channel": "api"})
+    return await AgentService.run_agent(
+        db,
+        current_user,
+        payload.message,
+        agent_ctx={
+            "source_channel": "api",
+            "oauth_redirect_base": str(request.base_url).rstrip("/"),
+        },
+    )
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunRead)

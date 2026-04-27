@@ -93,6 +93,7 @@ async def put_google_app_credentials(
 )
 async def google_start(
     payload: OAuthStartRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> OAuthStartResponse:
@@ -103,6 +104,7 @@ async def google_start(
             detail="Google sign-in for this app is not set up yet. Open Settings and save your Google Client ID and secret (one-time), then try again.",
         )
     scopes = google_oauth.scopes_for_intent(payload.intent)
+    redirect_base = str(request.base_url).rstrip("/")
     state = await state_store.create_state(
         state_store.StatePayload(
             user_id=current_user.id,
@@ -110,10 +112,11 @@ async def google_start(
             intent=payload.intent or "all",
             scopes=scopes,
             redirect_after=payload.redirect_after,
+            redirect_base=redirect_base,
         )
     )
     try:
-        url = google_oauth.build_authorize_url(state, scopes, cfg)
+        url = google_oauth.build_authorize_url(state, scopes, cfg, redirect_base=redirect_base)
     except OAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return OAuthStartResponse(authorize_url=url, state=state, scopes=scopes, configured=True)
@@ -240,7 +243,9 @@ async def google_callback(
 
     cfg = await get_google_runtime_config(db)
     try:
-        token_payload = await google_oauth.exchange_code(code, cfg)
+        token_payload = await google_oauth.exchange_code(
+            code, cfg, redirect_base=state_payload.redirect_base
+        )
     except OAuthError as exc:
         return RedirectResponse(
             _frontend_redirect(
@@ -505,9 +510,10 @@ async def microsoft_callback(
             status_code=status.HTTP_302_FOUND,
         )
 
-    base = await get_instance_redirect_base(db)
-    ms_redir = microsoft_oauth.redirect_uri_for_base(base)
     ms_cfg = await get_microsoft_runtime_config(db)
+    ms_redir = microsoft_oauth.redirect_uri_for_base(
+        state_payload.redirect_base or await get_instance_redirect_base(db)
+    )
     try:
         token_payload = await microsoft_oauth.exchange_code(
             code, ms_cfg, redirect_uri_override=ms_redir

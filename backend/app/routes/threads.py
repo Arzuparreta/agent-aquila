@@ -21,7 +21,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -357,6 +357,7 @@ async def read_messages(
 async def send_message(
     thread_id: int,
     payload: MessageCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MessageSendResult:
@@ -514,7 +515,10 @@ async def send_message(
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
-        agent_ctx={"source_channel": "web"},
+        agent_ctx={
+            "source_channel": "web",
+            "oauth_redirect_base": str(request.base_url).rstrip("/"),
+        },
     )
     await publish_run_status_event(
         user_id=current_user.id,
@@ -572,6 +576,7 @@ async def send_message(
 async def retry_failed_message(
     thread_id: int,
     message_id: int,
+    request: Request,
     x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -747,7 +752,10 @@ async def retry_failed_message(
         prior_messages=prior,
         thread_id=thread.id,
         thread_context_hint=hint,
-        agent_ctx={"source_channel": "web"},
+        agent_ctx={
+            "source_channel": "web",
+            "oauth_redirect_base": str(request.base_url).rstrip("/"),
+        },
     )
     await publish_run_status_event(
         user_id=current_user.id,

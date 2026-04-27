@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.config import settings
 from app.services.agent_runtime_config_service import resolve_for_user
@@ -23,6 +23,7 @@ router = APIRouter(prefix="/channels", tags=["channels"], dependencies=[Depends(
 @router.post("/gateway/deliver", response_model=ChannelDeliverResult)
 async def gateway_deliver(
     payload: ChannelInboundMessage,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ChannelDeliverResult:
@@ -49,7 +50,10 @@ async def gateway_deliver(
         thread_id=thread.id,
         thread_context_hint=f"Channel {payload.channel.value} (external: {payload.external_key[:80]})",
         turn_profile=TURN_PROFILE_CHANNEL_INBOUND,
-        agent_ctx={"source_channel": payload.channel.value},
+        agent_ctx={
+            "source_channel": payload.channel.value,
+            "oauth_redirect_base": str(request.base_url).rstrip("/"),
+        },
     )
     return ChannelDeliverResult(
         run_id=run.id,

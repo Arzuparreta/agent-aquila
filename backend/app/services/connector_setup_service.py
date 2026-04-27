@@ -666,7 +666,12 @@ async def submit_icloud_caldav_credentials(
 
 
 async def start_oauth(
-    db: AsyncSession, user: User, *, provider: str, service: str
+    db: AsyncSession,
+    user: User,
+    *,
+    provider: str,
+    service: str,
+    redirect_base: str = "",
 ) -> dict[str, Any]:
     provider = (provider or "").lower().strip()
     service = (service or "").lower().strip() or "all"
@@ -684,9 +689,10 @@ async def start_oauth(
                 intent=intent,
                 scopes=scopes,
                 redirect_after=None,
+                redirect_base=redirect_base,
             )
         )
-        url = google_oauth.build_authorize_url(state, scopes, cfg)
+        url = google_oauth.build_authorize_url(state, scopes, cfg, redirect_base=redirect_base)
         return {
             "card_kind": "oauth_authorize",
             "provider": "google",
@@ -708,9 +714,12 @@ async def start_oauth(
                 intent=intent,
                 scopes=scopes,
                 redirect_after=None,
+                redirect_base=redirect_base,
             )
         )
-        url = microsoft_oauth.build_authorize_url(state, scopes, cfg)
+        url = microsoft_oauth.build_authorize_url(
+            state, scopes, cfg, redirect_uri_override=redirect_base or None
+        )
         return {
             "card_kind": "oauth_authorize",
             "provider": "microsoft",

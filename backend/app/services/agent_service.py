@@ -2137,11 +2137,15 @@ class AgentService:
     ) -> dict[str, Any]:
         from app.services.connector_setup_service import start_oauth
 
+        ctx = _agent_ctx.get()
+        redirect_base = (ctx.get("oauth_redirect_base") or "") if ctx else ""
+
         return await start_oauth(
             db,
             user,
             provider=str(args.get("provider") or ""),
             service=str(args.get("service") or "all"),
+            redirect_base=redirect_base,
         )
 
     @staticmethod

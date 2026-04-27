@@ -83,8 +83,8 @@ def is_runtime_ready(config: GoogleOAuthRuntimeConfig) -> bool:
     return bool(config.client_id and config.client_secret)
 
 
-def redirect_uri_for(config: GoogleOAuthRuntimeConfig) -> str:
-    base = config.redirect_base.rstrip("/")
+def redirect_uri_for(config: GoogleOAuthRuntimeConfig, *, override_base: str | None = None) -> str:
+    base = (override_base or config.redirect_base).rstrip("/")
     return f"{base}/api/v1/oauth/google/callback"
 
 
@@ -97,7 +97,11 @@ def is_configured() -> bool:
 
 
 def build_authorize_url(
-    state: str, scopes: list[str], config: GoogleOAuthRuntimeConfig | None = None
+    state: str,
+    scopes: list[str],
+    config: GoogleOAuthRuntimeConfig | None = None,
+    *,
+    redirect_base: str = "",
 ) -> str:
     cfg = config or runtime_config_from_env()
     if not is_runtime_ready(cfg):
@@ -107,7 +111,7 @@ def build_authorize_url(
         )
     params = {
         "client_id": cfg.client_id,
-        "redirect_uri": redirect_uri_for(cfg),
+        "redirect_uri": redirect_uri_for(cfg, override_base=redirect_base or None),
         "response_type": "code",
         "scope": " ".join(scopes),
         "access_type": "offline",
@@ -173,7 +177,9 @@ def provider_ids_for_scopes(scopes: list[str]) -> list[str]:
     return out
 
 
-async def exchange_code(code: str, config: GoogleOAuthRuntimeConfig | None = None) -> dict[str, Any]:
+async def exchange_code(
+    code: str, config: GoogleOAuthRuntimeConfig | None = None, *, redirect_base: str = ""
+) -> dict[str, Any]:
     """Trade an auth code for access + refresh tokens. Returns the raw Google JSON."""
     cfg = config or runtime_config_from_env()
     if not is_runtime_ready(cfg):
@@ -183,7 +189,7 @@ async def exchange_code(code: str, config: GoogleOAuthRuntimeConfig | None = Non
         "client_secret": cfg.client_secret,
         "code": code,
         "grant_type": "authorization_code",
-        "redirect_uri": redirect_uri_for(cfg),
+        "redirect_uri": redirect_uri_for(cfg, override_base=redirect_base or None),
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         r = await client.post(TOKEN_URL, data=form)
