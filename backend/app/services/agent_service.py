@@ -202,15 +202,6 @@ _agent_ctx: ContextVar[dict[str, Any]] = ContextVar("agent_ctx", default={})
 
 _logger_memory_tools = logging.getLogger(__name__)
 
-# When the user turn looks like naming / “remember this” / durable prefs, bias the model toward
-# `upsert_memory` before `final_answer` (when tool-choice-required is on, the model can still emit
-# `final_answer` directly, so this reminder nudges memory writes first).
-_IDENTITY_AND_MEMORY_TOOL_NUDGE = """
-## Host reminder (this user message)
-This turn likely assigns or confirms your display name, or asks you to remember something durable. Before calling `final_answer`, call `upsert_memory` with appropriate keys (for names: `agent.identity.display_name_es` / `agent.identity.display_name_en`). If you tell the user you will remember or save it, you need a successful `upsert_memory` in this same turn — natural language alone does not persist.
-"""
-
-
 _logger = logging.getLogger(__name__)
 
 def get_tool_palette(
@@ -2359,7 +2350,6 @@ class AgentService:
                 "tool_palette_size": len(turn_tools),
                 "harness_mode_effective": effective,
                 "replay": replay is not None,
-                "memory_flush": tool_palette_override is not None,
                 "turn_profile": tp,
                 "max_tool_steps_effective": eff_max,
             },
@@ -2399,12 +2389,6 @@ class AgentService:
             )
         conversation.append({"role": "user", "content": message})
 
-        if heuristic_wants_post_turn_extraction(message, ""):
-            conversation[0] = {
-                "role": "system",
-                "content": (conversation[0].get("content") or "")
-                + _IDENTITY_AND_MEMORY_TOOL_NUDGE,
-            }
 
         model_limits = await resolve_model_limits(
             api_key=api_key or "",

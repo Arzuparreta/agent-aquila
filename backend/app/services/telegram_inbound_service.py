@@ -26,7 +26,6 @@ from app.services.channel_binding import get_or_create_thread_for_channel
 from app.services.chat_service import (
     append_message,
     history_for_agent,
-    preview_memory_flush_dropped,
     render_user_message,
 )
 from app.services.job_queue import enqueue
@@ -152,11 +151,6 @@ async def handle_telegram_text_message(
     await db.commit()
     await db.refresh(thread)
 
-    dropped = await preview_memory_flush_dropped(db, thread, runtime=agent_rt)
-    if dropped:
-        await AgentService.run_memory_flush_turn(
-            db, user, thread_id=thread.id, dropped_messages=dropped
-        )
     prior = await history_for_agent(db, thread, runtime=agent_rt)
     if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == text:
         prior = prior[:-1]

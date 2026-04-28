@@ -212,22 +212,6 @@ async def thread_messages_window_raw(
     ]
 
 
-async def preview_memory_flush_dropped(
-    db: AsyncSession,
-    thread: ChatThread,
-    *,
-    runtime: AgentRuntimeConfigResolved | None = None,
-    limit: int | None = None,
-) -> list[dict[str, str]]:
-    """Oldest segment of the window that ``history_for_agent`` would drop (for flush-before-compact)."""
-    msgs = await thread_messages_window_raw(db, thread, runtime=runtime, limit=limit)
-    rt = _effective_runtime(runtime)
-    cap_pairs = rt.agent_history_turns if limit is None else limit
-    if len(msgs) <= cap_pairs * 2:
-        return []
-    return msgs[: len(msgs) - cap_pairs * 2]
-
-
 async def history_for_agent(
     db: AsyncSession,
     thread: ChatThread,

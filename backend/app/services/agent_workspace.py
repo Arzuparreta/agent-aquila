@@ -292,7 +292,7 @@ async def build_system_prompt(
     if soul:
         parts.append(soul)
     parts.append(agents)
-    if tprof not in ("user_chat", "memory_flush"):
+    if tprof not in ("user_chat",):
         parts.append(
             "## Context-first (automated turn)\n"
             "Situate the incoming signal in the user snapshot and memory before using many tools. "

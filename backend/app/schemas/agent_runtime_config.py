@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 AgentToolPalette = Literal["full", "compact"]
 AgentPromptTier = Literal["full", "minimal", "none"]
-AgentMemoryPostTurnMode = Literal["heuristic", "always", "committee", "adaptive"]
+AgentMemoryPostTurnMode = Literal["heuristic", "always"]
 
 
 class AgentRuntimeConfigPartial(BaseModel):
@@ -32,16 +32,13 @@ class AgentRuntimeConfigPartial(BaseModel):
     agent_tool_choice_required: bool | None = None
     agent_history_turns: int | None = Field(default=None, ge=1, le=64)
     agent_thread_compact_after_pairs: int | None = Field(default=None, ge=0, le=500)
-    agent_memory_flush_enabled: bool | None = None
-    agent_memory_flush_max_steps: int | None = Field(default=None, ge=1, le=50)
-    agent_memory_flush_max_transcript_chars: int | None = Field(default=None, ge=1000, le=500_000)
     agent_memory_post_turn_enabled: bool | None = None
     agent_memory_post_turn_mode: AgentMemoryPostTurnMode | None = None
     agent_channel_gateway_enabled: bool | None = None
     agent_email_domain_allowlist: str | None = None
     # Harness: non-chat turns use a compact tool palette (channels, heartbeats, automation).
     agent_non_chat_uses_compact_palette: bool | None = None
-    # Optional per-profile step caps (default: ``agent_max_tool_steps`` / memory flush max).
+    # Optional per-profile step caps (default: ``agent_max_tool_steps``).
     agent_heartbeat_max_tool_steps: int | None = Field(default=None, ge=1, le=100)
     agent_channel_inbound_max_tool_steps: int | None = Field(default=None, ge=1, le=100)
     agent_automation_max_tool_steps: int | None = Field(default=None, ge=1, le=100)
@@ -54,10 +51,8 @@ class AgentRuntimeConfigPartial(BaseModel):
         if v is None or isinstance(v, str) and not str(v).strip():
             return None
         m = str(v).strip().lower()
-        if m not in ("heuristic", "always", "committee", "adaptive"):
-            raise ValueError(
-                "agent_memory_post_turn_mode must be heuristic, always, committee, or adaptive"
-            )
+        if m not in ("heuristic", "always"):
+            raise ValueError("agent_memory_post_turn_mode must be heuristic or always")
         return m
 
     @field_validator("agent_tool_palette", mode="before")
@@ -104,9 +99,6 @@ class AgentRuntimeConfigResolved(BaseModel):
     agent_tool_choice_required: bool
     agent_history_turns: int = Field(ge=1, le=64)
     agent_thread_compact_after_pairs: int = Field(ge=0, le=500)
-    agent_memory_flush_enabled: bool
-    agent_memory_flush_max_steps: int = Field(ge=1, le=50)
-    agent_memory_flush_max_transcript_chars: int = Field(ge=1000, le=500_000)
     agent_memory_post_turn_enabled: bool
     agent_memory_post_turn_mode: AgentMemoryPostTurnMode
     agent_channel_gateway_enabled: bool

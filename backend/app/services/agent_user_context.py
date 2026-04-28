@@ -41,8 +41,6 @@ async def injectable_user_context_section(
     tp = (turn_profile or "user_chat").strip().lower()
     if tp == "user_chat" and not inject_in_chat:
         return ""
-    if tp == "memory_flush":
-        return ""
     raw = getattr(settings_row, "agent_context_overview", None)
     if not raw or not str(raw).strip():
         return ""

@@ -60,7 +60,6 @@ from app.services.chat_service import (
     get_thread_message,
     history_for_agent,
     inject_memory_receipt,
-    preview_memory_flush_dropped,
     latest_prior_user_message,
     list_messages,
     list_threads,
@@ -389,11 +388,6 @@ async def send_message(
     await db.refresh(user_msg)
     await db.refresh(thread)
 
-    dropped = await preview_memory_flush_dropped(db, thread, runtime=agent_rt)
-    if dropped:
-        await AgentService.run_memory_flush_turn(
-            db, current_user, thread_id=thread.id, dropped_messages=dropped
-        )
     prior = await history_for_agent(db, thread, runtime=agent_rt)
     # Drop the most recent user message we just persisted (it's already last in `prior`),
     # since the agent expects it as the live `message` arg.
@@ -627,11 +621,6 @@ async def retry_failed_message(
     rendered = render_user_message(user_msg.content, refs)
     agent_rt = await resolve_for_user(db, current_user)
     AgentRateLimitService.check(current_user.id, max_runs_per_hour=agent_rt.agent_max_runs_per_hour)
-    dropped = await preview_memory_flush_dropped(db, thread, runtime=agent_rt)
-    if dropped:
-        await AgentService.run_memory_flush_turn(
-            db, current_user, thread_id=thread.id, dropped_messages=dropped
-        )
     prior = await history_for_agent(db, thread, runtime=agent_rt)
     if prior and prior[-1].get("role") == "user" and prior[-1].get("content") == user_msg.content:
         prior = prior[:-1]

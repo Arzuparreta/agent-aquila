@@ -56,12 +56,9 @@ def merge_stored_with_env(raw: dict[str, Any] | None) -> AgentRuntimeConfigResol
         "agent_tool_choice_required": bool(_get(s, "agent_tool_choice_required", r)),
         "agent_history_turns": int(_get(s, "agent_history_turns", r)),
         "agent_thread_compact_after_pairs": int(_get(s, "agent_thread_compact_after_pairs", r)),
-        "agent_memory_flush_enabled": bool(_get(s, "agent_memory_flush_enabled", r)),
-        "agent_memory_flush_max_steps": int(_get(s, "agent_memory_flush_max_steps", r)),
-        "agent_memory_flush_max_transcript_chars": int(_get(s, "agent_memory_flush_max_transcript_chars", r)),
         "agent_memory_post_turn_enabled": bool(_get(s, "agent_memory_post_turn_enabled", r)),
         "agent_memory_post_turn_mode": str(_get(s, "agent_memory_post_turn_mode", r)).strip().lower()
-        or "committee",
+        or "heuristic",
         "agent_channel_gateway_enabled": bool(_get(s, "agent_channel_gateway_enabled", r)),
         "agent_email_domain_allowlist": str(_get(s, "agent_email_domain_allowlist", r) or ""),
         "agent_non_chat_uses_compact_palette": bool(_get(s, "agent_non_chat_uses_compact_palette", r)),

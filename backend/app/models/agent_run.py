@@ -25,7 +25,7 @@ class AgentRun(Base):
     chat_thread_id: Mapped[int | None] = mapped_column(
         ForeignKey("chat_threads.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    # Harness turn kind: user_chat | channel_inbound | heartbeat | memory_flush | automation
+    # Harness turn kind: user_chat | channel_inbound | heartbeat | automation
     turn_profile: Mapped[str] = mapped_column(String(32), nullable=False, default="user_chat", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
