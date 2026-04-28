@@ -52,10 +52,6 @@ from app.schemas.agent import (
     PendingProposalRead,
 )
 from app.services.agent_harness.native import chat_turn_native
-from app.services.agent_harness.prompted import (
-    format_tool_results_for_prompt,
-    parse_tool_calls_from_content,
-)
 from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_dispatch_table import AGENT_TOOL_DISPATCH
 from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
@@ -2344,8 +2340,7 @@ class AgentService:
         effective = resolve_effective_mode(
             harness_pref, settings_row.provider_kind, settings_row.chat_model
         )
-        allow_native_fallback = effective == "native"
-
+    # Native only - fallback removed
         root_trace = run.root_trace_id or new_trace_id()
         if run.root_trace_id is None:
             run.root_trace_id = root_trace
@@ -2475,33 +2470,17 @@ class AgentService:
                     },
                 )
                 _llm_t0 = time.monotonic()
+                # Native mode only - native LLM call
                 try:
-                    if effective == "native":
-                        response = await chat_turn_native(
-                            api_key or "",
-                            settings_row,
-                            messages=conversation,
-                            tools=turn_tools,
-                            require_tool_choice=rt.agent_tool_choice_required,
-                            temperature=0.15,
-                            max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
-                        )
-                    else:
-                        raw_text, finish_reason, raw_msg, usage_cf = await LLMClient.chat_completion_full(
-                            api_key or "",
-                            settings_row,
-                            messages=conversation,
-                            temperature=0.15,
-                            max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
-                        )
-                        calls, parse_errors = parse_tool_calls_from_content(raw_text)
-                        response = ChatResponse(
-                            content=raw_text,
-                            tool_calls=calls,
-                            raw_message=raw_msg,
-                            finish_reason=finish_reason,
-                            usage=usage_cf,
-                        )
+                    response = await chat_turn_native(
+                        api_key or "",
+                        settings_row,
+                        messages=conversation,
+                        tools=turn_tools,
+                        require_tool_choice=rt.agent_tool_choice_required,
+                        temperature=0.15,
+                        max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
+                    )
                 except LLMProviderError as exc:
                     if rt.context_budget_v2 and _is_context_overflow(exc) and not overflow_retried:
                         overflow_retried = True
@@ -2517,36 +2496,6 @@ class AgentService:
                         continue
                     raise
                 _llm_duration_ms = int((time.monotonic() - _llm_t0) * 1000)
-
-                if (
-                    effective == "native"
-                    and allow_native_fallback
-                    and not response.has_tool_calls
-                ):
-                    effective = "prompted"
-                    allow_native_fallback = False
-                    system_prompt = await _assemble_system("prompted")
-                    conversation[0] = {"role": "system", "content": system_prompt}
-                    _llm_t0_fb = time.monotonic()
-                    raw_text, finish_reason, raw_msg, usage_fb = await LLMClient.chat_completion_full(
-                        api_key or "",
-                        settings_row,
-                        messages=conversation,
-                        temperature=0.15,
-                        max_tokens=budget.reserved_output_tokens if rt.context_budget_v2 else None,
-                    )
-                    _llm_duration_ms = int((time.monotonic() - _llm_t0_fb) * 1000)
-                    calls, parse_errors = parse_tool_calls_from_content(raw_text)
-                    response = ChatResponse(
-                        content=raw_text,
-                        tool_calls=calls,
-                        raw_message=raw_msg,
-                        finish_reason=finish_reason,
-                        usage=usage_fb,
-                    )
-
-                if effective == "native" and response.has_tool_calls:
-                    allow_native_fallback = False
 
                 step_idx += 1
                 await emit_trace_event(
@@ -2620,10 +2569,8 @@ class AgentService:
                         )
                     break
 
-                if effective == "native":
-                    conversation.append(_assistant_message_from(response))
-                else:
-                    conversation.append({"role": "assistant", "content": response.content or ""})
+                # Native mode only
+                conversation.append(_assistant_message_from(response))
 
                 tool_result_dicts: list[dict[str, Any]] = []
                 stop_due_to_repeated_empty_gmail_search = False
@@ -2702,16 +2649,16 @@ class AgentService:
                     elif tool_name != FINAL_ANSWER_TOOL_NAME:
                         empty_gmail_search_streak = 0
                         empty_gmail_queries.clear()
-                    if effective == "native":
-                        tool_payload = json.dumps(result, ensure_ascii=False, default=str)
-                        conversation.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call.id,
-                                "name": tool_name,
-                                "content": clamp_tool_content_by_tokens(tool_payload, 3000),
-                            }
-                        )
+                    # Native mode only
+                    tool_payload = json.dumps(result, ensure_ascii=False, default=str)
+                    conversation.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "name": tool_name,
+                            "content": clamp_tool_content_by_tokens(tool_payload, 3000),
+                        }
+                    )
                     try:
                         result_fingerprint = content_sha256_preview(
                             json.dumps(result, ensure_ascii=False, default=str)[:8000]
@@ -2738,22 +2685,7 @@ class AgentService:
                 if stop_due_to_repeated_empty_gmail_search:
                     break
 
-                executed_non_final = any(
-                    (c.name or "") != FINAL_ANSWER_TOOL_NAME for c in response.tool_calls
-                )
-                if (
-                    effective == "prompted"
-                    and response.tool_calls
-                    and (executed_non_final or final_answer_text is None)
-                ):
-                    conversation.append(
-                        {
-                            "role": "user",
-                            "content": format_tool_results_for_prompt(
-                                response.tool_calls, tool_result_dicts
-                            ),
-                        }
-                    )
+                # Native mode only - prompted tool result handling removed
                 if rt.context_budget_v2:
                     budget = plan_budget(messages=conversation, limits=model_limits)
                     if budget.compacted:

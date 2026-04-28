@@ -104,28 +104,8 @@ Full JSON Schemas for each tool are supplied separately by the host API (`tools`
 """
 
 
-_PROMPTED_TOOL_INSTRUCTIONS = """# Tool calling (prompted mode)
 
-The API may not expose tools separately. You **must** invoke tools by emitting one or more blocks in this exact shape (JSON object inside the tags, valid JSON only):
 
-<tool_call>
-{{"name": "TOOL_NAME", "arguments": {{ ... }}}}
-</tool_call>
-
-- Use only tool names from the **Available tools (JSON)** section below.
-- To show the user your reply, call the tool named `final_answer` with `arguments` like `{{"text": "...", "citations": []}}`.
-- You may emit multiple `<tool_call>` blocks in one assistant message if the host allows multiple steps; otherwise emit one at a time.
-- Do not wrap JSON in markdown code fences inside `<tool_call>`.
-
-## Available tools (JSON)
-
-The following definitions mirror the host tool schemas:
-
-```json
-{tool_json}
-```
-
-"""
 
 
 def _workspace_dir() -> Path:
@@ -167,27 +147,6 @@ def build_quick_tool_index(palette: list[dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "(no tools)"
 
 
-def palette_to_prompt_json(palette: list[dict[str, Any]], *, compact: bool) -> str:
-    """Serialize tool definitions for prompted-mode system embed (optionally trimmed)."""
-    if not compact:
-        return json.dumps(palette, ensure_ascii=False, indent=2)
-    slim: list[dict[str, Any]] = []
-    for t in palette:
-        fn = (t.get("function") or {}) if isinstance(t, dict) else {}
-        name = str(fn.get("name") or "").strip()
-        desc = str(fn.get("description") or "").replace("\n", " ").strip()
-        if len(desc) > 280:
-            desc = desc[:277] + "…"
-        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
-        slim.append(
-            {
-                "type": "function",
-                "function": {"name": name, "description": desc, "parameters": params},
-            }
-        )
-    return json.dumps(slim, ensure_ascii=False, separators=(",", ":"))
-
-
 def build_tools_section_native(
     palette: list[dict[str, Any]], *, include_gmail_playbook: bool
 ) -> str:
@@ -197,14 +156,6 @@ def build_tools_section_native(
     return "\n\n".join(parts)
 
 
-def build_tools_section_prompted(
-    palette: list[dict[str, Any]], *, include_gmail_playbook: bool, compact_json: bool
-) -> str:
-    tool_json = palette_to_prompt_json(palette, compact=compact_json)
-    parts = [_PROMPTED_TOOL_INSTRUCTIONS.format(tool_json=tool_json)]
-    if include_gmail_playbook:
-        parts.append(_GMAIL_PLAYBOOK)
-    return "\n\n".join(parts)
 
 
 def build_tools_section(
@@ -212,17 +163,11 @@ def build_tools_section(
     harness_mode: HarnessMode,
     *,
     prompt_tier: str,
-    prompted_compact_json: bool,
 ) -> str:
     tier = (prompt_tier or "full").strip().lower()
     include_playbook = tier == "full"
-    if harness_mode == "prompted":
-        return build_tools_section_prompted(
-            palette, include_gmail_playbook=include_playbook, compact_json=prompted_compact_json
-        )
+    # Native mode only - prompted mode removed
     return build_tools_section_native(palette, include_gmail_playbook=include_playbook)
-
-
 def build_harness_facts_markdown(
     *,
     tool_count: int,
@@ -341,7 +286,6 @@ async def build_system_prompt(
         tool_palette,
         harness_mode,
         prompt_tier=tier,
-        prompted_compact_json=rt.agent_prompted_compact_json,
     )
 
     parts: list[str] = []

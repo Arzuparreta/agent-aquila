@@ -32,7 +32,7 @@ from app.services.ai_provider_config_service import (
 from app.services.ai_providers import normalize_provider_id
 from app.services.user_time_context import normalize_time_format
 
-HarnessMode = Literal["auto", "native", "prompted"]
+HarnessMode = Literal["native"]  # prompted mode removed
 
 
 async def merge_calendar_timezone_from_user_prefs(
@@ -56,7 +56,7 @@ async def merge_calendar_timezone_from_user_prefs(
 
 def coerce_harness_mode(row: UserAISettings) -> HarnessMode:
     hm = getattr(row, "harness_mode", None) or "auto"
-    if hm in ("auto", "native", "prompted"):
+    if hm in ("native",):
         return hm
     return "auto"
 
@@ -142,7 +142,7 @@ class UserAISettingsService:
 
         if "harness_mode" in data and data["harness_mode"] is not None:
             hm = str(data["harness_mode"]).strip().lower()
-            if hm not in ("auto", "native", "prompted"):
+            if hm not in ("native",):
                 raise ValueError(f"Invalid harness_mode: {data['harness_mode']!r}")
             prefs.harness_mode = hm
 

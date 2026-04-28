@@ -53,7 +53,6 @@ def merge_stored_with_env(raw: dict[str, Any] | None) -> AgentRuntimeConfigResol
         "token_aware_history": bool(_get(s, "token_aware_history", r)),
         "dynamic_model_limits": bool(_get(s, "dynamic_model_limits", r)),
         "agent_connector_gated_tools": bool(_get(s, "agent_connector_gated_tools", r)),
-        "agent_prompted_compact_json": bool(_get(s, "agent_prompted_compact_json", r)),
         "agent_tool_choice_required": bool(_get(s, "agent_tool_choice_required", r)),
         "agent_history_turns": int(_get(s, "agent_history_turns", r)),
         "agent_thread_compact_after_pairs": int(_get(s, "agent_thread_compact_after_pairs", r)),
