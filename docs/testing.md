@@ -1,6 +1,6 @@
 # Testing
 
-Automated tests live under `backend/tests/` and use **[pytest](https://pytest.org/)** with **pytest-asyncio** (`asyncio_mode = auto` in `backend/pyproject.toml`).
+Automated tests live under `backend/tests/` and use **[pytest](https://pytest.org)** with **pytest-asyncio** (`asyncio_mode = auto` in `backend/pyproject.toml`).
 
 The **frontend** has no unit/e2e test script; use `npm run lint` (Next.js ESLint).
 
@@ -71,18 +71,26 @@ Useful variants:
 
 ---
 
-## What each module covers
+## Test modules (non-exhaustive)
 
 | Module | DB | Summary |
 |--------|----|---------|
-| `test_alembic_version_column.py` | No | Alembic `alembic_version.version_num` guard in `alembic/env.py` (long `revision` ids vs legacy VARCHAR(32)); see README Troubleshooting |
-| `test_capability_registry.py` | No | Registry keys for the only two proposal kinds the agent can produce (`email_send`, `email_reply`) and their preview helpers |
-| `test_ai_providers.py` | No | AI provider adapters (OpenAI, Ollama, Anthropic, OpenRouter, Azure, LiteLLM, custom OpenAI-compatible): URLs, headers, parsing, error codes — HTTP mocked via `httpx.AsyncClient` patches |
-| `test_ai_routes.py` | No | Provider registry enumeration, API key sentinel resolution, Pydantic normalization for user AI settings |
-| `test_agent_tools.py` | No | Catalogue structure only: bucket disjointness + `_DISPATCH` coverage (behavioral Gmail tests live in `test_gmail_*.py`, not duplicated per-tool here) |
-| `test_gmail_client.py` | No | Gmail 429 parsing; mocked `httpx` asserts REST JSON shapes (`modify_*` → camelCase `addLabelIds`, `create_filter` body) |
-| `test_gmail_routes.py` | No | FastAPI `TestClient`: `snake_case` request bodies on `/gmail/.../modify` forward correctly to the client |
-| `test_gmail_silence_sender.py` | Yes | `gmail_silence_sender`: filter action never adds `SPAM`; spam + `thread_id` calls `modify_thread` before `create_filter` |
+| `test_alembic_version_column.py` | No | `alembic_version.version_num` guard in `alembic/env.py` |
+| `test_capability_registry.py` | No | Registry keys for proposal kinds |
+| `test_ai_providers.py` | No | AI provider adapters (OpenAI, Ollama, Anthropic, OpenRouter, Azure, LiteLLM, custom) |
+| `test_ai_routes.py` | No | Provider registry enumeration, API key resolution |
+| `test_agent_tools.py` | No | Catalogue structure: bucket disjointness + dispatch coverage |
+| `test_gmail_client.py` | No | Gmail 429 parsing; mocked REST JSON shapes |
+| `test_gmail_routes.py` | No | FastAPI `TestClient`: body forwarding |
+| `test_gmail_silence_sender.py` | Yes | Gmail filter action never adds `SPAM` |
+| `test_chat_threads_list.py` | Yes | Thread listing |
+| `test_capability_registry.py` | No | Proposal preview helpers |
+| `test_agent_trace_channel.py` | Yes | Trace event ordering |
+| `test_embedding_vector.py` | No | Embedding padding to 1536 dims |
+| `test_workspace_sandbox.py` | No | Agent workspace file safety |
+| `test_github_client.py` | No | GitHub client mocked |
+| `test_whatsapp_client.py` | No | WhatsApp client mocked |
+| `test_icloud_*` | No | iCloud client mocks |
 
 ---
 
@@ -96,9 +104,15 @@ npm run lint
 
 ---
 
-## Manual UI QA
+## Smoke test (AI provider)
 
-There is no Playwright/Cypress suite for the chat or inbox yet. After changing those surfaces, run through the checklist in **[`MANUAL_QA.md`](MANUAL_QA.md)** (thread kebab: rename / pin / archive / delete; inbox: search, mute, spam, start chat; settings: memory + skills viewers; reconnect-Gmail banner).
+After configuring any provider, verify end-to-end:
+
+```bash
+docker compose exec backend python -m app.scripts.smoke_ai_provider
+```
+
+This exercises the same code paths the agent uses: tool calling, JSON mode, and embeddings.
 
 ---
 

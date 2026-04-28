@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from arq import cron  # type: ignore[import-not-found]
@@ -498,18 +498,26 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
     processed = 0
     failures = 0
     for task_id in due_ids:
+        async with AsyncSessionLocal() as db:
+            task = await db.get(ScheduledTask, task_id)
+            if task is None or not task.enabled or task.next_run_at > datetime.now(UTC):
+                await db.rollback()
+                continue
+            task.last_status = "running"
+            task.last_error = None
+            # Advance next_run_at immediately so another concurrent tick does
+            # not pick the same task.  On exception the outer try/except will
+            # reset this back in a separate session.
+            task.next_run_at = ScheduledTaskService.compute_next_run(
+                now_utc=datetime.now(UTC), task=task
+            )
+            await db.commit()
+
         try:
             async with AsyncSessionLocal() as db:
                 task = await db.get(ScheduledTask, task_id)
-                if task is None or not task.enabled or task.next_run_at > datetime.now(UTC):
+                if task is None or not task.enabled:
                     continue
-                task.next_run_at = ScheduledTaskService.compute_next_run(now_utc=datetime.now(UTC), task=task)
-                if task.schedule_type == "once":
-                    task.enabled = False
-                task.last_status = "running"
-                task.last_error = None
-                await db.commit()
-
                 user = await db.get(User, task.user_id)
                 if user is None or not user.is_active:
                     task.enabled = False
@@ -568,7 +576,8 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                         user.id,
                     )
 
-                await db.refresh(task)
+                if task.schedule_type == "once":
+                    task.enabled = False
                 task.last_run_at = datetime.now(UTC)
                 task.run_count = int(task.run_count or 0) + 1
                 task.last_status = run.status
@@ -582,6 +591,8 @@ async def run_scheduled_tasks(ctx: dict[str, Any]) -> dict[str, Any]:
                 async with AsyncSessionLocal() as db:
                     task = await db.get(ScheduledTask, task_id)
                     if task is not None:
+                        # Reset next_run_at so the task is retried.
+                        task.next_run_at = datetime.now(UTC) + timedelta(minutes=2)
                         task.last_status = "failed"
                         task.last_error = str(exc)[:2000]
                         await db.commit()

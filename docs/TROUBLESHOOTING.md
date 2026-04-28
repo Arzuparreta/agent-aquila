@@ -14,6 +14,7 @@ Use this page for startup failures, proxy errors, and long-running task stalls.
 | Startup fails because `user_ai_settings.agent_processing_paused` is missing | Apply latest migrations. Dev-only bypass: `AQUILA_SKIP_SCHEMA_PROBE=1`. |
 | Chat stalls on `...`, or bulk Gmail jobs never finish | Confirm `worker` is running (`arq app.worker.WorkerSettings`), `REDIS_URL` is set, and `AGENT_ASYNC_RUNS` is enabled. |
 | **Step budget exceeded** | Increase `AGENT_MAX_TOOL_STEPS` in `.env` or reduce tool rounds. For inbox wipes, prefer `gmail_trash_bulk_query` for one-shot runs. |
+| **Harness mode errors** | Aquila now uses native tool calling only. If your provider doesn't support `tools=`, switch to Ollama with a supporting model (watt-tool-8B, qwen3-coder) or use OpenRouter/LiteLLM as a proxy. See [PROVIDERS.md](./PROVIDERS.md). |
 | OAuth redirect points to `localhost` when accessing from a different URL (e.g., Tailscale Funnel) | The OAuth redirect URI is now captured dynamically from the request URL. If you still see this, ensure all possible base URLs are registered in your Google Cloud Console OAuth app settings. See the note below. |
 
 ## OAuth Redirect URI Configuration

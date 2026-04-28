@@ -20,4 +20,4 @@ Infrastructure and secrets (database, Redis, JWT, OAuth app credentials, workspa
 
 ## Internal-only knobs
 
-Some env vars exist for maintainers or gradual rollout (for example compact JSON for the prompted harness). They stay as server defaults unless exposed in the partial schema; prefer changing deployment env rather than documenting every flag in user-facing copy.
+Some env vars exist for maintainers or gradual rollout. They stay as server defaults unless exposed in the partial schema; prefer changing deployment env rather than documenting every flag in user-facing copy.
