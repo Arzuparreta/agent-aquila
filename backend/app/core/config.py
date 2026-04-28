@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     # Omit tool schemas for providers the user has not connected (reduces confusion + tokens).
     agent_connector_gated_tools: bool = Field(default=False, validation_alias="AGENT_CONNECTOR_GATED_TOOLS")
     # In prompted harness mode, use shorter JSON (tighter descriptions, no indent) for tool embed.
-    agent_prompted_compact_json: bool = Field(default=True, validation_alias="AGENT_PROMPTED_COMPACT_JSON")
+    # (prompted mode removed; kept for backward compat only — no longer used)
     # Native harness: when true, request ``tool_choice="required"`` (some routed providers reject this).
     agent_tool_choice_required: bool = Field(default=False, validation_alias="AGENT_TOOL_CHOICE_REQUIRED")
     # Prior chat turns sent to the agent (default 8). Lower = fewer tokens.

@@ -28,7 +28,6 @@ class AgentRuntimeConfigPartial(BaseModel):
     token_aware_history: bool | None = None
     dynamic_model_limits: bool | None = None
     agent_connector_gated_tools: bool | None = None
-    agent_prompted_compact_json: bool | None = None
     agent_tool_choice_required: bool | None = None
     agent_history_turns: int | None = Field(default=None, ge=1, le=64)
     agent_thread_compact_after_pairs: int | None = Field(default=None, ge=0, le=500)

@@ -42,7 +42,7 @@ class UserAISettingsRead(BaseModel):
     ai_disabled: bool
     has_api_key: bool
     extras: dict[str, Any] | None = None
-    harness_mode: Literal["auto", "native", "prompted"] = "auto"
+    harness_mode: Literal["auto", "native"] = "auto"
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] = "auto"
     agent_processing_paused: bool = False
@@ -58,7 +58,7 @@ class UserAISettingsUpdate(BaseModel):
     embedding_provider_kind: str | None = None
     ranking_provider_kind: str | None = None
     ai_disabled: bool | None = None
-    harness_mode: Literal["auto", "native", "prompted"] | None = None
+    harness_mode: Literal["auto", "native"] | None = None
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] | None = None
     agent_processing_paused: bool | None = None
@@ -217,7 +217,7 @@ class ProviderConfigsResponse(BaseModel):
     embedding_provider_kind: str | None = None
     ranking_provider_kind: str | None = None
     ai_disabled: bool = False
-    harness_mode: Literal["auto", "native", "prompted"] = "auto"
+    harness_mode: Literal["auto", "native"] = "auto"
     user_timezone: str | None = None
     time_format: Literal["auto", "12", "24"] = "auto"
     agent_runtime: AgentRuntimeConfigResolved

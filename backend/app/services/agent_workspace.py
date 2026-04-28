@@ -160,13 +160,11 @@ def build_tools_section_native(
 
 def build_tools_section(
     palette: list[dict[str, Any]],
-    harness_mode: HarnessMode,
     *,
     prompt_tier: str,
 ) -> str:
     tier = (prompt_tier or "full").strip().lower()
     include_playbook = tier == "full"
-    # Native mode only - prompted mode removed
     return build_tools_section_native(palette, include_gmail_playbook=include_playbook)
 def build_harness_facts_markdown(
     *,
@@ -259,7 +257,6 @@ async def build_system_prompt(
     user: User,
     *,
     tool_palette: list[dict[str, Any]],
-    harness_mode: HarnessMode,
     thread_context_hint: str | None = None,
     tenant_hint: str | None = None,
     user_timezone: str | None = None,

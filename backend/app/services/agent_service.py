@@ -52,7 +52,6 @@ from app.schemas.agent import (
     PendingProposalRead,
 )
 from app.services.agent_harness.native import chat_turn_native
-from app.services.agent_harness.selector import resolve_effective_mode
 from app.services.agent_dispatch_table import AGENT_TOOL_DISPATCH
 from app.schemas.agent_runtime_config import AgentRuntimeConfigResolved
 from app.services.agent_harness_effective import (
@@ -2327,11 +2326,7 @@ class AgentService:
             turn_profile=tp,
             inject_in_chat=rt.agent_inject_user_context_in_chat,
         )
-        harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
-        effective = resolve_effective_mode(
-            harness_pref, settings_row.provider_kind, settings_row.chat_model
-        )
-    # Native only - fallback removed
+        effective = "native"  # Native only - prompted harness removed
         root_trace = run.root_trace_id or new_trace_id()
         if run.root_trace_id is None:
             run.root_trace_id = root_trace
@@ -2355,12 +2350,11 @@ class AgentService:
             },
         )
 
-        async def _assemble_system(harness_mode: object) -> str:
+        async def _assemble_system() -> str:
             return await build_system_prompt(
                 db,
                 user,
                 tool_palette=turn_tools,
-                harness_mode=harness_mode,  # type: ignore[arg-type]
                 thread_context_hint=thread_context_hint,
                 user_timezone=getattr(settings_row, "user_timezone", None),
                 time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
@@ -2375,7 +2369,7 @@ class AgentService:
         if system_prompt_override is not None:
             system_prompt = system_prompt_override
         else:
-            system_prompt = await _assemble_system(effective)
+            system_prompt = await _assemble_system()
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
         ]
