@@ -74,7 +74,6 @@ from app.services.agent_tools import (
     AGENT_TOOLS,
     FINAL_ANSWER_TOOL_NAME,
     filter_tools_for_user_connectors,
-    memory_flush_tools,
     tools_for_palette_mode,
 )
 from app.services.agent_trace import (
@@ -92,7 +91,6 @@ from app.services.agent_trace import (
 )
 from app.services.agent_user_context import injectable_user_context_section
 from app.services.agent_workspace import (
-    build_memory_flush_system_prompt,
     build_system_prompt,
     linked_connector_providers,
     list_allowed_workspace_files,
@@ -245,18 +243,7 @@ async def resolve_turn_tool_palette(
     mode = effective_tool_palette_mode_for_turn(rt, turn_profile)
     base = tools_for_palette_mode(mode)
     
-    tool_names = {t.get("function", {}).get("name", "") for t in base}
-    _logger.warning(
-        "DIAG resolve_turn_tool_palette: user_id=%s mode=%s turn_profile=%s tool_count=%s tools=%s",
-        user.id, mode, turn_profile, len(base), sorted(tool_names)
-    )
-    _logger.warning(
-        "DIAG propose_* tools visible: %s",
-        [n for n in tool_names if n.startswith("propose_")]
-    )
-    
     if not rt.agent_connector_gated_tools:
-        _logger.warning("DIAG: no connector gating, returning base tools")
         return base
     filtered = await filter_tools_for_user_connectors(db, user.id, base)
     names = {t["function"]["name"] for t in filtered}
@@ -264,7 +251,6 @@ async def resolve_turn_tool_palette(
         return base
     if len(filtered) < 6:
         return base
-    _logger.warning("DIAG: connector gating active, filtered to %d tools", len(filtered))
     return filtered
 
 
@@ -1119,19 +1105,6 @@ class AgentService:
         return await upload_file(provider, creds, path, body, mime)
 
     @staticmethod
-    async def _tool_drive_share_file(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, DRIVE_TOOL_PROVIDERS, label="Google Drive")
-        _token, creds, provider = await TokenManager.get_valid_creds(db, row)
-        return await share_file(
-            provider,
-            creds,
-            str(args["file_id"]),
-            str(args["email"]),
-            str(args.get("role") or "reader"),
-        )
-
     @staticmethod
     async def _tool_sheets_read_range(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -1141,21 +1114,6 @@ class AgentService:
         return await client.get_values(str(args["spreadsheet_id"]), str(args["range"]))
 
     @staticmethod
-    async def _tool_sheets_append_row(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, SHEETS_TOOL_PROVIDERS, label="Google Sheets")
-        client = await _sheets_client(db, row)
-        raw_vals = args.get("values")
-        if not isinstance(raw_vals, list):
-            return {"error": "values must be an array"}
-        row_vals: list[Any] = list(raw_vals)
-        return await client.append_row(
-            str(args["spreadsheet_id"]),
-            str(args["range"]),
-            row_vals,
-        )
-
     @staticmethod
     async def _tool_docs_get_document(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -1168,93 +1126,11 @@ class AgentService:
     # YouTube, Tasks, People, iCloud CalDAV
     # ------------------------------------------------------------------
     @staticmethod
-    async def _tool_youtube_list_my_channels(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
-        client = await _youtube_client(db, row)
-        return await client.list_my_channels(page_token=args.get("page_token"))
-
     @staticmethod
-    async def _tool_youtube_search_videos(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
-        cid = args.get("channel_id")
-        q = args.get("q")
-        if not cid and not q:
-            return {"error": "pass channel_id and/or q"}
-        client = await _youtube_client(db, row)
-        return await client.search_videos(
-            channel_id=str(cid) if cid else None,
-            q=str(q) if q else None,
-            page_token=args.get("page_token"),
-            max_results=int(args.get("max_results") or 25),
-        )
-
     @staticmethod
-    async def _tool_youtube_get_video(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
-        raw = args.get("video_id")
-        if isinstance(raw, list):
-            ids = [str(x).strip() for x in raw if str(x).strip()]
-        else:
-            ids = [s.strip() for s in str(raw or "").split(",") if s.strip()]
-        if not ids:
-            return {"error": "video_id required"}
-        client = await _youtube_client(db, row)
-        return await client.list_videos(ids)
-
     @staticmethod
-    async def _tool_youtube_list_playlists(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
-        cid = str(args.get("channel_id") or "").strip()
-        if not cid:
-            return {
-                "error": "channel_id is required. Call youtube_list_my_channels first, then pass id.",
-            }
-        client = await _youtube_client(db, row)
-        return await client.list_playlists(
-            cid,
-            page_token=args.get("page_token"),
-            max_results=int(args.get("max_results") or 50),
-        )
-
     @staticmethod
-    async def _tool_youtube_list_playlist_items(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
-        pid = str(args.get("playlist_id") or "").strip()
-        if not pid:
-            return {"error": "playlist_id is required (from youtube_list_playlists or channel contentDetails)."}
-        client = await _youtube_client(db, row)
-        return await client.list_playlist_items(
-            pid,
-            page_token=args.get("page_token"),
-            max_results=int(args.get("max_results") or 50),
-        )
-
     @staticmethod
-    async def _tool_youtube_update_video(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, YOUTUBE_TOOL_PROVIDERS, label="YouTube")
-        client = await _youtube_client(db, row)
-        tags = args.get("tags")
-        tlist = [str(x) for x in tags] if isinstance(tags, list) else None
-        return await client.update_video_snippet(
-            str(args["video_id"]),
-            title=str(args["title"]) if args.get("title") is not None else None,
-            description=str(args["description"]) if args.get("description") is not None else None,
-            tags=tlist,
-            category_id=str(args["category_id"]) if args.get("category_id") is not None else None,
-        )
-
     @staticmethod
     async def _tool_tasks_list_tasklists(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -1456,35 +1332,8 @@ class AgentService:
         return {"ok": True, "result": result}
 
     @staticmethod
-    async def _tool_discord_list_guilds(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, DISCORD_TOOL_PROVIDERS, label="Discord")
-        client = await _discord_client(db, row)
-        guilds = await client.list_guilds()
-        return {"guilds": guilds}
-
     @staticmethod
-    async def _tool_discord_list_guild_channels(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, DISCORD_TOOL_PROVIDERS, label="Discord")
-        client = await _discord_client(db, row)
-        ch = await client.list_guild_channels(str(args["guild_id"]))
-        return {"channels": ch}
-
     @staticmethod
-    async def _tool_discord_get_channel_messages(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, DISCORD_TOOL_PROVIDERS, label="Discord")
-        client = await _discord_client(db, row)
-        msgs = await client.list_messages(
-            str(args["channel_id"]),
-            limit=int(args.get("limit") or 25),
-        )
-        return {"messages": msgs}
-
     @staticmethod
     async def _tool_device_list_ingested_files(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -1504,242 +1353,20 @@ class AgentService:
         )
 
     @staticmethod
-    async def _tool_icloud_drive_list_folder(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        path = str(args.get("path") or "")
-        try:
-            return await asyncio.to_thread(
-                list_folder_sync,
-                uid,
-                pw,
-                connection_id=row.id,
-                china_mainland=china,
-                path=path,
-            )
-        except ICloudDriveError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_icloud_drive_get_file(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        fpath = str(args.get("path") or "").strip()
-        if not fpath:
-            return {"error": "path is required (slash-separated from Drive root, e.g. Documents/notes.txt)"}
-        max_b = int(args.get("max_bytes") or DEFAULT_DOWNLOAD_MAX_BYTES)
-        try:
-            return await asyncio.to_thread(
-                download_file_sync,
-                uid,
-                pw,
-                connection_id=row.id,
-                china_mainland=china,
-                path=fpath,
-                max_bytes=max_b,
-            )
-        except ICloudDriveError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_icloud_contacts_list(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        try:
-            return await icloud_carddav_list_contacts(
-                uid,
-                pw,
-                china_mainland=china,
-                max_results=int(args.get("max_results") or 200),
-            )
-        except ICloudContactsError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_icloud_contacts_search(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        try:
-            return await icloud_carddav_search_contacts(
-                uid,
-                pw,
-                str(args.get("query") or ""),
-                china_mainland=china,
-                max_results=int(args.get("max_results") or 50),
-            )
-        except ICloudContactsError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_icloud_reminders_list(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        try:
-            return await icloud_pyicloud_list_reminders(
-                uid,
-                pw,
-                connection_id=row.id,
-                china_mainland=china,
-                max_lists=int(args.get("max_lists") or 20),
-                max_reminders_per_list=int(args.get("max_reminders_per_list") or 50),
-            )
-        except ICloudDriveError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_icloud_notes_list(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        try:
-            return await icloud_pyicloud_list_notes(
-                uid,
-                pw,
-                connection_id=row.id,
-                china_mainland=china,
-                limit=int(args.get("limit") or 40),
-            )
-        except ICloudDriveError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_icloud_photos_list(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, ICLOUD_TOOL_PROVIDERS, label="iCloud")
-        uid, pw, china = _icloud_app_password_creds(row)
-        if not uid or not pw.strip():
-            return {"error": "missing Apple ID or password on this iCloud connection"}
-        try:
-            return await icloud_pyicloud_list_photos(
-                uid,
-                pw,
-                connection_id=row.id,
-                china_mainland=china,
-                max_albums=int(args.get("max_albums") or 8),
-                max_photos_per_album=int(args.get("max_photos_per_album") or 25),
-            )
-        except ICloudDriveError as exc:
-            return {"error": exc.detail, "status_code": exc.status_code}
-
     @staticmethod
-    async def _tool_submit_whatsapp_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_whatsapp_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            access_token=str(args.get("access_token") or ""),
-            phone_number_id=str(args.get("phone_number_id") or ""),
-            graph_api_version=args.get("graph_api_version"),
-        )
-
     @staticmethod
-    async def _tool_submit_github_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_github_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            access_token=str(args.get("access_token") or ""),
-        )
-
     @staticmethod
-    async def _tool_submit_slack_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_slack_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            bot_token=str(args.get("bot_token") or ""),
-        )
-
     @staticmethod
-    async def _tool_submit_linear_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_linear_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            api_key=str(args.get("api_key") or ""),
-        )
-
     @staticmethod
-    async def _tool_submit_notion_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_notion_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            api_key=str(args.get("api_key") or ""),
-        )
-
     @staticmethod
-    async def _tool_submit_telegram_bot_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_telegram_bot_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            bot_token=str(args.get("bot_token") or ""),
-        )
-
     @staticmethod
-    async def _tool_submit_discord_bot_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_discord_bot_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            bot_token=str(args.get("bot_token") or ""),
-        )
-
     @staticmethod
-    async def _tool_submit_icloud_caldav_credentials(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        return await submit_icloud_caldav_credentials_service(
-            db,
-            user,
-            setup_token=str(args.get("setup_token") or ""),
-            apple_id=str(args.get("apple_id") or ""),
-            app_password=str(args.get("app_password") or ""),
-            china_mainland=bool(args.get("china_mainland")),
-        )
-
-    # ------------------------------------------------------------------
-    # Outlook + Teams tools
-    # ------------------------------------------------------------------
     @staticmethod
     async def _tool_outlook_list_messages(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -1757,43 +1384,8 @@ class AgentService:
         return await client.get_message(str(args["message_id"]))
 
     @staticmethod
-    async def _tool_teams_list_teams(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, TEAMS_TOOL_PROVIDERS, label="Microsoft Teams")
-        client = await _graph_client(db, row)
-        return await client._get("/me/joinedTeams")
-
     @staticmethod
-    async def _tool_teams_list_channels(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        row = await _resolve_connection(db, user, args, TEAMS_TOOL_PROVIDERS, label="Microsoft Teams")
-        client = await _graph_client(db, row)
-        return await client._get(f"/teams/{args['team_id']}/channels")
-
     @staticmethod
-    async def _tool_teams_post_message(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        import httpx
-
-        row = await _resolve_connection(db, user, args, TEAMS_TOOL_PROVIDERS, label="Microsoft Teams")
-        token = await TokenManager.get_valid_access_token(db, row)
-        url = (
-            f"https://graph.microsoft.com/v1.0/teams/{args['team_id']}"
-            f"/channels/{args['channel_id']}/messages"
-        )
-        body = {"body": {"contentType": "html", "content": str(args.get("body") or "")}}
-        async with httpx.AsyncClient(timeout=30.0) as http:
-            r = await http.post(url, headers={"Authorization": f"Bearer {token}"}, json=body)
-        if r.status_code >= 300:
-            return {"ok": False, "status": r.status_code, "detail": r.text[:500]}
-        return {"ok": True, "result": r.json()}
-
-    # ------------------------------------------------------------------
-    # Memory + skills tools
-    # ------------------------------------------------------------------
     @staticmethod
     async def _tool_upsert_memory(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -1959,85 +1551,6 @@ class AgentService:
         return {"path": path, "content": raw}
 
     @staticmethod
-    async def _tool_describe_harness(
-        db: AsyncSession, user: User, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        del args
-        from app.services.capability_registry import describe_capabilities
-
-        prefs = await UserAISettingsService.get_or_create(db, user)
-        rt = await resolve_for_user(db, user)
-        provs = await linked_connector_providers(db, user.id)
-        palette = await resolve_turn_tool_palette(db, user)
-        scheduled_total = int(
-            (
-                await db.execute(
-                    select(func.count()).select_from(ScheduledTask).where(ScheduledTask.user_id == user.id)
-                )
-            ).scalar_one()
-            or 0
-        )
-        scheduled_enabled = int(
-            (
-                await db.execute(
-                    select(func.count()).select_from(ScheduledTask).where(
-                        ScheduledTask.user_id == user.id, ScheduledTask.enabled.is_(True)
-                    )
-                )
-            ).scalar_one()
-            or 0
-        )
-        hbm = max(1, min(60, int(getattr(settings, "agent_heartbeat_minutes", 15) or 15)))
-        minute_marks = sorted({m for m in range(0, 60, hbm)})
-
-        return {
-            "harness": "agent-aquila",
-            "harness_mode_configured": coerce_harness_mode(prefs),
-            "tool_palette_mode": rt.agent_tool_palette,
-            "tool_count_this_turn": len(palette),
-            "tool_names_sample": [t["function"]["name"] for t in palette[:40]],
-            "linked_connector_providers": provs,
-            "agent_max_tool_steps": rt.agent_max_tool_steps,
-            "prompt_tier": rt.agent_prompt_tier,
-            "connector_gated_tools": rt.agent_connector_gated_tools,
-            "agent_processing_paused": bool(getattr(prefs, "agent_processing_paused", False)),
-            "capabilities": describe_capabilities(),
-            "web_tools": {
-                "enabled": bool(settings.web_search_enabled),
-                "provider": (settings.web_search_provider or "duckduckgo").strip().lower(),
-                "default_max_results": int(settings.web_search_max_results or 8),
-                "fetch_max_chars": int(settings.web_fetch_max_chars or 12000),
-            },
-            "background_automation": {
-                "scheduled_tasks": {
-                    "supported": True,
-                    "tasks_total": scheduled_total,
-                    "tasks_enabled": scheduled_enabled,
-                },
-                "heartbeat": {
-                    "server_master_enabled": bool(settings.agent_heartbeat_enabled),
-                    "worker_cron_fires_at_minute_marks_each_hour": minute_marks,
-                    "worker_uses_instance_env_heartbeat_minutes": hbm,
-                    "per_user_heartbeat_enabled": bool(rt.agent_heartbeat_enabled),
-                    "per_user_check_gmail_on_heartbeat": bool(rt.agent_heartbeat_check_gmail),
-                    "per_user_heartbeat_burst_per_hour": int(rt.agent_heartbeat_burst_per_hour),
-                },
-                "how_it_works": (
-                    "When the ARQ worker and Redis are running and the instance has "
-                    "AGENT_HEARTBEAT_ENABLED=true, the worker wakes the agent on a cron that fires "
-                    "at the listed minute marks every hour. Each participating user (heartbeat "
-                    "enabled in AI settings) gets a background turn that can use tools — e.g. Gmail "
-                    "when 'Check Gmail on heartbeat' is on. It is not a single 'once daily at 9:30' "
-                    "product toggle; exact wall-clock scheduling may need deployment tuning. "
-                    "Gmail watch / Pub/Sub push (event-driven) is optional in some installs — see "
-                    "docs. Outbound email still requires user approval; reads and digests are fine."
-                ),
-            },
-        }
-
-    # ------------------------------------------------------------------
-    # Connector helpers
-    # ------------------------------------------------------------------
     @staticmethod
     async def _tool_list_connectors(
         db: AsyncSession, user: User, args: dict[str, Any]
@@ -2472,37 +1985,6 @@ class AgentService:
         )
 
     @staticmethod
-    async def _tool_propose_youtube_upload(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        b64 = str(args.get("content_base64") or "")
-        try:
-            raw = base64.b64decode(b64, validate=True)
-        except Exception as exc:  # noqa: BLE001
-            return {"error": f"Invalid base64: {exc}"}
-        max_bytes = 12 * 1024 * 1024
-        if len(raw) > max_bytes:
-            return {"error": f"Decoded file exceeds {max_bytes} bytes."}
-        payload = {
-            "connection_id": int(args["connection_id"]),
-            "title": str(args.get("title") or "")[:100],
-            "description": str(args.get("description") or "")[:5000],
-            "content_base64": b64,
-            "mime_type": str(args.get("mime_type") or "video/mp4"),
-            "privacy_status": str(args.get("privacy_status") or "private"),
-        }
-        if not payload["title"].strip():
-            return {"error": "title is required."}
-        return await AgentService._insert_proposal(
-            db,
-            user,
-            run_id,
-            "youtube_upload",
-            payload,
-            f"YouTube upload: {payload['title'][:60]}",
-            idempotency_key=AgentService._idem(args),
-        )
-
     @staticmethod
     async def _tool_propose_slack_post_message(
         db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
@@ -2581,35 +2063,6 @@ class AgentService:
         )
 
     @staticmethod
-    async def _tool_propose_discord_post_message(
-        db: AsyncSession, user: User, run_id: int, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        channel = str(args.get("channel_id") or "").strip()
-        content = str(args.get("content") or "").strip()
-        if not channel or not content:
-            return {"error": "channel_id and content are required"}
-        payload = {
-            "connection_id": int(args["connection_id"]),
-            "channel_id": channel,
-            "content": content[:2000],
-        }
-        return await AgentService._insert_proposal(
-            db,
-            user,
-            run_id,
-            "discord_message",
-            payload,
-            f"Discord → {channel[:40]}",
-            idempotency_key=AgentService._idem(args),
-        )
-
-    # ------------------------------------------------------------------
-    # Tool dispatch — single source of truth for routing model-issued
-    # tool calls to the matching internal handler.
-    # ------------------------------------------------------------------
-
-    _DISPATCH = AGENT_TOOL_DISPATCH
-
     @staticmethod
     async def _dispatch_tool(
         db: AsyncSession,
@@ -2694,79 +2147,6 @@ class AgentService:
 
     # ------------------------------------------------------------------
     # Memory flush (OpenClaw-style, before thread compaction)
-    # ------------------------------------------------------------------
-    @staticmethod
-    async def run_memory_flush_turn(
-        db: AsyncSession,
-        user: User,
-        *,
-        thread_id: int,
-        dropped_messages: list[dict[str, str]],
-    ) -> None:
-        """Persist facts from chat turns that are about to be dropped from context."""
-        rt = await resolve_for_user(db, user)
-        if not dropped_messages or not rt.agent_memory_flush_enabled:
-            return
-        settings_row = await UserAISettingsService.get_or_create(db, user)
-        if getattr(settings_row, "agent_processing_paused", False) or settings_row.ai_disabled:
-            return
-        api_key = await UserAISettingsService.get_api_key(db, user)
-        if provider_kind_requires_api_key(settings_row.provider_kind) and not api_key:
-            return
-        lines: list[str] = []
-        for m in dropped_messages:
-            role = str(m.get("role") or "user")
-            content = str(m.get("content") or "")
-            if len(content) > 8000:
-                content = content[:7997] + "…"
-            lines.append(f"{role.upper()}: {content}")
-        transcript = "\n\n".join(lines)
-        max_c = rt.agent_memory_flush_max_transcript_chars
-        if len(transcript) > max_c:
-            transcript = transcript[: max_c - 20] + "\n…[truncated]"
-        root_trace = new_trace_id()
-        run = AgentRun(
-            user_id=user.id,
-            status="running",
-            user_message=(
-                "[memory_flush] The following turns will be omitted from chat context — "
-                "persist important facts with upsert_memory.\n\n" + transcript
-            ),
-            root_trace_id=root_trace,
-            chat_thread_id=thread_id,
-            turn_profile="memory_flush",
-        )
-        db.add(run)
-        await db.flush()
-        harness_pref = getattr(settings_row, "harness_mode", None) or "auto"
-        effective = resolve_effective_mode(
-            harness_pref, settings_row.provider_kind, settings_row.chat_model
-        )
-        palette = memory_flush_tools()
-        system_prompt = await build_memory_flush_system_prompt(
-            db,
-            user,
-            tool_palette=palette,
-            harness_mode=effective,
-            user_timezone=getattr(settings_row, "user_timezone", None),
-            time_format=normalize_time_format(getattr(settings_row, "time_format", None)),
-            prompt_tier="minimal",
-            runtime=rt,
-        )
-        await AgentService._execute_agent_loop(
-            db,
-            user,
-            run,
-            prior_messages=None,
-            thread_context_hint=None,
-            replay=None,
-            tool_palette_override=palette,
-            system_prompt_override=system_prompt,
-            max_tool_steps_override=rt.agent_memory_flush_max_steps,
-        )
-
-    # ------------------------------------------------------------------
-    # ReAct loop
     # ------------------------------------------------------------------
     @staticmethod
     async def run_agent_invalid_preflight(

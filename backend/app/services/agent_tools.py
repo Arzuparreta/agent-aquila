@@ -270,65 +270,6 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         required=["document_id"],
     ),
     _fn(
-        "youtube_list_my_channels",
-        "List the authenticated user's YouTube channels (mine=true). "
-        "Use before searching or listing videos when the channel id is unknown. "
-        "Optional ``connection_id``, ``page_token``.",
-        {**_CONNECTION_ID, "page_token": {"type": "string"}},
-    ),
-    _fn(
-        "youtube_search_videos",
-        "Search YouTube videos in a channel or by free-text query. "
-        "Pass at least one of ``channel_id`` or ``q``. Optional ``page_token``, "
-        "``max_results`` (1-50), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "channel_id": {"type": "string"},
-            "q": {"type": "string"},
-            "page_token": {"type": "string"},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 50},
-        },
-    ),
-    _fn(
-        "youtube_get_video",
-        "Fetch metadata for one or more YouTube videos by id (comma-separated or array). "
-        "``video_id`` required. Optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "video_id": {
-                "anyOf": [
-                    {"type": "string"},
-                    {"type": "array", "items": {"type": "string"}},
-                ]
-            },
-        },
-        required=["video_id"],
-    ),
-    _fn(
-        "youtube_list_playlists",
-        "List playlists for a YouTube **channel_id** (from ``youtube_list_my_channels`` "
-        "or ``contentDetails``). Optional ``page_token``, ``max_results`` (1-50), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "channel_id": {"type": "string", "description": "YouTube channel id (not @handle)."},
-            "page_token": {"type": "string"},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 50},
-        },
-        required=["channel_id"],
-    ),
-    _fn(
-        "youtube_list_playlist_items",
-        "List videos in a YouTube **playlist_id** (from channel playlists or upload playlist). "
-        "Optional ``page_token``, ``max_results`` (1-50), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "playlist_id": {"type": "string"},
-            "page_token": {"type": "string"},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 50},
-        },
-        required=["playlist_id"],
-    ),
-    _fn(
         "tasks_list_tasklists",
         "List Google Task lists for the user. Optional ``connection_id``, ``page_token``.",
         {**_CONNECTION_ID, "page_token": {"type": "string"}},
@@ -460,27 +401,6 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         },
     ),
     _fn(
-        "discord_list_guilds",
-        "Discord: guilds the bot account is in. Requires **discord_bot**. Optional ``connection_id``.",
-        {**_CONNECTION_ID},
-    ),
-    _fn(
-        "discord_list_guild_channels",
-        "Discord: list channels for **guild_id**. Requires **discord_bot**.",
-        {**_CONNECTION_ID, "guild_id": {"type": "string"}},
-        required=["guild_id"],
-    ),
-    _fn(
-        "discord_get_channel_messages",
-        "Discord: fetch recent messages in **channel_id**. Optional ``limit`` (1-100), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "channel_id": {"type": "string"},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-        },
-        required=["channel_id"],
-    ),
-    _fn(
         "device_list_ingested_files",
         "List files previously uploaded via the **device bridge** (e.g. iOS Shortcuts → "
         "``POST /api/v1/device-files/ingest``). Newest first. No cloud connector. "
@@ -496,84 +416,6 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         required=["ingest_id"],
     ),
     _fn(
-        "icloud_drive_list_folder",
-        "List immediate children of a folder in **iCloud Drive** (live). Uses the same "
-        "``icloud_caldav`` connector as Calendar. ``path`` is slash-separated from Drive root "
-        "(e.g. ``Documents`` or ``Keynote``); omit for root. Apple may require two-factor or "
-        "device approval for web login. Optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "path": {
-                "type": "string",
-                "description": "Folder path from Drive root; empty string = root listing.",
-            },
-        },
-    ),
-    _fn(
-        "icloud_drive_get_file",
-        "Download one file from **iCloud Drive** as ``content_base64``. ``path`` must end with "
-        "the file name (e.g. ``Notes/example.txt``). ``max_bytes`` caps size (default 4 MiB, max 32 MiB). "
-        "Optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "path": {"type": "string"},
-            "max_bytes": {"type": "integer", "minimum": 1, "maximum": 33554432},
-        },
-        required=["path"],
-    ),
-    _fn(
-        "icloud_contacts_list",
-        "List contacts from **iCloud** via CardDAV (same ``icloud_caldav`` Apple ID + app password). "
-        "Returns parsed names, emails, and phones (best-effort vCard). "
-        "Optional ``max_results`` (1-2000, default 200), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 2000},
-        },
-    ),
-    _fn(
-        "icloud_contacts_search",
-        "Search **iCloud** contacts by substring match on name, email, or phone. "
-        "``query`` required. Optional ``max_results`` (1-200, default 50), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "query": {"type": "string"},
-            "max_results": {"type": "integer", "minimum": 1, "maximum": 200},
-        },
-        required=["query"],
-    ),
-    _fn(
-        "icloud_reminders_list",
-        "List **iCloud Reminders** via PyiCloud (same ``icloud_caldav`` as Calendar/Drive). "
-        "Unofficial web APIs — may require 2FA like Drive. "
-        "Optional ``max_lists`` (1-50), ``max_reminders_per_list`` (1-200), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "max_lists": {"type": "integer", "minimum": 1, "maximum": 50},
-            "max_reminders_per_list": {"type": "integer", "minimum": 1, "maximum": 200},
-        },
-    ),
-    _fn(
-        "icloud_notes_list",
-        "List recent **Apple Notes** titles via PyiCloud (``icloud_caldav``). "
-        "Best-effort; unofficial APIs. Optional ``limit`` (1-200), ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "limit": {"type": "integer", "minimum": 1, "maximum": 200},
-        },
-    ),
-    _fn(
-        "icloud_photos_list",
-        "List **photo metadata** (album, id, filename, size, created) via PyiCloud — **no image bytes**. "
-        "``icloud_caldav`` connector. Optional ``max_albums`` (1-40), ``max_photos_per_album`` (1-100), "
-        "``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "max_albums": {"type": "integer", "minimum": 1, "maximum": 40},
-            "max_photos_per_album": {"type": "integer", "minimum": 1, "maximum": 100},
-        },
-    ),
-    _fn(
         "outlook_list_messages",
         "Use to read the user's Outlook (Microsoft 365) mail. Calls Graph "
         "live. Same role as ``gmail_list_messages`` for Outlook accounts. "
@@ -587,21 +429,6 @@ _READ_ONLY_TOOLS: list[dict[str, Any]] = [
         "Inputs: ``message_id`` (required), optional ``connection_id``.",
         {**_CONNECTION_ID, "message_id": {"type": "string"}},
         required=["message_id"],
-    ),
-    _fn(
-        "teams_list_teams",
-        "Use to list the Microsoft Teams the user is a member of. Required "
-        "before posting a channel message (you need the ``team_id``). "
-        "Inputs: optional ``connection_id``.",
-        {**_CONNECTION_ID},
-    ),
-    _fn(
-        "teams_list_channels",
-        "Use to list channels in a Microsoft Team. Required before posting "
-        "(you need the ``channel_id``). "
-        "Inputs: ``team_id`` (required), optional ``connection_id``.",
-        {**_CONNECTION_ID, "team_id": {"type": "string"}},
-        required=["team_id"],
     ),
     _fn(
         "list_connectors",
@@ -860,59 +687,6 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         required=["path", "mime_type"],
     ),
     _fn(
-        "drive_share_file",
-        "Grant access to an existing Drive file. Auto-applies. "
-        "Inputs: ``file_id`` (required, provider id from ``drive_list_files``), "
-        "``email`` (required), ``role`` (``reader`` (default) or ``writer``), "
-        "optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "file_id": {"type": "string"},
-            "email": {"type": "string"},
-            "role": {"type": "string", "enum": ["reader", "writer"]},
-        },
-        required=["file_id", "email"],
-    ),
-    _fn(
-        "sheets_append_row",
-        "Append one row to a Google Sheet (values as array of cells). Auto-applies. "
-        "``range`` is the table anchor (e.g. ``Sheet1!A1`` or ``Sheet1!A:D``). "
-        "Requires **google_sheets**. "
-        "Inputs: ``spreadsheet_id``, ``range``, ``values`` (array of strings/numbers), "
-        "optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "spreadsheet_id": {"type": "string"},
-            "range": {"type": "string"},
-            "values": {
-                "type": "array",
-                "items": {
-                    "anyOf": [
-                        {"type": "string"},
-                        {"type": "number"},
-                        {"type": "boolean"},
-                        {"type": "null"},
-                    ]
-                },
-            },
-        },
-        required=["spreadsheet_id", "range", "values"],
-    ),
-    _fn(
-        "youtube_update_video",
-        "Update YouTube video metadata (title, description, tags, category). "
-        "``video_id`` required. Auto-applies. Optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "video_id": {"type": "string"},
-            "title": {"type": "string"},
-            "description": {"type": "string"},
-            "tags": {"type": "array", "items": {"type": "string"}},
-            "category_id": {"type": "string"},
-        },
-        required=["video_id"],
-    ),
-    _fn(
         "tasks_create_task",
         "Create a task in a Google Task list. ``tasklist_id`` and ``title`` required. "
         "Optional ``notes``, ``due`` (RFC3339), ``connection_id``.",
@@ -952,67 +726,6 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         required=["tasklist_id", "task_id"],
     ),
     _fn(
-        "submit_whatsapp_credentials",
-        "After ``start_connector_setup`` for WhatsApp, persist Meta **access token** and "
-        "**phone_number_id** from the WhatsApp Cloud API setup. Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "access_token": {"type": "string"},
-            "phone_number_id": {"type": "string"},
-            "graph_api_version": {"type": "string"},
-        },
-        required=["setup_token", "access_token", "phone_number_id"],
-    ),
-    _fn(
-        "submit_github_credentials",
-        "After ``start_connector_setup`` for GitHub, persist a **personal access token** (PAT). "
-        "Auto-applies. Minimum scope: repo read or public read for issues.",
-        {
-            "setup_token": {"type": "string"},
-            "access_token": {"type": "string"},
-        },
-        required=["setup_token", "access_token"],
-    ),
-    _fn(
-        "submit_slack_credentials",
-        "After ``start_connector_setup`` for **slack_bot**, persist the **bot_token** (`xoxb-...`). "
-        "Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "bot_token": {"type": "string"},
-        },
-        required=["setup_token", "bot_token"],
-    ),
-    _fn(
-        "submit_linear_credentials",
-        "After ``start_connector_setup`` for **linear**, persist **api_key** (personal API key). Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "api_key": {"type": "string"},
-        },
-        required=["setup_token", "api_key"],
-    ),
-    _fn(
-        "submit_notion_credentials",
-        "After ``start_connector_setup`` for **notion**, persist **api_key** (internal integration secret). "
-        "Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "api_key": {"type": "string"},
-        },
-        required=["setup_token", "api_key"],
-    ),
-    _fn(
-        "submit_telegram_bot_credentials",
-        "After ``start_connector_setup`` for **telegram_bot**, persist **bot_token**. Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "bot_token": {"type": "string"},
-        },
-        required=["setup_token", "bot_token"],
-    ),
-    # ---- Telegram send (auto-apply) ------------------------------------
-    _fn(
         "telegram_send_message",
         "Send a Telegram message to a **chat_id** immediately (no approval needed). "
         "Use for scheduled summaries, alerts, or any proactive notification the user expects. "
@@ -1029,45 +742,6 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         },
         required=["chat_id", "text"],
     ),
-    _fn(
-        "submit_discord_bot_credentials",
-        "After ``start_connector_setup`` for **discord_bot**, persist **bot_token**. Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "bot_token": {"type": "string"},
-        },
-        required=["setup_token", "bot_token"],
-    ),
-    _fn(
-        "submit_icloud_caldav_credentials",
-        "After ``start_connector_setup`` for iCloud CalDAV, save **Apple ID** + "
-        "**app-specific password** (also used for iCloud Drive in this harness). "
-        "Set ``china_mainland`` true when the Apple ID region is China mainland. Auto-applies.",
-        {
-            "setup_token": {"type": "string"},
-            "apple_id": {"type": "string"},
-            "app_password": {"type": "string"},
-            "china_mainland": {"type": "boolean"},
-        },
-        required=["setup_token", "apple_id", "app_password"],
-    ),
-    # ---- Teams mutations ------------------------------------------------
-    _fn(
-        "teams_post_message",
-        "Post a message to a Microsoft Teams channel. Auto-applies. "
-        "Look up ``team_id`` via ``teams_list_teams`` and ``channel_id`` "
-        "via ``teams_list_channels`` first. "
-        "Inputs: ``team_id`` (required), ``channel_id`` (required), "
-        "``body`` (required, plain text or HTML), optional ``connection_id``.",
-        {
-            **_CONNECTION_ID,
-            "team_id": {"type": "string"},
-            "channel_id": {"type": "string"},
-            "body": {"type": "string"},
-        },
-        required=["team_id", "channel_id", "body"],
-    ),
-    # ---- Persistent memory ---------------------------------------------
     _fn(
         "upsert_memory",
         "Save (or update) a small note in the agent's persistent memory — "
@@ -1117,17 +791,6 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         "prior notes — preferences, deadlines, ongoing threads. "
         "Inputs: optional ``query`` (free text), optional ``tags`` (array "
         "for filtering), optional ``limit`` (default 6).",
-        {
-            "query": {"type": "string"},
-            "tags": {"type": "array", "items": {"type": "string"}},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
-        },
-    ),
-    _fn(
-        "memory_search",
-        "OpenClaw-style alias for semantic memory search — same behaviour as "
-        "``recall_memory`` (hybrid vector + recency when embeddings exist). "
-        "Inputs: optional ``query``, optional ``tags``, optional ``limit``.",
         {
             "query": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
@@ -1292,24 +955,6 @@ _PROPOSAL_TOOLS: list[dict[str, Any]] = [
         required=["connection_id", "to_e164"],
     ),
     _fn(
-        "propose_youtube_upload",
-        "Queue a YouTube video upload from raw bytes (base64). Creates an approval card. "
-        "Keep payloads small; large files should be uploaded outside the agent. "
-        "``content_base64`` max ~12 MiB decoded. "
-        "Inputs: ``connection_id``, ``title``, ``content_base64``, ``mime_type`` (e.g. video/mp4), "
-        "optional ``description``, ``privacy_status`` (private/unlisted/public).",
-        {
-            "connection_id": {"type": "integer"},
-            "title": {"type": "string"},
-            "description": {"type": "string"},
-            "content_base64": {"type": "string"},
-            "mime_type": {"type": "string"},
-            "privacy_status": {"type": "string", "enum": ["private", "unlisted", "public"]},
-            **_IDEMPOTENCY,
-        },
-        required=["connection_id", "title", "content_base64", "mime_type"],
-    ),
-    _fn(
         "propose_slack_post_message",
         "Queue a Slack **chat.postMessage** in a channel. Creates an approval card; "
         "nothing is posted until the user approves. "
@@ -1352,26 +997,6 @@ _PROPOSAL_TOOLS: list[dict[str, Any]] = [
         required=["connection_id", "chat_id", "text"],
     ),
     _fn(
-        "propose_discord_post_message",
-        "Queue a Discord channel message (**channel_id**). Requires approval. "
-        "``content`` max 2000 chars.",
-        {
-            "connection_id": {"type": "integer"},
-            "channel_id": {"type": "string"},
-            "content": {"type": "string", "maxLength": 2000},
-            **_IDEMPOTENCY,
-        },
-        required=["connection_id", "channel_id", "content"],
-    ),
-]
-
-
-# ---------------------------------------------------------------------------
-# Harness introspection (read-only workspace + deployment facts)
-# ---------------------------------------------------------------------------
-
-_INTROSPECTION_TOOLS: list[dict[str, Any]] = [
-    _fn(
         "list_workspace_files",
         "List markdown files available in the agent workspace (persona/rules) and "
         "the skills folder. Use when the user asks what files they can edit or "
@@ -1389,14 +1014,6 @@ _INTROSPECTION_TOOLS: list[dict[str, Any]] = [
             }
         },
         required=["path"],
-    ),
-    _fn(
-        "describe_harness",
-        "Return structured information about this deployment: tool palette size, "
-        "harness settings, linked connectors, background heartbeat/automation state, and "
-        "capability policy. Use when the user asks what you can do, how you are configured, or "
-        "whether recurring/scheduled/background work (e.g. daily inbox digests) is available.",
-        {},
     ),
     _fn(
         "scheduled_task_create",
@@ -1536,7 +1153,6 @@ _COMPACT_PALETTE_TOOLS = frozenset({
     "load_skill",
     "list_memory",
     "recall_memory",
-    "memory_search",
     "memory_get",
     "upsert_memory",
     "delete_memory",
@@ -1549,7 +1165,6 @@ _COMPACT_PALETTE_TOOLS = frozenset({
     "start_oauth_flow",
     "submit_connector_credentials",
     "list_connectors",
-    "describe_harness",
     "list_workspace_files",
     "read_workspace_file",
     "web_search",
@@ -1584,55 +1199,3 @@ def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
     return list(AGENT_TOOLS)
 
 
-_MEMORY_FLUSH_NAMES: frozenset[str] = frozenset(
-    {
-        "final_answer",
-        "upsert_memory",
-        "delete_memory",
-        "list_memory",
-        "recall_memory",
-        "memory_search",
-        "memory_get",
-    }
-)
-
-
-def memory_flush_tools() -> list[dict[str, Any]]:
-    """Tools for OpenClaw-style memory flush turns (before thread compaction)."""
-    return [t for t in AGENT_TOOLS if t["function"]["name"] in _MEMORY_FLUSH_NAMES]
-
-
-def tool_required_connector_providers(tool_name: str) -> frozenset[str] | None:
-    """If a tool talks to a specific provider, return acceptable ``ConnectorConnection.provider`` ids."""
-    return required_providers_for_tool(tool_name)
-
-
-async def filter_tools_for_user_connectors(
-    db: AsyncSession,
-    user_id: int,
-    tools: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Drop tools whose upstream provider is not linked for this user."""
-    from sqlalchemy import select
-
-    from app.models.connector_connection import ConnectorConnection
-
-    r = await db.execute(
-        select(ConnectorConnection.provider).where(ConnectorConnection.user_id == user_id)
-    )
-    active = frozenset(row[0] for row in r.all() if row[0])
-    out: list[dict[str, Any]] = []
-    for t in tools:
-        fn = t.get("function") or {}
-        nm = str(fn.get("name") or "")
-        req = tool_required_connector_providers(nm)
-        if req is None:
-            out.append(t)
-        elif active & req:
-            out.append(t)
-    return out
-
-
-# Tool names the agent loop should treat as "fetches more context" rather
-# than terminators. Used by the loop to know when to stop iterating.
-EXECUTABLE_TOOL_NAMES: frozenset[str] = AGENT_TOOL_NAMES - {FINAL_ANSWER_TOOL_NAME}
