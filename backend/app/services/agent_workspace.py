@@ -8,6 +8,7 @@ live ``AGENT_TOOLS`` palette so it always matches dispatch.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,8 @@ from app.services.agent_harness.selector import HarnessMode
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.agent_runtime_config_service import merge_stored_with_env
 from app.services.user_time_context import build_datetime_context_section, normalize_time_format
+
+_logger = logging.getLogger(__name__)
 
 
 def _effective_runtime(rt: AgentRuntimeConfigResolved | None) -> AgentRuntimeConfigResolved:
@@ -166,38 +169,6 @@ def build_tools_section(
     tier = (prompt_tier or "full").strip().lower()
     include_playbook = tier == "full"
     return build_tools_section_native(palette, include_gmail_playbook=include_playbook)
-def build_harness_facts_markdown(
-    *,
-    tool_count: int,
-    max_tool_steps: int,
-    harness_mode: str,
-    prompt_tier: str,
-    tool_palette_mode: str,
-    connector_gated: bool,
-    linked_providers: list[str],
-    agent_paused: bool,
-    turn_profile: str | None = None,
-) -> str:
-    prov = ", ".join(sorted(linked_providers)) if linked_providers else "(none linked)"
-    lines: list[str] = [
-        "# Harness (runtime facts)",
-        f"- Tools offered this turn: **{tool_count}**",
-    ]
-    if turn_profile:
-        lines.append(f"- Turn profile: **{turn_profile}**")
-    lines.extend(
-        [
-            f"- Max tool steps this turn: **{max_tool_steps}**",
-            f"- Harness mode (effective): **{harness_mode}**",
-            f"- Prompt tier: **{prompt_tier}**",
-            f"- Tool palette setting: **{tool_palette_mode}**",
-            f"- Connector-gated tool list: **{connector_gated}**",
-            f"- Linked connector providers: {prov}",
-            f"- Agent processing paused (dashboard): **{agent_paused}**",
-            "",
-        ]
-    )
-    return "\n".join(lines)
 
 
 async def linked_connector_providers(db: AsyncSession, user_id: int) -> list[str]:
@@ -268,7 +239,11 @@ async def build_system_prompt(
     injected_user_context: str | None = None,
     max_tool_steps_effective: int | None = None,
 ) -> str:
-    """Assemble system prompt: SOUL + AGENTS + optional facts + tools + memory + clock + thread hint."""
+    """Assemble system prompt: SOUL + AGENTS + optional facts + tools + memory + clock + thread hint.
+
+    Uses a template-based approach with inlined harness facts for cleaner, more maintainable
+    prompt assembly. Tool section is kept separate from content blocks.
+    """
     del tenant_hint
     rt = _effective_runtime(runtime)
     tier = (prompt_tier or rt.agent_prompt_tier or "full").strip().lower()
@@ -277,56 +252,92 @@ async def build_system_prompt(
     mxs = int(max_tool_steps_effective) if max_tool_steps_effective is not None else int(rt.agent_max_tool_steps)
     tprof = (turn_profile or "user_chat").strip().lower()
 
+    # Load core content blocks
     soul = _read_file("SOUL.md", _DEFAULT_SOUL) if tier != "none" else ""
     agents = _read_file("AGENTS.md", _DEFAULT_AGENTS)
-    tools = build_tools_section(
-        tool_palette,
-        prompt_tier=tier,
-    )
+    tools = build_tools_section(tool_palette, prompt_tier=tier)
 
-    parts: list[str] = []
+    # Build content blocks (semantic parts of the prompt)
+    content_blocks: list[str] = []
+
     if soul:
-        parts.append(soul)
-    parts.append(agents)
+        content_blocks.append(soul)
+
+    content_blocks.append(agents)
+
+    # Context-first hint for automated turns
     if tprof not in ("user_chat",):
-        parts.append(
+        content_blocks.append(
             "## Context-first (automated turn)\n"
             "Situate the incoming signal in the user snapshot and memory before using many tools. "
             "Prefer a concise `final_answer` unless deeper actions are clearly needed."
         )
+
+    # Injected user context
     if injected_user_context and str(injected_user_context).strip():
-        parts.append(str(injected_user_context).strip())
+        content_blocks.append(str(injected_user_context).strip())
+
+    # Inline harness facts (replaces build_harness_facts_markdown)
     if rt.agent_include_harness_facts:
         provs = await linked_connector_providers(db, user.id)
-        parts.append(
-            build_harness_facts_markdown(
-                tool_count=len(tool_palette),
-                max_tool_steps=mxs,
-                harness_mode=str(harness_mode),
-                prompt_tier=tier,
-                tool_palette_mode=rt.agent_tool_palette,
-                connector_gated=rt.agent_connector_gated_tools,
-                linked_providers=provs,
-                agent_paused=agent_processing_paused,
-                turn_profile=tprof,
-            )
-        )
-    parts.append(tools)
-    if tier != "none":
-        parts.append(_EPISTEMIC_PRIORITY_HOST)
+        prov_str = ", ".join(sorted(provs)) if provs else "(none linked)"
 
+        harness_facts = [
+            "# Harness (runtime facts)",
+            f"- Tools offered this turn: **{len(tool_palette)}**",
+        ]
+
+        if tprof:
+            harness_facts.append(f"- Turn profile: **{tprof}**")
+
+        harness_facts.extend([
+            f"- Max tool steps this turn: **{mxs}**",
+            f"- Harness mode (effective): **{str(harness_mode)}**",
+            f"- Prompt tier: **{tier}**",
+            f"- Tool palette setting: **{rt.agent_tool_palette}**",
+            f"- Connector-gated tool list: **{rt.agent_connector_gated_tools}**",
+            f"- Linked connector providers: {prov_str}",
+            f"- Agent processing paused (dashboard): **{agent_processing_paused}**",
+            "",
+        ])
+
+        content_blocks.append("\n".join(harness_facts))
+
+    # Epistemic priority (host constraints)
+    if tier != "none":
+        content_blocks.append(_EPISTEMIC_PRIORITY_HOST)
+
+    # Memory blob
     if tier != "none":
         memory_blob = await AgentMemoryService.recent_for_prompt(db, user)
         if memory_blob:
-            parts.append(memory_blob)
+            content_blocks.append(memory_blob)
 
-    parts.append(
+    # DateTime context
+    content_blocks.append(
         build_datetime_context_section(
             user_timezone=user_timezone,
             time_format=normalize_time_format(time_format),
         )
     )
+
+    # Thread context hint
     if thread_context_hint:
-        parts.append(f"Thread context: {thread_context_hint.strip()}")
-    return "\n\n".join(parts)
+        content_blocks.append(f"Thread context: {thread_context_hint.strip()}")
+
+    # Assemble final prompt: content blocks + tool section
+    final_prompt = "\n\n".join(content_blocks) + "\n\n" + tools
+
+    # Development logging: measure prompt size
+    if _logger.isEnabledFor(logging.DEBUG):
+        prompt_size = len(final_prompt.encode('utf-8'))
+        _logger.debug(
+            "System prompt size: %d bytes, %d chars, %d blocks, %d tools",
+            prompt_size,
+            len(final_prompt),
+            len(content_blocks),
+            len(tool_palette),
+        )
+
+    return final_prompt
 
