@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.agent_replay import AgentReplayContext
-from app.services.agent_service import AgentService, _replay_ctx
+from app.services.agent.replay import AgentReplayContext
+from app.services.agent import _dispatch_tool, _replay_ctx
 from app.services.llm_client import ChatToolCall
 
 
@@ -14,7 +14,7 @@ async def test_dispatch_tool_uses_replay_results(db_session, aquila_user, agent_
     replay = AgentReplayContext(tool_results=[{"from_replay": True}])
     token = _replay_ctx.set(replay)
     try:
-        res, prop = await AgentService._dispatch_tool(
+        res, prop = await _dispatch_tool(
             db_session,
             aquila_user,
             agent_run.id,

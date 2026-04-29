@@ -1,171 +1,191 @@
-"""Calendar tool handlers."""
+"""Calendar tool handlers (Google Calendar, Microsoft Graph, iCloud CalDAV)."""
+
 from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.connector_connection import ConnectorConnection
 from app.models.user import User
-from app.services.agent.runtime_clients import GoogleCalendarClient
+from app.services.connector_tool_registry import GRAPH_CALENDAR_TOOL_PROVIDERS
+from app.services.connectors.graph_client import GraphClient, GraphAPIError
 
-    return conversation, False
-reduced = list(conversation)
-changed = False
-# Keep system prompt + latest user turn, compact middle history first.
-if len(reduced) > 2:
-    head = reduced[:1]
-    middle = reduced[1:-1]
-    tail = reduced[-1:]
-    dropped_count = max(0, len(middle) - 8)
-    compact_middle = select_history_by_budget(
-        history=[
-            {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
-            for m in middle
-            if isinstance(m.get("content"), str)
-        ],
-        budget_tokens=max(256, input_budget_tokens - estimate_message_tokens(head + tail)),
-        keep_tail_messages=4,
-    )
-    if dropped_count > 0:
-        summary = {
-            "role": "system",
-            "content": (
-                "Context compression summary:\n"
-                f"- Active Task: Continue the current user request.\n"
-                f"- Completed Actions: Earlier tool/assistant exchanges were compacted ({dropped_count} msgs).\n"
-                "- Pending Requests: Prior unresolved asks remain in compacted history.\n"
-                "- Constraints/Preferences: Preserve user constraints and provider/tool limitations.\n"
-                "- Open Questions: None explicitly tracked."
-            ),
-        }
-        reduced = head + [summary] + compact_middle + tail
-    else:
-        reduced = head + compact_middle + tail
-    changed = True
-# If still over budget, trim very large message contents.
-while estimate_message_tokens(reduced) > input_budget_tokens and len(reduced) > 1:
-    idx = 1
-    candidate = reduced[idx]
-    content = candidate.get("content")
-
-    if not isinstance(content, str) or len(content) < 600:
-        if len(reduced) > 3:
-            reduced.pop(idx)
-            changed = True
-            continue
-        break
-    candidate = dict(candidate)
-    candidate["content"] = clamp_tool_content_by_tokens(content, max(100, len(content) // 10))
-    reduced[idx] = candidate
-    changed = True
-return reduced, changed
-
-
-def _assistant_message_from(response: ChatResponse) -> dict[str, Any]:
-"""Re-encode an assistant ``ChatResponse`` into a chat-completions message.
-
-We deliberately rebuild the dict (rather than reusing ``raw_message``) so
-the conversation history we feed back to the next call is exactly the
-OpenAI tool-calling shape, regardless of provider-specific extras.
-"""
-msg: dict[str, Any] = {"role": "assistant", "content": response.content or None}
-if response.tool_calls:
-    msg["tool_calls"] = [tc.to_message_dict() for tc in response.tool_calls]
-return msg
-
-
-# ---------------------------------------------------------------------------
-# Connection resolution
-# ---------------------------------------------------------------------------
-
-
-async def _resolve_connection(
-db: AsyncSession,
-user: User,
-args: dict[str, Any],
-providers: tuple[str, ...],
-*,
-label: str,
-) -> ConnectorConnection:
-"""Pick the connector connection a tool call should use.
-
-Honour ``args["connection_id"]`` when present; otherwise auto-detect
-the user's single matching connection. Returns a friendly-error
-``RuntimeError`` (caught by the dispatcher) when the user has zero
-or many connections of the requested type.
-"""
-cid = args.get("connection_id")
-if cid is not None:
-    row = await db.get(ConnectorConnection, int(cid))
-    if not row or row.user_id != user.id:
-        raise RuntimeError(f"connection {cid} not found")
-    if row.provider not in providers:
-        raise RuntimeError(f"connection {cid} is not a {label} connection")
-    return row
-stmt = (
-    select(ConnectorConnection)
-    .where(
-        ConnectorConnection.user_id == user.id,
-        ConnectorConnection.provider.in_(providers),
-    )
-    .order_by(ConnectorConnection.created_at.desc())
+from .base import (
+    provider_connection_multi,
+    _make_calendar_client_for_row,
+    _make_icloud_caldav_client,
 )
-rows = list((await db.execute(stmt)).scalars().all())
-if not rows:
-    raise RuntimeError(f"no {label} connection — connect one in Settings → Connectors")
-
-if len(rows) > 1:
-    ids = ", ".join(str(r.id) for r in rows)
-    raise RuntimeError(
-        f"multiple {label} connections — pass `connection_id` (available: {ids})"
-    )
-return rows[0]
 
 
-async def _gmail_client(db: AsyncSession, row: ConnectorConnection) -> GmailClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GmailClient(token)
+def _parse_rfc3339_to_utc_datetime(s: str) -> datetime:
+    return datetime.fromisoformat(str(s).strip().replace("Z", "+00:00")).astimezone(UTC)
 
 
-async def _calendar_client(db: AsyncSession, row: ConnectorConnection) -> GoogleCalendarClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GoogleCalendarClient(token)
+async def _default_icloud_calendar_url(client) -> str:
+    cals = await client.list_calendars()
+    if not cals:
+        raise RuntimeError("no iCloud calendars found on this connection")
+    for cal in cals:
+        name = str(cal.get("name") or "").lower()
+        if "home" in name or name in ("calendar", "personal"):
+            return str(cal["url"])
+    return str(cals[0]["url"])
 
 
-async def _drive_client(db: AsyncSession, row: ConnectorConnection) -> GoogleDriveClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GoogleDriveClient(token)
+@provider_connection_multi("calendar", pass_row=True, client_factory_override=_make_calendar_client_for_row)
+async def _tool_calendar_list_calendars(
+    db: AsyncSession, user: User, client, row: ConnectorConnection, args: dict[str, Any],
+) -> dict[str, Any]:
+    prov = row.provider
+    if prov in ("google_calendar", "gcal"):
+        return await client.list_calendar_list(
+            page_token=args.get("page_token"),
+            max_results=int(args.get("max_results") or 250),
+        )
+    if prov == "icloud_caldav":
+        cals = await client.list_calendars()
+        return {
+            "provider": prov,
+            "items": [
+                {"summary": c.get("name"), "calendar_id": None, "calendar_url": c.get("url")}
+                for c in cals
+            ],
+        }
+    if prov in GRAPH_CALENDAR_TOOL_PROVIDERS:
+        raw = await client.list_calendars(top=int(args.get("max_results") or 50))
+        items = []
+        for it in raw.get("value") or []:
+            if isinstance(it, dict):
+                items.append({
+                    "summary": it.get("name"),
+                    "calendar_id": it.get("id"),
+                    "calendar_url": None,
+                })
+        return {"provider": prov, "items": items}
+    return {"error": f"list_calendars not implemented for provider {prov}"}
 
 
-async def _youtube_client(db: AsyncSession, row: ConnectorConnection) -> YoutubeClient:
+@provider_connection_multi("calendar", pass_row=True, client_factory_override=_make_calendar_client_for_row)
+async def _tool_calendar_list_events(
+    db: AsyncSession, user: User, client, row: ConnectorConnection, args: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.user_ai_settings_service import merge_calendar_timezone_from_user_prefs
 
-token = await TokenManager.get_valid_access_token(db, row)
-return YoutubeClient(token)
+    prov = row.provider
+    time_min = args.get("time_min")
+    if time_min is None:
+        time_min = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = args.get("time_max")
+    max_results = int(args.get("max_results") or 50)
+
+    if prov in ("google_calendar", "gcal"):
+        return await client.list_events(
+            str(args.get("calendar_id") or "primary"),
+            page_token=args.get("page_token"),
+            max_results=min(max(max_results, 1), 250),
+            time_min=str(time_min),
+            time_max=str(time_max) if time_max else None,
+            order_by="startTime",
+        )
+
+    if prov == "icloud_caldav":
+        cal_url = str(args.get("calendar_url") or args.get("calendar_id") or "").strip()
+        if not cal_url:
+            cal_url = await _default_icloud_calendar_url(client)
+        try:
+            start_d = _parse_rfc3339_to_utc_datetime(str(time_min)).date()
+        except ValueError:
+            start_d = datetime.now(UTC).date()
+        if time_max:
+            try:
+                end_d = _parse_rfc3339_to_utc_datetime(str(time_max)).date()
+            except ValueError:
+                end_d = start_d
+        else:
+            end_d = start_d + timedelta(days=30)
+        events = await client.list_events(cal_url, start=start_d, end=end_d)
+        return {"provider": prov, "calendar_url": cal_url, "events": events}
+
+    if prov in GRAPH_CALENDAR_TOOL_PROVIDERS:
+        end_s = str(time_max) if time_max else None
+        if not end_s:
+            try:
+                start_dt = _parse_rfc3339_to_utc_datetime(str(time_min))
+            except ValueError:
+                start_dt = datetime.now(UTC)
+            end_dt = start_dt + timedelta(days=30)
+            end_s = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            raw = await client.list_calendar_view(
+                start_datetime=str(time_min),
+                end_datetime=end_s,
+                top=min(max(max_results, 1), 250),
+            )
+        except GraphAPIError as exc:
+            return {"provider": prov, "error": exc.detail, "status": exc.status_code}
+        return {"provider": prov, "events": raw.get("value") or [], "@odata": raw.get("@odata.nextLink")}
+
+    return {"error": f"unsupported calendar provider: {prov}"}
 
 
-async def _tasks_client(db: AsyncSession, row: ConnectorConnection) -> GoogleTasksClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GoogleTasksClient(token)
+@provider_connection_multi("calendar", pass_row=True, client_factory_override=_make_calendar_client_for_row)
+async def _tool_calendar_create_event(
+    db: AsyncSession, user: User, client, row: ConnectorConnection, args: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.user_ai_settings_service import merge_calendar_timezone_from_user_prefs
+    from app.services.connectors.calendar_adapters import create_calendar_event
+    from app.services.oauth import TokenManager
+
+    prov = row.provider
+    if prov == "icloud_caldav":
+        cal_url = str(args.get("calendar_url") or "").strip()
+        if not cal_url:
+            cal_url = await _default_icloud_calendar_url(client)
+        start = datetime.fromisoformat(str(args["start_iso"]).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(args["end_iso"]).replace("Z", "+00:00"))
+        return await client.create_event(
+            cal_url,
+            summary=str(args["summary"]),
+            start=start,
+            end=end,
+            description=str(args["description"]) if args.get("description") else None,
+        )
+    _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+    payload = await merge_calendar_timezone_from_user_prefs(db, user, args)
+    return await create_calendar_event(provider, creds, payload)
 
 
-async def _people_client(db: AsyncSession, row: ConnectorConnection) -> GooglePeopleClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GooglePeopleClient(token)
+@provider_connection_multi("calendar", pass_row=True, client_factory_override=_make_calendar_client_for_row)
+async def _tool_calendar_update_event(
+    db: AsyncSession, user: User, client, row: ConnectorConnection, args: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.user_ai_settings_service import merge_calendar_timezone_from_user_prefs
+    from app.services.connectors.calendar_adapters import update_calendar_event
+    from app.services.oauth import TokenManager
+
+    if row.provider == "icloud_caldav":
+        return {
+            "ok": False,
+            "error": "iCloud calendar updates are not supported via this tool yet; delete and recreate, or use another calendar client.",
+        }
+    _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+    payload = await merge_calendar_timezone_from_user_prefs(db, user, args)
+    return await update_calendar_event(provider, creds, payload)
 
 
+@provider_connection_multi("calendar", pass_row=True, client_factory_override=_make_calendar_client_for_row)
+async def _tool_calendar_delete_event(
+    db: AsyncSession, user: User, client, row: ConnectorConnection, args: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.connectors.calendar_adapters import delete_calendar_event
+    from app.services.oauth import TokenManager
 
-async def _sheets_client(db: AsyncSession, row: ConnectorConnection) -> GoogleSheetsClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GoogleSheetsClient(token)
-
-
-async def _docs_client(db: AsyncSession, row: ConnectorConnection) -> GoogleDocsClient:
-token = await TokenManager.get_valid_access_token(db, row)
-return GoogleDocsClient(token)
-
-
-def _icloud_app_password_creds(row: ConnectorConnection) -> tuple[str, str, bool]:
-creds = ConnectorService.decrypt_credentials(row)
-user = str(creds.get("username") or creds.get("apple_id") or "").strip()
-pw = str(creds.get("password") or creds.get("app_password") or "")
-china = bool(creds.get("china_mainland"))
-return user, pw, china
-
+    if row.provider == "icloud_caldav":
+        return {
+            "ok": False,
+            "error": "iCloud calendar deletes are not supported via this tool yet; remove the event in Apple Calendar or another CalDAV client.",
+        }
+    _token, creds, provider = await TokenManager.get_valid_creds(db, row)
+    return await delete_calendar_event(provider, creds, str(args["event_id"]))

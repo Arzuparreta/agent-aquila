@@ -873,6 +873,92 @@ _AUTO_APPLY_TOOLS: list[dict[str, Any]] = [
         },
         required=["provider", "service"],
     ),
+    # ---- Workspace / introspection (no connector) ----------------------
+    _fn(
+        "list_workspace_files",
+        "List markdown files available in the agent workspace (persona/rules) and "
+        "the skills folder. Use when the user asks what files they can edit or "
+        "how behaviour is configured.",
+        {},
+    ),
+    _fn(
+        "read_workspace_file",
+        "Read one markdown file from the workspace or skills root. "
+        "Pass only the basename (e.g. `SOUL.md`, `AGENTS.md`).",
+        {
+            "path": {
+                "type": "string",
+                "description": "Filename ending in .md (no directories or ..).",
+            }
+        },
+        required=["path"],
+    ),
+    # ---- Scheduled tasks -----------------------------------------------
+    _fn(
+        "scheduled_task_create",
+        "Create a user-defined scheduled task. Use for both recurring automation "
+        "(like every every night check iCloud photos) AND one-time reminders "
+        "(like remind me at 7pm to pick up groceries). For one-time tasks, use "
+        "schedule_type=once with scheduled_at (ISO 8601 datetime). CRITICAL: when the user says "
+        "at 22:50 or at 7pm and they have a timezone set in Settings, interpret that time in THEIR local timezone "
+        "(check the clock block in the system prompt for the user's configured timezone). The user means their local time, NOT UTC. "
+        "Inputs: name (required), instruction (required), schedule_type (once/interval/daily/cron/rrule), "
+        "for once use scheduled_at (ISO 8601 datetime string); for interval use interval_minutes; "
+        "for daily use hour_local, minute_local, optional timezone and weekdays (0=Mon..6=Sun); "
+        "for cron use cron_expr; for rrule use rrule_expr. One-time tasks auto-disable after execution.",
+        {
+            "name": {"type": "string"},
+            "instruction": {"type": "string"},
+            "schedule_type": {"type": "string", "enum": ["once", "interval", "daily", "cron", "rrule"]},
+            "scheduled_at": {"type": "string", "description": "ISO 8601 datetime for once type (interpret in user's local timezone)"},
+            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
+            "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
+            "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
+            "cron_expr": {"type": "string"},
+            "rrule_expr": {"type": "string"},
+            "timezone": {"type": "string"},
+            "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
+            "enabled": {"type": "boolean"},
+        },
+        required=["name", "instruction", "schedule_type"],
+    ),
+    _fn(
+        "scheduled_task_list",
+        "List the user's scheduled tasks. Use before updates/deletes, and to confirm "
+        "what automations are active. Optional input: ``enabled_only``.",
+        {
+            "enabled_only": {"type": "boolean"},
+        },
+    ),
+    _fn(
+        "scheduled_task_update",
+        "Update an existing scheduled task (name, instruction, enabled, or schedule). "
+        "Pass ``task_id`` and only the fields that need changing.",
+        {
+            "task_id": {"type": "integer"},
+            "name": {"type": "string"},
+            "instruction": {"type": "string"},
+            "schedule_type": {"type": "string", "enum": ["once", "interval", "daily", "cron", "rrule"]},
+            "scheduled_at": {"type": "string", "description": "ISO 8601 datetime for once type"},
+            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
+            "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
+            "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
+            "cron_expr": {"type": "string"},
+            "rrule_expr": {"type": "string"},
+            "timezone": {"type": "string"},
+            "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
+            "enabled": {"type": "boolean"},
+        },
+        required=["task_id"],
+    ),
+    _fn(
+        "scheduled_task_delete",
+        "Delete a scheduled task permanently. Use when the user asks to remove/stop a recurring task.",
+        {
+            "task_id": {"type": "integer"},
+        },
+        required=["task_id"],
+    ),
 ]
 
 
@@ -996,90 +1082,6 @@ _PROPOSAL_TOOLS: list[dict[str, Any]] = [
         },
         required=["connection_id", "chat_id", "text"],
     ),
-    _fn(
-        "list_workspace_files",
-        "List markdown files available in the agent workspace (persona/rules) and "
-        "the skills folder. Use when the user asks what files they can edit or "
-        "how behaviour is configured.",
-        {},
-    ),
-    _fn(
-        "read_workspace_file",
-        "Read one markdown file from the workspace or skills root. "
-        "Pass only the basename (e.g. `SOUL.md`, `AGENTS.md`).",
-        {
-            "path": {
-                "type": "string",
-                "description": "Filename ending in .md (no directories or ..).",
-            }
-        },
-        required=["path"],
-    ),
-    _fn(
-        "scheduled_task_create",
-        "Create a user-defined scheduled task. Use for both recurring automation "
-        "(like every every night check iCloud photos) AND one-time reminders "
-        "(like remind me at 7pm to pick up groceries). For one-time tasks, use "
-        "schedule_type=once with scheduled_at (ISO 8601 datetime). CRITICAL: when the user says "
-        "at 22:50 or at 7pm and they have a timezone set in Settings, interpret that time in THEIR local timezone "
-        "(check the clock block in the system prompt for the user's configured timezone). The user means their local time, NOT UTC. "
-        "Inputs: name (required), instruction (required), schedule_type (once/interval/daily/cron/rrule), "
-        "for once use scheduled_at (ISO 8601 datetime string); for interval use interval_minutes; "
-        "for daily use hour_local, minute_local, optional timezone and weekdays (0=Mon..6=Sun); "
-        "for cron use cron_expr; for rrule use rrule_expr. One-time tasks auto-disable after execution.",
-        {
-            "name": {"type": "string"},
-            "instruction": {"type": "string"},
-            "schedule_type": {"type": "string", "enum": ["once", "interval", "daily", "cron", "rrule"]},
-            "scheduled_at": {"type": "string", "description": "ISO 8601 datetime for once type (interpret in user's local timezone)"},
-            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
-            "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
-            "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
-            "cron_expr": {"type": "string"},
-            "rrule_expr": {"type": "string"},
-            "timezone": {"type": "string"},
-            "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
-            "enabled": {"type": "boolean"},
-        },
-        required=["name", "instruction", "schedule_type"],
-    ),
-    _fn(
-        "scheduled_task_list",
-        "List the user's scheduled tasks. Use before updates/deletes, and to confirm "
-        "what automations are active. Optional input: ``enabled_only``.",
-        {
-            "enabled_only": {"type": "boolean"},
-        },
-    ),
-    _fn(
-        "scheduled_task_update",
-        "Update an existing scheduled task (name, instruction, enabled, or schedule). "
-        "Pass ``task_id`` and only the fields that need changing.",
-        {
-            "task_id": {"type": "integer"},
-            "name": {"type": "string"},
-            "instruction": {"type": "string"},
-            "schedule_type": {"type": "string", "enum": ["once", "interval", "daily", "cron", "rrule"]},
-            "scheduled_at": {"type": "string", "description": "ISO 8601 datetime for once type"},
-            "interval_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
-            "hour_local": {"type": "integer", "minimum": 0, "maximum": 23},
-            "minute_local": {"type": "integer", "minimum": 0, "maximum": 59},
-            "cron_expr": {"type": "string"},
-            "rrule_expr": {"type": "string"},
-            "timezone": {"type": "string"},
-            "weekdays": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 6}},
-            "enabled": {"type": "boolean"},
-        },
-        required=["task_id"],
-    ),
-    _fn(
-        "scheduled_task_delete",
-        "Delete a scheduled task permanently. Use when the user asks to remove/stop a recurring task.",
-        {
-            "task_id": {"type": "integer"},
-        },
-        required=["task_id"],
-    ),
 ]
 
 
@@ -1138,7 +1140,6 @@ AGENT_TOOLS: list[dict[str, Any]] = [
     *_READ_ONLY_TOOLS,
     *_AUTO_APPLY_TOOLS,
     *_PROPOSAL_TOOLS,
-    *_INTROSPECTION_TOOLS,
     *_TERMINATOR_TOOLS,
 ]
 
@@ -1183,19 +1184,69 @@ for _tool in AGENT_TOOLS:
         _tool["_palette_modes"] = frozenset({"full", "compact"})
 
 
-def tools_for_palette_mode(mode: str) -> list[dict[str, Any]]:
+def tools_for_palette_mode(
+    tool_ids_or_mode: str | list[str] | None = None,
+    *,
+    mode: str = "full",
+) -> list[dict[str, Any]]:
     """Return the tool list for ``full`` (default) or ``compact`` (fewer tools, lower token use).
-    
+
+    Accepts either a plain mode string (backward compat) or an explicit
+    ``tool_ids`` list plus ``mode`` keyword.
+
     The source of truth for palette membership is each tool's ``_palette_modes`` metadata.
     Tools without ``_palette_modes`` default to ``{"full"}`` (excluded from compact).
     """
+    if isinstance(tool_ids_or_mode, list):
+        tool_ids = set(tool_ids_or_mode)
+    else:
+        if tool_ids_or_mode is not None:
+            mode = tool_ids_or_mode
+        tool_ids = None
+
     m = (mode or "full").strip().lower()
     if m == "compact":
-        # Return tools that self-declare "compact" in their _palette_modes
-        return [
+        base = [
             t for t in AGENT_TOOLS
             if "compact" in (t.get("_palette_modes") or frozenset())
         ]
-    return list(AGENT_TOOLS)
+    else:
+        base = list(AGENT_TOOLS)
+
+    if tool_ids is not None:
+        return [t for t in base if t["function"]["name"] in tool_ids]
+    return base
+
+
+async def filter_tools_for_user_connectors(
+    db: AsyncSession,
+    user_id: int,
+    tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove tools whose required connector providers are not linked for *user_id*.
+
+    Tools with no ``required_providers_for_tool`` entry (memory, skills, etc.)
+    always pass through.
+    """
+    from app.models.connector_connection import ConnectorConnection
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(ConnectorConnection.provider).where(
+            ConnectorConnection.user_id == user_id
+        )
+    )
+    linked: set[str] = {row[0] for row in result.all() if row[0]}
+
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        name = t["function"]["name"]
+        required = required_providers_for_tool(name)
+        if required is None or required & linked:
+            out.append(t)
+    return out
+
+
+tool_required_connector_providers = required_providers_for_tool
 
 

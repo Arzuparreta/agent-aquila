@@ -1,75 +1,69 @@
-"""Tasks tool handlers."""
+"""Google Tasks tool handlers."""
+
 from __future__ import annotations
+
 from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.connector_connection import ConnectorConnection
+
 from app.models.user import User
-from app.services.agent.runtime_clients import GoogleTasksClient
+from app.services.connectors.google_tasks_client import GoogleTasksClient
+
+from .base import provider_connection
 
 
-
-class AgentService:
-@staticmethod
-def _scheduled_task_to_dict(task: ScheduledTask) -> dict[str, Any]:
-    return {
-        "id": task.id,
-        "name": task.name,
-
-        "instruction": task.instruction,
-        "schedule_type": task.schedule_type,
-        "timezone": task.timezone,
-        "scheduled_at": task.scheduled_at.isoformat() if task.scheduled_at else None,
-        "interval_minutes": task.interval_minutes,
-        "hour_local": task.hour_local,
-        "minute_local": task.minute_local,
-        "cron_expr": task.cron_expr,
-        "rrule_expr": task.rrule_expr,
-        "weekdays": task.weekdays,
-        "enabled": bool(task.enabled),
-        "next_run_at": task.next_run_at.isoformat() if task.next_run_at else None,
-        "last_run_at": task.last_run_at.isoformat() if task.last_run_at else None,
-        "run_count": int(task.run_count or 0),
-        "last_status": task.last_status,
-        "last_error": task.last_error,
-
-    }
-
-# ------------------------------------------------------------------
-# Gmail tools
-# ------------------------------------------------------------------
-@staticmethod
-async def _tool_gmail_list_messages(
-    db: AsyncSession, user: User, args: dict[str, Any]
+@provider_connection("tasks")
+async def _tool_tasks_list_tasklists(
+    db: AsyncSession, user: User, client: GoogleTasksClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    return await client.list_messages(
-        page_token=args.get("page_token"),
+    return await client.list_tasklists(page_token=args.get("page_token"))
 
-        q=args.get("q"),
-        label_ids=args.get("label_ids"),
-        max_results=int(args.get("max_results") or 25),
+
+@provider_connection("tasks")
+async def _tool_tasks_list_tasks(
+    db: AsyncSession, user: User, client: GoogleTasksClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    sc = args.get("show_completed")
+    return await client.list_tasks(
+        str(args["tasklist_id"]),
+        page_token=args.get("page_token"),
+        show_completed=bool(sc) if sc is not None else None,
+        due_min=args.get("due_min"),
+        due_max=args.get("due_max"),
+        max_results=int(args.get("max_results") or 100),
     )
 
-@staticmethod
-async def _tool_gmail_get_message(
-    db: AsyncSession, user: User, args: dict[str, Any]
+
+@provider_connection("tasks")
+async def _tool_tasks_create_task(
+    db: AsyncSession, user: User, client: GoogleTasksClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    mid = str(args["message_id"])
-    fmt = str(args.get("format") or "full")
-    if fmt == "metadata":
-        cached = get_message_metadata(row.id, mid)
-        if cached is not None:
-            return cached
-    client = await _gmail_client(db, row)
+    body: dict[str, Any] = {"title": str(args["title"])}
+    if args.get("notes") is not None:
+        body["notes"] = str(args["notes"])
+    if args.get("due"):
+        body["due"] = str(args["due"])
+    return await client.insert_task(str(args["tasklist_id"]), body)
 
-    payload = await client.get_message(mid, format=fmt)
-    if fmt == "metadata":
-        put_message_metadata(row.id, mid, payload)
-    return payload
 
-@staticmethod
-async def _tool_gmail_get_thread(
-    db: AsyncSession, user: User, args: dict[str, Any]
+@provider_connection("tasks")
+async def _tool_tasks_update_task(
+    db: AsyncSession, user: User, client: GoogleTasksClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if args.get("title") is not None:
+        body["title"] = str(args["title"])
+    if args.get("notes") is not None:
+        body["notes"] = str(args["notes"])
+    if args.get("status"):
+        body["status"] = str(args["status"])
+    if args.get("due"):
+        body["due"] = str(args["due"])
+    return await client.patch_task(str(args["tasklist_id"]), str(args["task_id"]), body)
 
+
+@provider_connection("tasks")
+async def _tool_tasks_delete_task(
+    db: AsyncSession, user: User, client: GoogleTasksClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    return await client.delete_task(str(args["tasklist_id"]), str(args["task_id"]))

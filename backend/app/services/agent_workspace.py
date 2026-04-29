@@ -281,7 +281,6 @@ async def build_system_prompt(
     agents = _read_file("AGENTS.md", _DEFAULT_AGENTS)
     tools = build_tools_section(
         tool_palette,
-        harness_mode,
         prompt_tier=tier,
     )
 

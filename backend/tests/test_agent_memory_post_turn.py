@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.models.user import User
-from app.services.agent_memory_post_turn_service import (
+from app.services.agent.memory.post_turn import (
     _parse_json_object,
     heuristic_wants_post_turn_extraction,
     maybe_ingest_post_turn_memory,
@@ -66,7 +66,7 @@ async def test_maybe_ingest_skips_when_heuristic_no_match(
     crm_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.services.agent_memory_post_turn_service as mod
+    import app.services.agent.memory.post_turn as mod
 
     base = merge_stored_with_env(None)
     fake_rt = base.model_copy(
@@ -93,7 +93,7 @@ async def test_maybe_ingest_upserts_from_committee(
     crm_user: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.services.agent_memory_post_turn_service as mod
+    import app.services.agent.memory.post_turn as mod
 
     base = merge_stored_with_env(None)
     fake_rt = base.model_copy(
@@ -101,7 +101,7 @@ async def test_maybe_ingest_upserts_from_committee(
     )
     monkeypatch.setattr(mod, "resolve_for_user", AsyncMock(return_value=fake_rt))
 
-    async def fake_committee(*_a, **_k):
+    async def fake_single_extraction(*_a, **_k):
         return [
             {
                 "key": "agent.identity.display_name_es",
@@ -110,8 +110,7 @@ async def test_maybe_ingest_upserts_from_committee(
             }
         ]
 
-    monkeypatch.setattr(mod, "run_committee_memory_extraction", fake_committee)
-    monkeypatch.setattr(mod, "maybe_adapt_rubric_after_turn", AsyncMock())
+    monkeypatch.setattr(mod, "_run_single_extraction", fake_single_extraction)
 
     calls: list[dict] = []
 

@@ -1,82 +1,85 @@
-"""Third-party tool handlers."""
+"""Third-party tool handlers — GitHub, Linear, Notion."""
+
 from __future__ import annotations
+
 from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.connector_connection import ConnectorConnection
+
 from app.models.user import User
-from app.services.agent.runtime_clients import (
-    GitHubClient, LinearClient, NotionClient,
-)
+from app.services.connectors.github_client import GitHubClient
+from app.services.connectors.linear_client import LinearClient
+from app.services.connectors.notion_client import NotionClient
 
-    return payload
+from .base import provider_connection
 
-@staticmethod
-async def _tool_gmail_list_labels(
-    db: AsyncSession, user: User, args: dict[str, Any]
+
+# ---------------------------------------------------------------------------
+# GitHub
+# ---------------------------------------------------------------------------
+
+@provider_connection("github")
+async def _tool_github_list_my_repos(
+    db: AsyncSession, user: User, client: GitHubClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    return await client.list_labels()
-
-@staticmethod
-async def _tool_gmail_list_filters(
-
-    db: AsyncSession, user: User, args: dict[str, Any]
-) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    return await client.list_filters()
-
-@staticmethod
-def _parse_label_ids(value: Any) -> list[str] | None:
-    """Parse label_ids from args - handles both array and malformed string input."""
-    if value is None:
-        return None
-    if isinstance(value, list):
-        return [str(x) for x in value if x]
-    if isinstance(value, str):
-        if not value.strip():
-            return None
-        try:
-            parsed = json.loads(value)
-
-@staticmethod
-async def _tool_gmail_modify_thread(
-    db: AsyncSession, user: User, args: dict[str, Any]
-) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    add_label_ids = AgentService._parse_label_ids(args.get("add_label_ids"))
-    remove_label_ids = AgentService._parse_label_ids(args.get("remove_label_ids"))
-    result = await client.modify_thread(
-
-        str(args["thread_id"]),
-        add_label_ids=add_label_ids,
-        remove_label_ids=remove_label_ids,
+    items = await client.list_user_repos(
+        page=int(args.get("page") or 1),
+        per_page=int(args.get("per_page") or 30),
     )
-    gmail_cache_invalidate_connection(row.id)
-    return result
+    return {"repos": items}
 
-@staticmethod
 
-async def _tool_gmail_trash_message(
-    db: AsyncSession, user: User, args: dict[str, Any]
+@provider_connection("github")
+async def _tool_github_list_repo_issues(
+    db: AsyncSession, user: User, client: GitHubClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    mid = str(args["message_id"])
-    result = await client.trash_message(mid)
-    gmail_cache_invalidate_message(row.id, mid)
-    return result
+    st = str(args.get("state") or "open")
+    if st not in ("open", "closed", "all"):
+        st = "open"
+    items = await client.list_repo_issues(
+        str(args["owner"]),
+        str(args["repo"]),
+        state=st,
+        page=int(args.get("page") or 1),
+        per_page=int(args.get("per_page") or 30),
+    )
+    return {"issues": items}
 
-@staticmethod
 
-async def _tool_gmail_untrash_message(
-    db: AsyncSession, user: User, args: dict[str, Any]
+# ---------------------------------------------------------------------------
+# Linear
+# ---------------------------------------------------------------------------
+
+@provider_connection("linear")
+async def _tool_linear_list_issues(
+    db: AsyncSession, user: User, client: LinearClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    mid = str(args["message_id"])
-    result = await client.untrash_message(mid)
-    gmail_cache_invalidate_message(row.id, mid)
+    return await client.list_issues(first=int(args.get("first") or 25))
 
+
+@provider_connection("linear")
+async def _tool_linear_get_issue(
+    db: AsyncSession, user: User, client: LinearClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    return await client.get_issue(str(args["issue_id"]))
+
+
+# ---------------------------------------------------------------------------
+# Notion
+# ---------------------------------------------------------------------------
+
+@provider_connection("notion")
+async def _tool_notion_search(
+    db: AsyncSession, user: User, client: NotionClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    return await client.search(
+        query=str(args.get("query") or ""),
+        page_size=int(args.get("page_size") or 20),
+    )
+
+
+@provider_connection("notion")
+async def _tool_notion_get_page(
+    db: AsyncSession, user: User, client: NotionClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    return await client.get_page(str(args["page_id"]))

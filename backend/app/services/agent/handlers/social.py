@@ -1,100 +1,88 @@
-"""Social/communication tool handlers."""
+"""Social/communication tool handlers — Slack, Telegram, Outlook."""
+
 from __future__ import annotations
+
 from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.connector_connection import ConnectorConnection
+
 from app.models.user import User
-from app.services.agent.runtime_clients import (
-    SlackClient, TelegramBotClient, DiscordBotClient,
-)
-from app.services.connectors.outlook_mail import OutlookMailClient
+from app.services.connectors.slack_client import SlackClient
+from app.services.connectors.telegram_bot_client import TelegramBotClient
+from app.services.connectors.graph_client import GraphClient
 
-            if isinstance(parsed, list):
-                return [str(x) for x in parsed if x]
-        except (json.JSONDecodeError, ValueError):
-            pass
-        return [value.strip()]
-    return None
+from .base import provider_connection
 
-@staticmethod
-async def _tool_gmail_modify_message(
-    db: AsyncSession, user: User, args: dict[str, Any]
+
+# ---------------------------------------------------------------------------
+# Slack
+# ---------------------------------------------------------------------------
+
+@provider_connection("slack")
+async def _tool_slack_list_conversations(
+    db: AsyncSession, user: User, client: SlackClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-
-    client = await _gmail_client(db, row)
-    mid = str(args["message_id"])
-    add_label_ids = AgentService._parse_label_ids(args.get("add_label_ids"))
-    remove_label_ids = AgentService._parse_label_ids(args.get("remove_label_ids"))
-    result = await client.modify_message(
-        mid,
-        add_label_ids=add_label_ids,
-        remove_label_ids=remove_label_ids,
+    return await client.conversations_list(
+        types=str(args.get("types") or "public_channel,private_channel"),
+        cursor=args.get("cursor"),
+        limit=int(args.get("limit") or 200),
     )
-    gmail_cache_invalidate_message(row.id, mid)
-    return result
 
 
-    return result
-
-@staticmethod
-async def _tool_gmail_trash_thread(
-    db: AsyncSession, user: User, args: dict[str, Any]
+@provider_connection("slack")
+async def _tool_slack_get_conversation_history(
+    db: AsyncSession, user: User, client: SlackClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
+    return await client.conversations_history(
+        str(args["channel_id"]),
+        limit=int(args.get("limit") or 50),
+        cursor=args.get("cursor"),
+    )
 
-    result = await client.trash_thread(str(args["thread_id"]))
-    gmail_cache_invalidate_connection(row.id)
-    return result
 
-@staticmethod
-async def _tool_gmail_untrash_thread(
-    db: AsyncSession, user: User, args: dict[str, Any]
+# ---------------------------------------------------------------------------
+# Telegram
+# ---------------------------------------------------------------------------
+
+@provider_connection("telegram")
+async def _tool_telegram_get_me(
+    db: AsyncSession, user: User, client: TelegramBotClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    result = await client.untrash_thread(str(args["thread_id"]))
-    gmail_cache_invalidate_connection(row.id)
+    return await client.get_me()
 
-    return result
 
-@staticmethod
-async def _tool_gmail_trash_bulk_query(
-    db: AsyncSession, user: User, args: dict[str, Any]
+@provider_connection("telegram")
+async def _tool_telegram_get_updates(
+    db: AsyncSession, user: User, client: TelegramBotClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    q = str(args.get("q") or "in:inbox")
-    cap = min(max(int(args.get("max_messages") or 50_000), 1), 250_000)
-    client = await _gmail_client(db, row)
-    total = 0
-    page_token: str | None = None
-    capped = False
-    while total < cap:
-        page = await client.list_messages(page_token=page_token, q=q, max_results=500)
-        messages = page.get("messages") or []
-        ids = [str(m["id"]) for m in messages if isinstance(m, dict) and m.get("id")]
-        if not ids:
-            break
+    return await client.get_updates(
+        offset=int(args.get("offset") or 0),
+        limit=min(int(args.get("limit") or 20), 100),
+    )
 
 
-@staticmethod
-async def _tool_gmail_mark_unread(
-    db: AsyncSession, user: User, args: dict[str, Any]
+@provider_connection("telegram")
+async def _tool_telegram_send_message(
+    db: AsyncSession, user: User, client: TelegramBotClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    client = await _gmail_client(db, row)
-    if args.get("thread_id"):
+    cid = str(args["chat_id"])
+    text = str(args["text"])
+    return await client.send_message(cid, text[:4096])
 
-        out = await client.modify_thread(
-            str(args["thread_id"]), add_label_ids=["UNREAD"]
-        )
-        gmail_cache_invalidate_connection(row.id)
-        return out
-    if args.get("message_id"):
-        mid = str(args["message_id"])
-        out = await client.modify_message(mid, add_label_ids=["UNREAD"])
-        gmail_cache_invalidate_message(row.id, mid)
-        return out
-    return {"error": "either message_id or thread_id is required"}
 
+# ---------------------------------------------------------------------------
+# Outlook (Graph)
+# ---------------------------------------------------------------------------
+
+@provider_connection("graph")
+async def _tool_outlook_list_messages(
+    db: AsyncSession, user: User, client: GraphClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    return await client.messages_delta(top=int(args.get("top") or 25))
+
+
+@provider_connection("graph")
+async def _tool_outlook_get_message(
+    db: AsyncSession, user: User, client: GraphClient, args: dict[str, Any],
+) -> dict[str, Any]:
+    return await client.get_message(str(args["message_id"]))

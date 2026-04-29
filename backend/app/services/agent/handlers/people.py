@@ -1,21 +1,23 @@
-"""People tool handlers."""
+"""Google People (Contacts) tool handlers."""
+
 from __future__ import annotations
+
 from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.connector_connection import ConnectorConnection
+
 from app.models.user import User
-from app.services.agent.runtime_clients import GooglePeopleClient
+from app.services.connectors.google_people_client import GooglePeopleClient
 
+from .base import provider_connection
+
+
+@provider_connection("people")
+async def _tool_people_search_contacts(
+    db: AsyncSession, user: User, client: GooglePeopleClient, args: dict[str, Any],
 ) -> dict[str, Any]:
-    row = await _resolve_connection(db, user, args, GMAIL_TOOL_PROVIDERS, label="Gmail")
-    tid = str(args["thread_id"])
-    fmt = str(args.get("format") or "metadata")
-    if fmt == "metadata":
-        cached = gmail_cache_get_thread(row.id, tid, fmt)
-        if cached is not None:
-            return cached
-    client = await _gmail_client(db, row)
-    payload = await client.get_thread(tid, format=fmt)
-    if fmt == "metadata":
-        gmail_cache_put_thread(row.id, tid, fmt, payload)
-
+    return await client.search_contacts(
+        str(args["query"]),
+        page_token=args.get("page_token"),
+        page_size=int(args.get("page_size") or 20),
+    )

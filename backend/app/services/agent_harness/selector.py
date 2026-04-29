@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Literal
 
 HarnessMode = Literal["native"]  # prompted mode removed
 HarnessPreference = Literal["native"]  # auto/prompted removed

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.agent_replay import AgentReplayContext
+from app.services.agent.replay import AgentReplayContext
 from app.services.agent_tools import AGENT_TOOLS, tools_for_palette_mode
 from app.services.channel_binding import get_or_create_thread_for_channel
 
