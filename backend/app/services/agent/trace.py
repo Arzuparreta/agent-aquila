@@ -199,54 +199,35 @@ def _reduce_conversation_for_budget(
     *,
     input_budget_tokens: int,
 ) -> tuple[list[dict[str, Any]], bool]:
-    from app.services.token_budget_service import estimate_message_tokens, select_history_by_budget, clamp_tool_content_by_tokens
+    """Simplified budget reduction: keep system prompt + last N messages that fit budget.
+
+    Replaces complex head+tail selection with compaction summaries.
+    For most users, this is unnecessary — the real fix is reducing prompt bloat
+    (which we're already doing in Phases 1-3).
+    """
+    from app.services.token_budget_service import estimate_message_tokens
+
     if not conversation:
         return conversation, False
+
+    # If already within budget, no changes needed
     if estimate_message_tokens(conversation) <= input_budget_tokens:
         return conversation, False
-    reduced = list(conversation)
-    changed = False
-    # Keep system prompt + latest user turn, compact middle history first.
-    if len(reduced) > 2:
-        head = reduced[:1]
-        middle = reduced[1:-1]
-        tail = reduced[-1:]
-        dropped_count = max(0, len(middle) - 8)
-        compact_middle = select_history_by_budget(
-            history=[
-                {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
-                for m in middle
-                if isinstance(m.get("content"), str)
-            ],
-            budget_tokens=max(256, input_budget_tokens - estimate_message_tokens(head + tail)),
-            keep_tail_messages=4,
-        )
-        if dropped_count > 0:
-            summary = {
-                "role": "system",
-                "content": (
-                    "Context compression summary:\n"
-                    "- Active Task: Continue the current user request.\n"
-                    f"- Completed Actions: Earlier exchanges compacted ({dropped_count} msgs).\n"
-                ),
-            }
-            reduced = head + [summary] + compact_middle + tail
-        else:
-            reduced = head + compact_middle + tail
-        changed = True
-    # If still over budget, trim very large message contents.
-    while estimate_message_tokens(reduced) > input_budget_tokens and len(reduced) > 1:
-        idx = 1
-        candidate = reduced[idx]
-        content = candidate.get("content")
-        if not isinstance(content, str) or len(content) < 600:
-            if len(reduced) > 3:
-                reduced.pop(idx)
-                changed = True
-                continue
-            break
-        candidate = dict(candidate)
-        candidate["content"] = clamp_tool_content_by_tokens(content, max(100, len(content) // 10))
-        reduced[idx] = candidate
-        changed = True
-    return reduced, changed
+
+    # Keep system prompt + latest 8 messages that fit in budget
+    system = conversation[0] if conversation else {}
+    remaining = conversation[1:]
+
+    # Keep latest 8 messages that fit in budget
+    keep = []
+    for msg in reversed(remaining):
+        cost = estimate_message_tokens([{"role": msg.get("role"), "content": msg.get("content")}])
+        if cost <= input_budget_tokens:
+            keep.insert(0, msg)
+            input_budget_tokens -= cost
+
+    # Always include system prompt if it exists
+    if system:
+        keep.insert(0, system)
+
+    return keep, len(keep) < len(conversation)

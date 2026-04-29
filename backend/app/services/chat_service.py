@@ -235,25 +235,9 @@ async def history_for_agent(
     if rt.token_aware_history:
         effective_budget = token_budget if token_budget is not None and token_budget > 0 else cap_pairs * 700
         selected = select_history_by_budget(history=msgs, budget_tokens=effective_budget)
-        if len(selected) < len(msgs):
-            selected = [
-                {
-                    "role": "system",
-                    "content": "[Earlier messages omitted to stay within the context window.]",
-                },
-                *selected,
-            ]
         return selected
     if len(msgs) > cap_pairs * 2:
         msgs = msgs[-(cap_pairs * 2) :]
-        if rt.agent_thread_compact_after_pairs > 0:
-            msgs = [
-                {
-                    "role": "system",
-                    "content": "[Earlier messages omitted to stay within the context window.]",
-                },
-                *msgs,
-            ]
     return msgs
 
 
