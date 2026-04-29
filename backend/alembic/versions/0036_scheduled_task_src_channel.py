@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0036_scheduled_task_source_channel"
+revision = "0036_scheduled_task_src_channel"
 down_revision = "0035_scheduled_task_scheduled_at"
 branch_labels = None
 depends_on = None

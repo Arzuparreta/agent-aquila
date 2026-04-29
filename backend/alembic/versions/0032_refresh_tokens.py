@@ -11,7 +11,7 @@ from alembic import op
 
 # Revision identifiers, used by Alembic.
 revision = "0032_refresh_tokens"
-down_revision = "0031_telegram_ui_integration_cancel_run"
+down_revision = "0031_telegram_ui_cancel_run"
 branch_labels = None
 depends_on = None
 

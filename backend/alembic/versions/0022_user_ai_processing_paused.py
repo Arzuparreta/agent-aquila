@@ -5,8 +5,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0022_user_ai_agent_processing_paused"
-down_revision = "0021_agent_traces_channel_bindings"
+revision = "0022_user_ai_processing_paused"
+down_revision = "0021_traces_channel_bindings"
 branch_labels = None
 depends_on = None
 

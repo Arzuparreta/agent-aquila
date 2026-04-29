@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0024_chat_message_idempotency_token"
+revision = "0024_chat_msg_idempotency_token"
 down_revision = "0023_telegram_channel"
 branch_labels = None
 depends_on = None

@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0025_embedding_provider_kind"
-down_revision = "0024_chat_message_idempotency_token"
+down_revision = "0024_chat_msg_idempotency_token"
 branch_labels = None
 depends_on = None
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0030_harness_user_context_turn_profile"
+revision = "0030_harness_user_ctx_profile"
 down_revision = "0029_user_device_file_ingest"
 branch_labels = None
 depends_on = None
