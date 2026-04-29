@@ -167,6 +167,8 @@ class Settings(BaseSettings):
     agent_channel_gateway_enabled: bool = Field(
         default=False, validation_alias="AGENT_CHANNEL_GATEWAY_ENABLED"
     )
+    # Trace events for observability and eval/replay. When false, only essential AgentRun records are kept.
+    agent_tracing_enabled: bool = Field(default=False, validation_alias="AGENT_TRACING_ENABLED")
     # Non-chat agent turns (channels, heartbeats, automation-class) use compact tool palette.
     agent_non_chat_uses_compact_palette: bool = Field(
         default=True, validation_alias="AGENT_NON_CHAT_USES_COMPACT_PALETTE"

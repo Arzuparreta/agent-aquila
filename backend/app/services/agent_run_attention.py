@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_run import AgentRun, AgentTraceEvent
+from app.core.config import settings
+from app.models.agent_run import AgentRun, AgentTraceEvent, AgentRunStep
 
 
 @dataclass(slots=True)
@@ -38,6 +39,10 @@ def hint_for_stage(stage: str) -> str:
 
 
 async def latest_trace_event(db: AsyncSession, run_id: int) -> AgentTraceEvent | None:
+    """Get the latest trace event for a run, or None if tracing is disabled."""
+    if not getattr(settings, "agent_tracing_enabled", False):
+        return None
+
     result = await db.execute(
         select(AgentTraceEvent)
         .where(AgentTraceEvent.run_id == run_id)
@@ -48,6 +53,10 @@ async def latest_trace_event(db: AsyncSession, run_id: int) -> AgentTraceEvent |
 
 
 async def latest_trace_event_at(db: AsyncSession, run_id: int) -> datetime | None:
+    """Get the timestamp of the latest trace event, or None if tracing is disabled."""
+    if not getattr(settings, "agent_tracing_enabled", False):
+        return None
+
     result = await db.execute(
         select(func.max(AgentTraceEvent.created_at)).where(AgentTraceEvent.run_id == run_id)
     )
@@ -55,9 +64,18 @@ async def latest_trace_event_at(db: AsyncSession, run_id: int) -> datetime | Non
 
 
 async def build_attention_snapshot(db: AsyncSession, run: AgentRun) -> AttentionSnapshot:
+    """Build attention snapshot using trace events if available, otherwise fallback to run status."""
     latest = await latest_trace_event(db, run.id)
-    stage = stage_from_event_type(latest.event_type if latest else None)
-    last_event_at = latest.created_at if latest else None
+
+    if latest:
+        # Use trace events for detailed stage information
+        stage = stage_from_event_type(latest.event_type)
+        last_event_at = latest.created_at
+    else:
+        # Fallback: use run status and updated_at when tracing is disabled
+        stage = run.status if run.status in {"queued", "running", "pending"} else "running"
+        last_event_at = run.updated_at or run.created_at
+
     hint = hint_for_stage(stage)
     return AttentionSnapshot(stage=stage, last_event_at=last_event_at, hint=hint)
 

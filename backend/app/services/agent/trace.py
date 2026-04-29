@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.agent_run import AgentTraceEvent
 
 _MAX_STEP_PAYLOAD_JSON_CHARS = 20_000
@@ -27,6 +28,11 @@ EV_RUN_FAILED = "run.failed"
 EV_POST_TURN_STARTED = "post_turn.started"
 EV_POST_TURN_SKIPPED = "post_turn.skipped"
 EV_POST_TURN_COMPLETED = "post_turn.completed"
+
+
+def tracing_enabled() -> bool:
+    """Check if detailed trace event emission is enabled."""
+    return getattr(settings, "agent_tracing_enabled", False)
 
 
 def new_trace_id() -> str:
@@ -56,6 +62,14 @@ async def emit_trace_event(
     parent_span_id: str | None = None,
     step_index: int | None = None,
 ) -> None:
+    """Emit a trace event if tracing is enabled.
+
+    This function checks the AGENT_TRACING_ENABLED setting before emitting
+    events to avoid unnecessary database writes for single-user deployments.
+    """
+    if not tracing_enabled():
+        return
+
     db.add(
         AgentTraceEvent(
             run_id=run_id,

@@ -265,6 +265,11 @@ async def _emit_trace_safe(db, run_id, event_type, payload):
         return
     try:
         from app.models.agent_run import AgentRun
+        from app.services.agent_trace import tracing_enabled
+
+        if not tracing_enabled():
+            return
+
         row = await db.get(AgentRun, run_id)
         if not row or not row.root_trace_id:
             return

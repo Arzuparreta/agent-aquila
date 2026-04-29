@@ -125,6 +125,11 @@ async def list_agent_run_trace_events(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AgentTraceEventRead]:
+    from app.core.config import settings
+
+    if not getattr(settings, "agent_tracing_enabled", False):
+        return []
+
     events = await AgentService.list_trace_events(db, current_user, run_id)
     if events is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
