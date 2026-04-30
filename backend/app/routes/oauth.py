@@ -31,6 +31,7 @@ from app.services.instance_oauth_service import (
     get_microsoft_app_credentials_form,
     get_microsoft_runtime_config,
     get_redirect_base as get_instance_redirect_base,
+    resolve_oauth_redirect_base_for_request,
     save_google_app_credentials,
     save_microsoft_app_credentials,
 )
@@ -104,7 +105,8 @@ async def google_start(
             detail="Google sign-in for this app is not set up yet. Open Settings and save your Google Client ID and secret (one-time), then try again.",
         )
     scopes = google_oauth.scopes_for_intent(payload.intent)
-    redirect_base = str(request.base_url).rstrip("/")
+    request_origin = str(request.base_url).rstrip("/")
+    redirect_base = await resolve_oauth_redirect_base_for_request(db, request_origin)
     state = await state_store.create_state(
         state_store.StatePayload(
             user_id=current_user.id,
@@ -441,6 +443,7 @@ async def put_microsoft_app_credentials(
 )
 async def microsoft_start(
     payload: OAuthStartRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> OAuthStartResponse:
@@ -452,6 +455,8 @@ async def microsoft_start(
             "Application (client) ID and secret (one-time), then try again.",
         )
     scopes = microsoft_oauth.scopes_for_intent(payload.intent)
+    request_origin = str(request.base_url).rstrip("/")
+    redirect_base = await resolve_oauth_redirect_base_for_request(db, request_origin)
     state = await state_store.create_state(
         state_store.StatePayload(
             user_id=current_user.id,
@@ -459,11 +464,11 @@ async def microsoft_start(
             intent=payload.intent or "all",
             scopes=scopes,
             redirect_after=payload.redirect_after,
+            redirect_base=redirect_base,
         )
     )
     try:
-        base = await get_instance_redirect_base(db)
-        ms_redir = microsoft_oauth.redirect_uri_for_base(base)
+        ms_redir = microsoft_oauth.redirect_uri_for_base(redirect_base)
         url = microsoft_oauth.build_authorize_url(
             state, scopes, ms_cfg, redirect_uri_override=ms_redir
         )

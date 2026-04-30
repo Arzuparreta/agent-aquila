@@ -74,6 +74,24 @@ async def get_redirect_base(db: AsyncSession) -> str:
     return from_ui or settings.google_oauth_redirect_base
 
 
+async def resolve_oauth_redirect_base_for_request(db: AsyncSession, request_public_origin: str) -> str:
+    """Origin (scheme + host + port) used in OAuth ``redirect_uri`` for this browser flow.
+
+    If the operator saved **Public URL** in Settings, use it so registration in
+    Google / Azure can use a stable hostname (required for many setups). Google
+    rejects raw Tailscale/LAN IPs; those users should save a tunnel or localhost
+    origin here.
+
+    If nothing is saved, fall back to the incoming request URL (proxy ``Host`` /
+    ``X-Forwarded-*`` as seen by FastAPI).
+    """
+    row = await _get_or_create_row(db)
+    explicit = (row.google_oauth_redirect_base or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    return (request_public_origin or "").rstrip("/")
+
+
 async def get_google_runtime_config(db: AsyncSession) -> GoogleOAuthRuntimeConfig:
     row = await _get_or_create_row(db)
     cid = (row.google_oauth_client_id or "").strip() or settings.google_oauth_client_id

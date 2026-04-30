@@ -87,7 +87,76 @@ docker compose up --build
 1. Open <http://localhost:3002> — you'll be redirected to the **Create account** page
 2. Register your first account (automatically becomes the **instance admin**)
 3. Configure your AI provider in **Settings → AI**
-4. Connect external services in **Settings → Connectors**
+4. Connect external services in **Settings → Connectors**  
+   If Google or Microsoft refuse your redirect URL while you use a **private or Tailscale IP** in the browser, read **Google / Microsoft OAuth without a public domain** below—this is expected until you add a public HTTPS origin.
+
+### Google / Microsoft OAuth without a public domain (Cloudflare quick tunnel)
+
+This subsection is for people who run Agent Aquila at home (or only on Tailscale / a LAN) and **do not** have a normal domain or reverse proxy yet. If you already serve the app at `https://your-domain`, skip this and use that URL everywhere below instead of the tunnel.
+
+#### What problem this solves
+
+Signing in to Google or Microsoft from Aquila uses **OAuth**. After you approve access in the browser, Google or Microsoft **redirects your browser** to a URL on **your** installation (the “callback”). You must **register that exact callback URL** in Google Cloud Console / Azure.
+
+Those consoles **do not accept** addresses like:
+
+- `http://192.168.x.x:3002/…` (LAN)
+- `http://100.x.x.x:3002/…` (Tailscale)
+
+So if you only ever open Aquila with a private IP, you can use the app, but you **cannot** complete “Connect Google” / “Connect Microsoft” until you introduce **some HTTPS address that still reaches this same Docker stack** and that providers treat as a normal hostname.
+
+**You do not need a monitor on the server.** You complete OAuth in a browser on your phone or laptop. The server stays headless.
+
+#### What the optional tunnel does
+
+The Compose file includes a small **Cloudflare Tunnel** sidecar (`cloudflared`) behind the profile `oauth-tunnel`. When you run it, Cloudflare gives you a temporary **`https://….trycloudflare.com`** URL that forwards traffic to the **frontend** container. From the internet’s point of view, your app has a public HTTPS origin—even though it still runs on your machine.
+
+- **Pros**: No domain purchase, no DNS, works through NAT.
+- **Cons**: A **quick tunnel** URL **changes** when the tunnel container is recreated. If it changes, you must update **Public URL** in Aquila and the redirect URIs in Google / Azure (or switch to a stable domain / [named Cloudflare tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/) later).
+
+#### How to use it (step by step)
+
+1. **Start the main stack** (if it is not already running):
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+2. **Start the tunnel** (separate command; only starts `cloudflared`):
+
+   ```bash
+   docker compose --profile oauth-tunnel up -d cloudflared
+   ```
+
+3. **Read the public URL from the tunnel logs.** Cloudflare prints a line containing your hostname, for example `https://random-words.trycloudflare.com`:
+
+   ```bash
+   docker compose logs cloudflared
+   ```
+
+   Copy **only the origin**: `https://random-words.trycloudflare.com` (no path, no trailing slash).
+
+4. **Register redirect URIs** in each provider (replace the origin with yours):
+
+   - **Google** (OAuth client type **Web application** → **Authorized redirect URIs**):
+     - `https://random-words.trycloudflare.com/api/v1/oauth/google/callback`
+   - **Microsoft** (App registration → **Authentication** → **Redirect URIs**):
+     - `https://random-words.trycloudflare.com/api/v1/oauth/microsoft/callback`
+
+5. **Open Aquila in a browser** (you can use Tailscale or LAN as usual, or open the trycloudflare URL—either is fine for clicking around).
+
+6. Go to **Settings → Connectors**:
+
+   - In **Public URL**, paste the same origin: `https://random-words.trycloudflare.com`
+   - Enter your Google / Microsoft client ID and secret, then **Save Google link** / **Save Microsoft link** so Aquila stores that origin.
+
+7. Click **Connect Google** or **Connect Microsoft**. Your browser will go to the provider; after you approve, the provider will send you back to the **trycloudflare** callback, which reaches your stack and finishes the link.
+
+8. **Keep the tunnel running** whenever you need to **connect or reconnect** OAuth (new tokens / revoked access). Day-to-day chat may keep working for a while with stored tokens, but reconnects always need the callback URL to work again.
+
+#### If you outgrow the quick tunnel
+
+For a URL that does not change on every restart, use a real domain with HTTPS (VPS + Caddy/Let’s Encrypt, or a **named** Cloudflare Tunnel with a hostname you control). Then set **Public URL** to that `https://…` origin and update the provider redirect URIs once.
 
 ### Manual Setup
 
