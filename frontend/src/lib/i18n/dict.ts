@@ -604,6 +604,16 @@ const en = {
     "The worker calls Telegram getUpdates so inbound chats work on localhost and home networks. Turn off only if you use an HTTPS webhook instead.",
   "settings.telegram.pollTimeout": "Long-poll wait (seconds)",
   "settings.telegram.pollTimeoutHint": "0–50 (Telegram limit). Default 45. Higher values mean fewer HTTP requests.",
+  "settings.telegram.pairingTitle": "Bot linking code",
+  "settings.telegram.pairingHint":
+    "This is separate from webhook. Generate a short pairing code, then send it to your bot as /start YOUR_CODE.",
+  "settings.telegram.linkStatusLabel": "Linked chat:",
+  "settings.telegram.linkedYes": "yes",
+  "settings.telegram.linkedNo": "no",
+  "settings.telegram.generatePairingCode": "Generate pairing code",
+  "settings.telegram.pairingCodeReady": "Pairing code generated. Send it to your bot now.",
+  "settings.telegram.pairingCodeFailed": "Could not generate pairing code.",
+  "settings.telegram.pairingExpires": "Expires:",
   "settings.telegram.webhookTitle": "Optional HTTPS webhook",
   "settings.telegram.webhookHint":
     "If you expose the API publicly, you can set Telegram setWebhook to the path below. Long polling and webhook must not run for the same bot elsewhere.",
@@ -1632,6 +1642,16 @@ const es: Record<keyof typeof en, string> = {
     "El worker llama a getUpdates de Telegram para que los chats entren en local y redes domésticas. Desactívalo solo si usas webhook HTTPS.",
   "settings.telegram.pollTimeout": "Espera del long poll (segundos)",
   "settings.telegram.pollTimeoutHint": "0–50 (límite de Telegram). Por defecto 45. Más alto = menos peticiones HTTP.",
+  "settings.telegram.pairingTitle": "Codigo de enlace del bot",
+  "settings.telegram.pairingHint":
+    "Esto es independiente del webhook. Genera un codigo de enlace y envialo al bot como /start TU_CODIGO.",
+  "settings.telegram.linkStatusLabel": "Chat enlazado:",
+  "settings.telegram.linkedYes": "si",
+  "settings.telegram.linkedNo": "no",
+  "settings.telegram.generatePairingCode": "Generar codigo de enlace",
+  "settings.telegram.pairingCodeReady": "Codigo de enlace generado. Envialo al bot ahora.",
+  "settings.telegram.pairingCodeFailed": "No se pudo generar el codigo de enlace.",
+  "settings.telegram.pairingExpires": "Expira:",
   "settings.telegram.webhookTitle": "Webhook HTTPS opcional",
   "settings.telegram.webhookHint":
     "Si expones la API públicamente, puedes configurar setWebhook con la ruta de abajo. No combines webhook y otro long poll con el mismo bot.",

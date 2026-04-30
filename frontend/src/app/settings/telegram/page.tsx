@@ -16,9 +16,20 @@ type TelegramIntegration = {
   webhook_secret: string | null;
 };
 
+type TelegramLinkStatus = {
+  linked: boolean;
+};
+
+type TelegramPairing = {
+  code: string;
+  expires_at: string;
+};
+
 export default function TelegramSettingsPage() {
   const { t } = useTranslation();
   const [data, setData] = useState<TelegramIntegration | null>(null);
+  const [linkStatus, setLinkStatus] = useState<TelegramLinkStatus | null>(null);
+  const [pairing, setPairing] = useState<TelegramPairing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -29,8 +40,12 @@ export default function TelegramSettingsPage() {
     setLoading(true);
     setError(null);
     try {
-      const row = await apiFetch<TelegramIntegration>("/telegram/integration");
+      const [row, status] = await Promise.all([
+        apiFetch<TelegramIntegration>("/telegram/integration"),
+        apiFetch<TelegramLinkStatus>("/telegram/link-status")
+      ]);
       setData(row);
+      setLinkStatus(status);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t("settings.telegram.loadFailed"));
     } finally {
@@ -113,6 +128,23 @@ export default function TelegramSettingsPage() {
     }
   };
 
+  const generatePairingCode = async () => {
+    setSaving(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const row = await apiFetch<TelegramPairing>("/telegram/pairing-code", { method: "POST" });
+      setPairing(row);
+      setInfo(t("settings.telegram.pairingCodeReady"));
+      const ls = await apiFetch<TelegramLinkStatus>("/telegram/link-status");
+      setLinkStatus(ls);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : t("settings.telegram.pairingCodeFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <ProtectedPage>
       <SettingsLayout
@@ -179,6 +211,33 @@ export default function TelegramSettingsPage() {
                   className="w-28 rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-fg"
                 />
                 <p className="text-xs text-fg-muted">{t("settings.telegram.pollTimeoutHint")}</p>
+              </div>
+
+              <div className="space-y-2 border-t border-border-subtle pt-4">
+                <p className="text-sm font-medium text-fg">{t("settings.telegram.pairingTitle")}</p>
+                <p className="text-xs text-fg-muted">{t("settings.telegram.pairingHint")}</p>
+                <p className="text-xs text-fg-muted">
+                  {t("settings.telegram.linkStatusLabel")}{" "}
+                  <span className="text-fg">
+                    {linkStatus === null
+                      ? "…"
+                      : linkStatus.linked
+                        ? t("settings.telegram.linkedYes")
+                        : t("settings.telegram.linkedNo")}
+                  </span>
+                </p>
+                <Button type="button" disabled={saving || !data.configured} onClick={() => void generatePairingCode()}>
+                  {t("settings.telegram.generatePairingCode")}
+                </Button>
+                {pairing ? (
+                  <p className="rounded-md bg-surface-muted px-3 py-2 font-mono text-xs text-fg">
+                    /start {pairing.code}
+                    <br />
+                    <span className="text-fg-muted">
+                      {t("settings.telegram.pairingExpires")} {pairing.expires_at}
+                    </span>
+                  </p>
+                ) : null}
               </div>
 
               <div className="space-y-2 border-t border-border-subtle pt-4">
