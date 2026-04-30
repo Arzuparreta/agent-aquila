@@ -523,8 +523,23 @@ async def _execute_agent_loop(
                 run.status = "completed"
                 break
         else:
-            run.status = "failed"
-            run.error = "Step budget exceeded"
+            # Budget exhausted without explicit final_answer — produce best-effort reply
+            # from the last LLM content or accumulated tool results.
+            last_content = ""
+            for step in reversed(conversation):
+                if step.get("role") == "assistant" and step.get("content"):
+                    last_content = step["content"].strip()
+                    break
+            if last_content:
+                run.assistant_reply = last_content
+                run.status = "completed"
+            else:
+                run.assistant_reply = (
+                    "I've reached the end of my current turn budget without reaching a "
+                    "definitive answer. Here's what I gathered so far — let me know if "
+                    "you'd like me to continue exploring a specific angle."
+                )
+                run.status = "completed"
 
     except LLMProviderError as exc:
         step_idx += 1
