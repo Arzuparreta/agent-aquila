@@ -201,6 +201,16 @@ async def key_decrypt_exception_handler(request, exc: KeyDecryptError):
     )
 
 
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc: Exception):
+    """Catch unhandled exceptions and return JSON instead of Starlette's plain text."""
+    logger.exception("Unhandled exception on %s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error — see backend logs for details."},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

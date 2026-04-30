@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.schemas.agent_turn_profile import TURN_PROFILE_USER_CHAT
 
 from .connection import _resolve_connection
 from .handlers.base import (
@@ -68,16 +69,27 @@ class AgentService:
     """Thin wrapper for agent functionality — backward compatible entry point."""
 
     @staticmethod
-    async def run_agent_invalid_preflight(db: AsyncSession, user: User, message: str, **kw) -> Any:
-        return await run_agent_invalid_preflight(db, user, message, **kw)
+    async def run_agent_invalid_preflight(
+        db: AsyncSession, user: User, message: str, *, thread_id: int | None = None
+    ) -> Any:
+        return await run_agent_invalid_preflight(db, user, message, thread_id=thread_id)
 
     @staticmethod
-    async def abort_pending_run_queue_unavailable(db: AsyncSession, **kw) -> Any:
-        return await abort_pending_run_queue_unavailable(db=db, **kw)
+    async def abort_pending_run_queue_unavailable(
+        db: AsyncSession, *, run: Any, placeholder_message: Any
+    ) -> Any:
+        return await abort_pending_run_queue_unavailable(db=db, run=run, placeholder_message=placeholder_message)
 
     @staticmethod
-    async def create_pending_agent_run(db: AsyncSession, user: User, **kw) -> Any:
-        return await create_pending_agent_run(db, user, **kw)
+    async def create_pending_agent_run(
+        db: AsyncSession,
+        user: User,
+        message: str,
+        *,
+        thread_id: int | None = None,
+        turn_profile: str = TURN_PROFILE_USER_CHAT,
+    ) -> Any:
+        return await create_pending_agent_run(db, user, message, thread_id=thread_id, turn_profile=turn_profile)
 
     @staticmethod
     async def run_agent(
