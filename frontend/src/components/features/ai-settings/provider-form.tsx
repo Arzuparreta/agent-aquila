@@ -181,7 +181,16 @@ export function ProviderForm({ api }: ProviderFormProps) {
           t={t}
         />
 
-        <TestConnectionButton onTest={() => void test()} pending={testing} result={testResult} />
+        <TestConnectionButton
+          onTest={async () => {
+            const result = await test();
+            if (result?.ok) {
+              await refreshModels();
+            }
+          }}
+          pending={testing}
+          result={testResult}
+        />
 
         <ModelSelector
           label={t("settings.chatModel")}
