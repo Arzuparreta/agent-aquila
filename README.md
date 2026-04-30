@@ -21,7 +21,7 @@ Agent Aquila is a **full-stack AI agent platform** that combines:
 
 ## Key Features
 
-### 🤖 Intelligent Agent
+### 🦅 Intelligent Agent
 
 - **ReAct Loop**: Reasoning + Acting cycle for complex task execution
 - **Tool Calling**: 50+ tools across multiple service categories
