@@ -95,6 +95,23 @@ function normalizedOriginFromPublicUrl(raw: string): string | null {
   }
 }
 
+function isGoogleRedirectBaseInvalid(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  try {
+    const u = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    const host = u.hostname.toLowerCase();
+    if (!host) return true;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
+    const ipv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+    const ipv6 = host.includes(":");
+    if (ipv4 || ipv6) return true;
+    return !host.includes(".");
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Render a translation that contains lightweight inline markup. We support a
  * small allow-list (<strong>, <code>, <mono>) so translators can keep the
@@ -281,6 +298,10 @@ export function ConnectorsSection() {
     event.preventDefault();
     setError(null);
     setInfo(null);
+    if (isGoogleRedirectBaseInvalid(oauthPublicBase)) {
+      setError(t("connectors.google.invalidRedirectBase"));
+      return;
+    }
     setGoogleSetupSaving(true);
     try {
       const updated = await apiFetch<GoogleAppCredentials>("/oauth/google/app-credentials", {
@@ -680,6 +701,7 @@ export function ConnectorsSection() {
   const oauthOriginGuess = normalizedOriginFromPublicUrl(oauthPublicBase);
   const redirectMismatch =
     Boolean(oauthOriginGuess) && Boolean(browserOrigin) && oauthOriginGuess !== browserOrigin;
+  const googleRedirectBaseInvalid = isGoogleRedirectBaseInvalid(oauthPublicBase);
 
   return (
     <Card className="mt-8 p-5">
@@ -741,6 +763,11 @@ export function ConnectorsSection() {
                 origin: browserOrigin
               })}
             />
+          </div>
+        ) : null}
+        {googleRedirectBaseInvalid ? (
+          <div className="mt-3">
+            <AlertBanner variant="error" message={t("connectors.google.invalidRedirectBase")} />
           </div>
         ) : null}
       </div>

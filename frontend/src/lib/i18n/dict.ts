@@ -306,7 +306,7 @@ const en = {
     "Connect your accounts here. Google Workspace and Microsoft 365 use OAuth 2.0. WhatsApp Business (Meta Cloud API), iCloud Calendar (CalDAV with an app-specific password), and GitHub (personal access token) use static credentials stored encrypted. Outbound sends and other risky actions stay human-gated where the harness requires it.",
   "connectors.publicUrlTitle": "This app's web address",
   "connectors.publicUrlIntro":
-    "Use the same address people type to open this site (example: <mono>http://localhost:3002</mono> at home, or your real domain in production). No trailing slash. Google and Microsoft both use it for secure return links after sign-in.",
+    "Use the same address people type to open this site (example: <mono>http://localhost:3002</mono> at home, or your real domain in production). No trailing slash. For Google, use a public domain (or localhost only for local dev), not a private IP.",
   "connectors.publicUrlLabel": "Public URL",
   "connectors.publicUrlPlaceholder": "https://your-site.example",
   "connectors.publicUrlHelp":
@@ -341,7 +341,9 @@ const en = {
   "connectors.google.step1.line1Post":
     " and create an <strong>OAuth client ID</strong> of type <strong>Web application</strong>.",
   "connectors.google.step1.line2":
-    "Under <strong>Authorized redirect URIs</strong>, add this exact line (copy–paste):",
+    "Under <strong>Authorized redirect URIs</strong>, add this exact line (copy–paste). Google requires a public domain (or <mono>localhost</mono> in local dev):",
+  "connectors.google.invalidRedirectBase":
+    "Google OAuth redirect URL must use a public domain (for example: https://app.example.com). Private or LAN/VPN IPs are rejected by Google.",
   "connectors.google.step1.line3":
     "Turn on the <strong>Gmail</strong>, <strong>Calendar</strong>, <strong>Drive</strong>, <strong>Sheets</strong>, and <strong>Docs</strong> APIs for that project (and any others you use, e.g. YouTube).",
   "connectors.google.step2": "Step 2 — Paste into this page",
@@ -1339,7 +1341,7 @@ const es: Record<keyof typeof en, string> = {
     "Conecta tus cuentas aquí. Google Workspace y Microsoft 365 usan OAuth 2.0. WhatsApp Business (API en la nube de Meta), Calendario de iCloud (CalDAV con contraseña específica de app) y GitHub (token personal) usan credenciales estáticas cifradas. Los envíos y otras acciones sensibles siguen sujetos a aprobación humana cuando el harness lo exige.",
   "connectors.publicUrlTitle": "Dirección web de esta aplicación",
   "connectors.publicUrlIntro":
-    "Usa la misma dirección que la gente escribe para abrir este sitio (por ejemplo: <mono>http://localhost:3002</mono> en local, o tu dominio real en producción). Sin barra final. Tanto Google como Microsoft la utilizan para los enlaces de retorno seguros tras iniciar sesión.",
+    "Usa la misma dirección que la gente escribe para abrir este sitio (por ejemplo: <mono>http://localhost:3002</mono> en local, o tu dominio real en producción). Sin barra final. Para Google, usa un dominio público (o localhost solo en desarrollo local), no una IP privada.",
   "connectors.publicUrlLabel": "URL pública",
   "connectors.publicUrlPlaceholder": "https://tu-sitio.example",
   "connectors.publicUrlHelp":
@@ -1376,7 +1378,9 @@ const es: Record<keyof typeof en, string> = {
   "connectors.google.step1.line1Post":
     " y crea un <strong>ID de cliente OAuth</strong> de tipo <strong>Aplicación web</strong>.",
   "connectors.google.step1.line2":
-    "En <strong>URI de redireccionamiento autorizadas</strong>, añade exactamente esta línea (copia y pega):",
+    "En <strong>URI de redireccionamiento autorizadas</strong>, añade exactamente esta línea (copia y pega). Google exige un dominio público (o <mono>localhost</mono> en desarrollo local):",
+  "connectors.google.invalidRedirectBase":
+    "La URL de redirección de Google OAuth debe usar un dominio público (por ejemplo: https://app.example.com). Google rechaza IPs privadas o de LAN/VPN.",
   "connectors.google.step1.line3":
     "Activa las APIs de <strong>Gmail</strong>, <strong>Calendar</strong>, <strong>Drive</strong>, <strong>Sheets</strong> y <strong>Docs</strong> para ese proyecto (y las demás que uses, p. ej. YouTube).",
   "connectors.google.step2": "Paso 2 — Pega los datos en esta página",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 OAuthCredentialSource = Literal["database", "environment", "none"]
 
@@ -45,6 +47,31 @@ class GoogleOAuthAppCredentialsUpdate(BaseModel):
     client_id: str = Field(default="", max_length=512)
     client_secret: str | None = Field(default=None, max_length=512)
     redirect_base: str = Field(default="", max_length=1024)
+
+    @model_validator(mode="after")
+    def validate_google_redirect_base(self) -> "GoogleOAuthAppCredentialsUpdate":
+        raw = self.redirect_base.strip()
+        if not raw:
+            return self
+        parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            raise ValueError("Google OAuth redirect base must include a valid host.")
+        if host == "localhost":
+            return self
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            if "." not in host:
+                raise ValueError(
+                    "Google OAuth redirect base must use a public domain (for example: https://app.example.com)."
+                )
+            return self
+        if ip.is_loopback:
+            return self
+        raise ValueError(
+            "Google OAuth redirect base cannot use an IP address. Use a public domain, or localhost for local dev."
+        )
 
 
 class MicrosoftOAuthAppCredentialsResponse(BaseModel):
