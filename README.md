@@ -22,12 +22,14 @@ Agent Aquila is a **full-stack AI agent platform** that combines:
 ## Key Features
 
 ### 🤖 Intelligent Agent
+
 - **ReAct Loop**: Reasoning + Acting cycle for complex task execution
 - **Tool Calling**: 50+ tools across multiple service categories
 - **Context-Aware**: Memory system provides personalized context
 - **Scoped Tool Palettes**: Optimized tool selection for different scenarios
 
 ### 🔌 Service Connectors
+
 - **Google Workspace**: Gmail, Calendar, Drive, Sheets, Docs, Tasks, People, YouTube
 - **Microsoft 365**: Outlook (Graph mail), Teams
 - **Apple Services**: iCloud Drive, Contacts, Calendar (CalDAV)
@@ -36,25 +38,29 @@ Agent Aquila is a **full-stack AI agent platform** that combines:
 - **Productivity**: Web search, file operations, scheduled tasks
 
 ### 🧠 Memory System
+
 - **Canonical Storage**: Markdown-based memory files (MEMORY.md, USER.md, daily logs)
 - **Semantic Search**: Vector-based memory retrieval with embeddings
 - **Auto-Extraction**: Post-turn memory extraction from conversations
 - **Consolidation**: Periodic memory consolidation and summarization
 
 ### 📋 Skills System
+
 - **Gmail Triage**: Priority-based inbox management
 - **Weekly Review**: Structured digest from email, calendar, and memory
 - **Silence Sender**: Mute/spam management with filter rules
 - **Custom Skills**: Easy authoring with markdown templates
 
 ### 🔒 Security & Control
+
 - **OAuth 2.0**: Secure authentication for all connected services
 - **Proposal System**: User approval required for sensitive actions
 - **API Key Encryption**: Encrypted storage for AI provider credentials
 - **Rate Limiting**: Configurable rate limits per user
 - **Admin Controls**: User management and system settings
 
-### 📱 Multi-Channel Access
+### 📱 Access Channels
+
 - **Web UI**: Modern Next.js interface with real-time updates
 - **Telegram Bot**: Chat with your agent via Telegram
 - **Channel Gateway**: Extensible architecture for custom channels
@@ -125,6 +131,7 @@ python -m app.scripts.create_admin --email admin@example.com --password yourpass
 ## Architecture Overview
 
 ### Backend (FastAPI)
+
 - **API Layer**: RESTful endpoints in `backend/app/routes/`
 - **Services**: Business logic in `backend/app/services/`
 - **Models**: SQLAlchemy ORM in `backend/app/models/`
@@ -133,6 +140,7 @@ python -m app.scripts.create_admin --email admin@example.com --password yourpass
 - **Worker**: Background job processing with ARQ
 
 ### Frontend (Next.js)
+
 - **Pages**: Route handlers in `frontend/src/app/`
 - **Components**: Reusable UI in `frontend/src/components/`
 - **Features**: Feature-specific components in `frontend/src/components/features/`
@@ -141,18 +149,21 @@ python -m app.scripts.create_admin --email admin@example.com --password yourpass
 ### Key Systems
 
 #### Agent Execution
+
 - **ReAct Loop**: Reasoning + Acting cycle for complex tasks
 - **Tool Dispatch**: 50+ tools across multiple service categories
 - **Memory Integration**: Context-aware decision making
 - **Proposal System**: User approval for sensitive actions
 
 #### Memory System
+
 - **Canonical Storage**: Markdown files in `data/users/<user_id>/memory_workspace/`
 - **Vector Search**: pgvector-based semantic retrieval
 - **Auto-Extraction**: Post-turn memory extraction from conversations
 - **Consolidation**: Periodic summarization and cleanup
 
 #### Connector System
+
 - **OAuth 2.0**: Secure authentication flow
 - **Token Management**: Automatic refresh and rotation
 - **Multi-Account**: Support for multiple connections per provider
@@ -187,6 +198,7 @@ AGENT_CHANNEL_GATEWAY_ENABLED=false
 ### Per-User Settings
 
 Users can configure:
+
 - **AI Provider**: Multiple provider support with per-user API keys
 - **Agent Behavior**: Rate limits, tool palettes, memory settings
 - **Connectors**: OAuth connections to external services
@@ -232,16 +244,19 @@ npm run build
 ### Adding New Features
 
 #### Add a New Tool
+
 1. Define tool schema in `backend/app/services/agent_tools.py`
 2. Implement handler in `backend/app/services/agent/handlers/`
 3. Add dispatch entry in `backend/app/services/agent/dispatch.py`
 
 #### Add a New Connector
+
 1. Create client in `backend/app/services/connectors/`
 2. Add OAuth flow in `backend/app/services/oauth/`
 3. Create tool handlers for connector operations
 
 #### Add a New Skill
+
 1. Create `backend/skills/<skill-name>/SKILL.md`
 2. Follow the skill template with frontmatter and steps
 3. Test with agent via `load_skill` tool
@@ -259,6 +274,7 @@ npm run build
 ## Safety & Security
 
 ### Default Safety Policies
+
 - **Proposal System**: Sending/replying to emails requires user approval
 - **Rate Limiting**: Configurable limits per user to prevent abuse
 - **API Key Encryption**: All credentials encrypted at rest
@@ -267,6 +283,7 @@ npm run build
 ### Tuning Safety Policies
 
 Modify proposal tools in:
+
 - `backend/app/services/agent_tools.py` - `_PROPOSAL_TOOLS`
 - `backend/app/services/capability_registry.py` - Risk tiers
 
