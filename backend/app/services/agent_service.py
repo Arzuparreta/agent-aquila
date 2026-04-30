@@ -26,17 +26,17 @@ async def resolve_turn_tool_palette(
 ) -> list[dict[str, Any]]:
     """Resolve which tools the user can use this turn."""
     from app.schemas.agent_turn_profile import TURN_PROFILE_USER_CHAT
-    from app.services.user_ai_settings_service import UserAISettingsService
+    from app.services.agent_runtime_config_service import resolve_for_user
 
-    settings_row = await UserAISettingsService.get_or_create(db, user)
+    rt = await resolve_for_user(db, user)
 
-    mode = settings_row.agent_tool_palette
-    if settings_row.agent_non_chat_uses_compact_palette and turn_profile != TURN_PROFILE_USER_CHAT:
+    mode = rt.agent_tool_palette
+    if rt.agent_non_chat_uses_compact_palette and turn_profile != TURN_PROFILE_USER_CHAT:
         mode = "compact"
 
     base = tools_for_palette_mode(mode=mode)
 
-    if settings_row.agent_connector_gated_tools:
+    if rt.agent_connector_gated_tools:
         base = await filter_tools_for_user_connectors(db, user.id, base)
 
     if len(base) < 10:

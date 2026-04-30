@@ -292,7 +292,6 @@ async def build_system_prompt(
 
         harness_facts.extend([
             f"- Max tool steps this turn: **{mxs}**",
-            f"- Harness mode (effective): **{str(harness_mode)}**",
             f"- Prompt tier: **{tier}**",
             f"- Tool palette setting: **{rt.agent_tool_palette}**",
             f"- Connector-gated tool list: **{rt.agent_connector_gated_tools}**",
