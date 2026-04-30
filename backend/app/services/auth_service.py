@@ -14,6 +14,9 @@ from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 
 
+MIN_PASSWORD_LENGTH = 8
+
+
 def _registration_domain_allowset(raw: str) -> frozenset[str]:
     return frozenset(
         p.strip().lower().lstrip("@") for p in raw.split(",") if p.strip()
@@ -35,7 +38,16 @@ def _normalize_login_email(email: str) -> str:
 class AuthService:
     @staticmethod
     async def register(db: AsyncSession, payload: RegisterRequest) -> User:
-        if not settings.registration_open:
+        if len(payload.password or "") < MIN_PASSWORD_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+            )
+
+        user_count = await db.scalar(select(func.count()).select_from(User)) or 0
+        is_first_user = user_count == 0
+
+        if not settings.registration_open and not is_first_user:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Registration is disabled.",
@@ -51,13 +63,11 @@ class AuthService:
                     detail="Registration is restricted to approved email domains.",
                 )
 
-        if settings.registration_max_users > 0:
-            cnt = await db.scalar(select(func.count()).select_from(User))
-            if (cnt or 0) >= settings.registration_max_users:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="No additional user accounts are allowed.",
-                )
+        if settings.registration_max_users > 0 and user_count >= settings.registration_max_users:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No additional user accounts are allowed.",
+            )
 
         existing = await db.execute(select(User).where(func.lower(User.email) == email_str))
         if existing.scalar_one_or_none():
@@ -67,6 +77,7 @@ class AuthService:
             email=email_str,
             hashed_password=hash_password(payload.password),
             full_name=payload.full_name,
+            is_admin=is_first_user,
         )
         db.add(user)
         await db.commit()
@@ -188,8 +199,11 @@ class AuthService:
     ) -> None:
         if not verify_password(old_password, user.hashed_password):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Old password is incorrect")
-        if len(new_password or "") < 3:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password is too short")
+        if len(new_password or "") < MIN_PASSWORD_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"New password must be at least {MIN_PASSWORD_LENGTH} characters",
+            )
         if verify_password(new_password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

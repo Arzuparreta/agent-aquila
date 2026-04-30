@@ -68,6 +68,20 @@ const en = {
   "auth.redirecting": "Redirecting...",
   "auth.loadingSession": "Loading session...",
 
+  // ── Register ──────────────────────────────────────────────────────────────
+  "register.title": "Create account",
+  "register.intro": "The first account becomes the instance administrator. Choose a strong password (8+ characters).",
+  "register.email": "Email",
+  "register.password": "Password (8+ characters)",
+  "register.fullName": "Full name (optional)",
+  "register.createAccount": "Create account",
+  "register.creating": "Creating…",
+  "register.disabled": "Registration is disabled on this instance.",
+  "register.hasAccount": "Already have an account?",
+  "register.signIn": "Sign in",
+  "login.noAccount": "No account yet?",
+  "login.createAccount": "Create one",
+
   // ── Dashboard ────────────────────────────────────────────────────────────
   "dashboard.title": "Dashboard",
   "dashboard.recentEmails": "Recent Emails",
@@ -1072,6 +1086,20 @@ const es: Record<keyof typeof en, string> = {
     "No se pudo contactar con el servidor. Si usas Docker, ejecuta `docker compose up` y abre la app en el mismo host y puerto que en tu archivo compose.",
   "auth.redirecting": "Redirigiendo...",
   "auth.loadingSession": "Cargando sesión...",
+
+  // ── Register ──────────────────────────────────────────────────────────────
+  "register.title": "Crear cuenta",
+  "register.intro": "La primera cuenta se convierte en administradora de la instancia. Elige una contraseña fuerte (8+ caracteres).",
+  "register.email": "Correo",
+  "register.password": "Contraseña (8+ caracteres)",
+  "register.fullName": "Nombre completo (opcional)",
+  "register.createAccount": "Crear cuenta",
+  "register.creating": "Creando…",
+  "register.disabled": "El registro está desactivado en esta instancia.",
+  "register.hasAccount": "¿Ya tienes cuenta?",
+  "register.signIn": "Iniciar sesión",
+  "login.noAccount": "¿Aún sin cuenta?",
+  "login.createAccount": "Crea una",
 
   // ── Dashboard ────────────────────────────────────────────────────────────
   "dashboard.title": "Panel",

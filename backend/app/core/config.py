@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 30
     # POST /auth/register — disable after your account exists on a private instance.
-    registration_open: bool = Field(default=True, validation_alias="REGISTRATION_OPEN")
+    registration_open: bool = Field(default=False, validation_alias="REGISTRATION_OPEN")
     # Comma-separated lowercase domains (no @). Empty = any domain when registration_open is true.
     registration_email_domain_allowlist: str = Field(
         default="", validation_alias="REGISTRATION_EMAIL_DOMAIN_ALLOWLIST"

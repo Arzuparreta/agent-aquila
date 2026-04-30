@@ -10,6 +10,7 @@ class UserRead(TimestampSchema):
     email: EmailStr
     full_name: str | None = None
     is_active: bool
+    is_admin: bool
 
 
 class UserCreateRequest(ORMBaseModel):
@@ -21,4 +22,5 @@ class UserCreateRequest(ORMBaseModel):
 class UserUpdateRequest(ORMBaseModel):
     full_name: str | None = None
     is_active: bool | None = None
+    is_admin: bool | None = None
     password: str | None = None

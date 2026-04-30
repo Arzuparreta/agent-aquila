@@ -46,6 +46,12 @@ if settings.sentry_dsn:
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
+    if settings.jwt_secret in ("change_me", "change_me_in_production"):
+        logger.warning(
+            "JWT_SECRET is set to the default value '%s'. "
+            "Generate a strong secret and set JWT_SECRET in .env before deploying.",
+            settings.jwt_secret,
+        )
     await fail_fast_if_schema_stale()
     sub_task: asyncio.Task | None = None
     if (settings.redis_url or "").strip():

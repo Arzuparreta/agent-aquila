@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -13,6 +14,12 @@ from app.schemas.user import UserRead
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/has-users")
+async def has_users(db: AsyncSession = Depends(get_db)) -> dict[str, bool]:
+    cnt = await db.scalar(select(func.count()).select_from(User))
+    return {"users_exist": (cnt or 0) > 0, "registration_open": settings.registration_open}
 
 
 @router.post("/register", response_model=UserRead)

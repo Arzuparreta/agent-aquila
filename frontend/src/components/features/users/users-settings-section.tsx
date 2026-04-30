@@ -12,6 +12,7 @@ import type { AppUser } from "@/types/api";
 type MeResponse = {
   id: number;
   email: string;
+  is_admin: boolean;
 };
 
 export function UsersSettingsSection() {
@@ -35,6 +36,8 @@ export function UsersSettingsSection() {
   const [resetPasswords, setResetPasswords] = useState<Record<number, string>>({});
   const [resettingUserId, setResettingUserId] = useState<number | null>(null);
 
+  const isAdmin = me?.is_admin ?? false;
+
   const deleteTarget = useMemo(
     () => users.find((user) => user.id === pendingDeleteId) ?? null,
     [pendingDeleteId, users],
@@ -44,12 +47,14 @@ export function UsersSettingsSection() {
     setLoading(true);
     setError(null);
     try {
-      const [userList, currentUser] = await Promise.all([
-        apiFetch<AppUser[]>("/users"),
-        apiFetch<MeResponse>("/auth/me"),
-      ]);
-      setUsers(userList);
+      const currentUser = await apiFetch<MeResponse>("/auth/me");
       setMe(currentUser);
+      if (currentUser.is_admin) {
+        const userList = await apiFetch<AppUser[]>("/users");
+        setUsers(userList);
+      } else {
+        setUsers([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load users");
     } finally {
@@ -84,6 +89,21 @@ export function UsersSettingsSection() {
       setError(err instanceof Error ? err.message : "Could not create user");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleToggleAdmin(user: AppUser) {
+    setError(null);
+    setInfo(null);
+    try {
+      const updated = await apiFetch<AppUser>(`/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_admin: !user.is_admin }),
+      });
+      setUsers((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      setInfo(updated.is_admin ? `${updated.email} promoted to admin` : `${updated.email} demoted from admin`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update user");
     }
   }
 
@@ -170,9 +190,48 @@ export function UsersSettingsSection() {
     }
   }
 
+  if (loading) return <p className="text-sm text-fg-muted">Loading users…</p>;
+
+  if (!isAdmin) {
+    return (
+      <div className="space-y-5">
+        {error ? <p className="text-sm text-red-500">{error}</p> : null}
+        {info ? <p className="text-sm text-emerald-600">{info}</p> : null}
+        <p className="text-sm text-fg-muted">
+          Only admins can manage other users. Contact your instance administrator to create accounts or reset passwords.
+        </p>
+        <section className="space-y-3 rounded-md border border-border p-3">
+          <h3 className="text-sm font-semibold">Change my password</h3>
+          <p className="text-xs text-fg-muted">
+            This requires your current password. Use this to replace temporary credentials.
+          </p>
+          <form className="grid gap-2 sm:grid-cols-3" onSubmit={handleChangeMyPassword}>
+            <Input
+              type="password"
+              placeholder="Current password"
+              value={oldPassword}
+              onChange={(e) => setOldPassword(e.target.value)}
+              required
+            />
+            <Input
+              type="password"
+              placeholder="New password"
+              value={nextPassword}
+              onChange={(e) => setNextPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+            <Button type="submit" disabled={changingPassword}>
+              {changingPassword ? "Updating…" : "Update my password"}
+            </Button>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
-      {loading ? <p className="text-sm text-fg-muted">Loading users…</p> : null}
       {error ? <p className="text-sm text-red-500">{error}</p> : null}
       {info ? <p className="text-sm text-emerald-600">{info}</p> : null}
 
@@ -187,11 +246,12 @@ export function UsersSettingsSection() {
             required
           />
           <Input
-            placeholder="Temporary password"
+            placeholder="Temporary password (8+ chars)"
             type="password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             required
+            minLength={8}
           />
           <Input
             placeholder="Full name (optional)"
@@ -213,6 +273,7 @@ export function UsersSettingsSection() {
                 <TH>Email</TH>
                 <TH>Name</TH>
                 <TH>Status</TH>
+                <TH>Role</TH>
                 <TH>Temporary password reset</TH>
                 <TH className="text-right">Actions</TH>
               </TR>
@@ -225,6 +286,11 @@ export function UsersSettingsSection() {
                     <TD>{user.email}</TD>
                     <TD>{user.full_name || "—"}</TD>
                     <TD>{user.is_active ? "Active" : "Inactive"}</TD>
+                    <TD>
+                      <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${user.is_admin ? "bg-amber-100 text-amber-800" : "bg-surface-muted text-fg-muted"}`}>
+                        {user.is_admin ? "Admin" : "User"}
+                      </span>
+                    </TD>
                     <TD>
                       <div className="flex gap-2">
                         <Input
@@ -246,6 +312,9 @@ export function UsersSettingsSection() {
                     </TD>
                     <TD className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button type="button" onClick={() => void handleToggleAdmin(user)} disabled={isCurrent}>
+                          {user.is_admin ? "Remove admin" : "Make admin"}
+                        </Button>
                         <Button type="button" onClick={() => void handleToggleUserActive(user)} disabled={isCurrent}>
                           {user.is_active ? "Deactivate" : "Reactivate"}
                         </Button>
@@ -282,10 +351,11 @@ export function UsersSettingsSection() {
           />
           <Input
             type="password"
-            placeholder="New password"
+            placeholder="New password (8+ chars)"
             value={nextPassword}
             onChange={(e) => setNextPassword(e.target.value)}
             required
+            minLength={8}
           />
           <Button type="submit" disabled={changingPassword}>
             {changingPassword ? "Updating…" : "Update my password"}

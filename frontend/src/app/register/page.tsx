@@ -51,7 +51,6 @@ function messageFromFastApiDetail(body: unknown): string | null {
   return null;
 }
 
-/** Read error body: Next/proxies sometimes omit or mislabel Content-Type on 5xx. */
 async function messageFromErrorResponse(
   response: Response,
   htmlFallback: string,
@@ -73,25 +72,23 @@ async function messageFromErrorResponse(
   return trimmed.length > 480 ? `${trimmed.slice(0, 480)}…` : trimmed;
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter();
   const { setToken } = useAuth();
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [showRegisterLink, setShowRegisterLink] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/auth/has-users`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { users_exist?: boolean; registration_open?: boolean } | null) => {
-        if (!data) return;
-        if (!data.users_exist) {
-          router.replace("/register");
-          return;
+        if (data && data.users_exist && !data.registration_open) {
+          router.replace("/login");
         }
-        setShowRegisterLink(data.registration_open ?? false);
       })
       .catch(() => {});
   }, [router]);
@@ -99,13 +96,17 @@ export default function LoginPage() {
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setSubmitting(true);
 
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
+      const response = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-        credentials: "include",
+        body: JSON.stringify({
+          email,
+          password,
+          full_name: fullName.trim() || null,
+        }),
       });
 
       if (!response.ok) {
@@ -115,24 +116,34 @@ export default function LoginPage() {
         );
         if (!message) {
           message =
-            response.status === 401
-              ? t("login.invalidCredentials")
+            response.status === 403
+              ? t("register.disabled")
               : t("login.requestFailed", { status: String(response.status) });
         }
         setError(message);
         return;
       }
 
-      const data: { access_token: string; token_type: string } = await response.json();
-      setToken(data.access_token);
-      const params = new URLSearchParams(window.location.search);
-      let dest = params.get("next") || "/";
-      if (!dest.startsWith("/") || dest.startsWith("//")) {
-        dest = "/";
+      const loginResponse = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+        credentials: "include",
+      });
+
+      if (!loginResponse.ok) {
+        router.push("/login");
+        return;
       }
-      router.push(dest);
+
+      const data: { access_token: string; token_type: string } =
+        await loginResponse.json();
+      setToken(data.access_token);
+      router.push("/");
     } catch {
       setError(t("login.networkError"));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -140,33 +151,40 @@ export default function LoginPage() {
     <main className="page-scroll bg-surface-base text-fg">
       <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col justify-center px-4 pb-10 pt-[max(2.5rem,env(safe-area-inset-top))]">
         <Card>
-          <h1 className="mb-4 text-xl font-semibold">{t("login.title")}</h1>
+          <h1 className="mb-4 text-xl font-semibold">{t("register.title")}</h1>
+          <p className="mb-4 text-sm text-fg-muted">{t("register.intro")}</p>
           <form className="space-y-3" onSubmit={onSubmit}>
             <Input
-              placeholder={t("login.email")}
+              placeholder={t("register.email")}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              required
             />
             <Input
-              placeholder={t("login.password")}
+              placeholder={t("register.password")}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+            <Input
+              placeholder={t("register.fullName")}
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
             />
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
-            <Button className="w-full" type="submit">
-              {t("login.signIn")}
+            <Button className="w-full" type="submit" disabled={submitting}>
+              {submitting ? t("register.creating") : t("register.createAccount")}
             </Button>
           </form>
-          {showRegisterLink ? (
-            <p className="mt-4 text-center text-sm text-fg-muted">
-              {t("login.noAccount")}{" "}
-              <a href="/register" className="text-accent underline">
-                {t("login.createAccount")}
-              </a>
-            </p>
-          ) : null}
+          <p className="mt-4 text-center text-sm text-fg-muted">
+            {t("register.hasAccount")}{" "}
+            <a href="/login" className="text-accent underline">
+              {t("register.signIn")}
+            </a>
+          </p>
         </Card>
       </div>
     </main>

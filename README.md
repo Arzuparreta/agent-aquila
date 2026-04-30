@@ -19,6 +19,17 @@ cp .env.example .env
 docker compose up --build
 ```
 
+1. Open <http://localhost:3002> — you are redirected to the **Create account** page.
+2. Register your first account. It becomes the **instance admin** automatically.
+3. After the first account exists, registration is closed by default (`REGISTRATION_OPEN=false`). The admin can create additional users in **Settings → Users**, or re-open registration by setting `REGISTRATION_OPEN=true` in `.env`.
+
+To create an admin headlessly (e.g. in CI):
+
+```bash
+docker compose exec backend python -m app.scripts.create_admin \
+  --email admin@example.com --password yourpassword
+```
+
 If you run the **frontend on the host** (for example `cd frontend && npm install && npm run dev`), Next.js will generate `frontend/next-env.d.ts` for TypeScript. That file is generated and is **not** kept in git, so run `npm install` in `frontend/` after a fresh clone if your editor complains about missing types.
 
 | | URL |
