@@ -93,28 +93,45 @@ class AgentService:
 
     @staticmethod
     async def run_agent(
-        db: AsyncSession, user: User,
+        db: AsyncSession, user: User, message: str = "",
         *,
         thread_id: int | None = None,
-        user_message: str | None = None,
         turn_profile: str | None = None,
         injected_user_context: str | None = None,
         replay_id: int | None = None,
-        message: str | None = None,
         prior_messages: list[dict[str, str]] | None = None,
         thread_context_hint: str | None = None,
         replay: Any | None = None,
         agent_ctx: dict[str, Any] | None = None,
     ) -> Any:
-        msg = user_message or message or ""
         return await run_agent(
-            db, user, msg,
+            db, user, message,
             prior_messages=prior_messages,
             thread_id=thread_id,
             thread_context_hint=thread_context_hint,
             replay=replay,
             turn_profile=turn_profile,
             agent_ctx=agent_ctx,
+        )
+
+    @staticmethod
+    async def _execute_agent_loop(
+        db: AsyncSession, user: User, run: Any,
+        *, prior_messages: list[dict[str, str]] | None = None,
+        thread_context_hint: str | None = None,
+        replay: Any | None = None,
+        tool_palette_override: list[dict[str, Any]] | None = None,
+        system_prompt_override: str | None = None,
+        max_tool_steps_override: int | None = None,
+    ) -> Any:
+        return await _execute_agent_loop(
+            db, user, run,
+            prior_messages=prior_messages,
+            thread_context_hint=thread_context_hint,
+            replay=replay,
+            tool_palette_override=tool_palette_override,
+            system_prompt_override=system_prompt_override,
+            max_tool_steps_override=max_tool_steps_override,
         )
 
     @staticmethod
