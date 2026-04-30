@@ -306,7 +306,7 @@ const en = {
     "Connect your accounts here. Google Workspace and Microsoft 365 use OAuth 2.0. WhatsApp Business (Meta Cloud API), iCloud Calendar (CalDAV with an app-specific password), and GitHub (personal access token) use static credentials stored encrypted. Outbound sends and other risky actions stay human-gated where the harness requires it.",
   "connectors.publicUrlTitle": "This app's web address",
   "connectors.publicUrlIntro":
-    "HTTPS origin that reaches this Docker stack for OAuth callbacks (no trailing slash). Use your public VPS domain, or the optional Cloudflare tunnel from the README if you only have Tailscale/LAN. You can still open the UI from a private IP for day-to-day use if this value stays set to that HTTPS origin.",
+    "HTTPS origin for OAuth callbacks (no trailing slash). On Tailscale, run <mono>tailscale serve --bg 3002</mono> on the Docker host and use the <mono>https://…ts.net</mono> URL from <mono>tailscale serve status</mono> (see README). You can still open the UI via a private IP if this field stays set to that HTTPS origin.",
   "connectors.publicUrlLabel": "Public URL",
   "connectors.publicUrlPlaceholder": "https://your-site.example",
   "connectors.publicUrlHelp":
@@ -317,7 +317,7 @@ const en = {
   "connectors.redirectMismatch":
     "Public URL ({publicBase}) does not match this browser origin ({origin}). OAuth may fail until they match.",
   "connectors.oauth.privateNetworkBanner":
-    "You opened this page over a private or Tailscale address. Google and Microsoft still require OAuth redirects to use a normal public HTTPS hostname (they block raw private IPs). You do not need a desktop on the server: use a VPS domain, or run <mono>docker compose --profile oauth-tunnel up -d cloudflared</mono> and put the trycloudflare origin in <strong>Public URL</strong> and in the provider console (see README).",
+    "You opened this page over a private or Tailscale IP. Google and Microsoft require an HTTPS callback hostname (not a raw IP). On the Docker host run <mono>tailscale serve --bg 3002</mono>, copy the <mono>https://…ts.net</mono> origin from <mono>tailscale serve status</mono>, put it in <strong>Public URL</strong> and in the provider redirect URIs (see README). Use <strong>Serve</strong>, not Funnel, unless you want the app on the public internet.",
   "connectors.google.appStatusTitle": "OAuth app",
   "connectors.google.appStatusLine": "Client ID from {idSrc}. Client secret from {secretSrc}.",
   "connectors.google.configuredReady": "Ready to connect accounts.",
@@ -1343,7 +1343,7 @@ const es: Record<keyof typeof en, string> = {
     "Conecta tus cuentas aquí. Google Workspace y Microsoft 365 usan OAuth 2.0. WhatsApp Business (API en la nube de Meta), Calendario de iCloud (CalDAV con contraseña específica de app) y GitHub (token personal) usan credenciales estáticas cifradas. Los envíos y otras acciones sensibles siguen sujetos a aprobación humana cuando el harness lo exige.",
   "connectors.publicUrlTitle": "Dirección web de esta aplicación",
   "connectors.publicUrlIntro":
-    "Origen HTTPS que llega a esta pila Docker para las redirecciones OAuth (sin barra final). Usa el dominio público de tu VPS, o el túnel opcional de Cloudflare del README si solo tienes Tailscale/LAN. Puedes seguir abriendo la interfaz por IP privada en el día a día si este valor sigue siendo ese origen HTTPS.",
+    "Origen HTTPS para las redirecciones OAuth (sin barra final). Con Tailscale, en el host de Docker ejecuta <mono>tailscale serve --bg 3002</mono> y usa la URL <mono>https://…ts.net</mono> que muestre <mono>tailscale serve status</mono> (véase README). Puedes seguir abriendo la interfaz por IP privada si este campo sigue siendo ese origen HTTPS.",
   "connectors.publicUrlLabel": "URL pública",
   "connectors.publicUrlPlaceholder": "https://tu-sitio.example",
   "connectors.publicUrlHelp":
@@ -1354,7 +1354,7 @@ const es: Record<keyof typeof en, string> = {
   "connectors.redirectMismatch":
     "La URL pública ({publicBase}) no coincide con el origen de este navegador ({origin}). OAuth puede fallar hasta que coincidan.",
   "connectors.oauth.privateNetworkBanner":
-    "Has abierto esta página con una dirección privada o de Tailscale. Google y Microsoft siguen exigiendo que las redirecciones OAuth usen un nombre HTTPS público normal (bloquean IPs privadas tal cual). No necesitas un escritorio en el servidor: usa un dominio en tu VPS, o ejecuta <mono>docker compose --profile oauth-tunnel up -d cloudflared</mono> y pon el origen trycloudflare en <strong>URL pública</strong> y en la consola del proveedor (véase README).",
+    "Has abierto esta página con una IP privada o de Tailscale. Google y Microsoft exigen un nombre HTTPS para la redirección OAuth (no una IP en bruto). En el host de Docker ejecuta <mono>tailscale serve --bg 3002</mono>, copia el origen <mono>https://…ts.net</mono> de <mono>tailscale serve status</mono>, ponlo en <strong>URL pública</strong> y en las URIs de redirección del proveedor (véase README). Usa <strong>Serve</strong>, no Funnel, salvo que quieras el sitio en internet público.",
   "connectors.google.appStatusTitle": "Aplicación OAuth",
   "connectors.google.appStatusLine": "ID de cliente desde {idSrc}. Secreto de cliente desde {secretSrc}.",
   "connectors.google.configuredReady": "Listo para conectar cuentas.",

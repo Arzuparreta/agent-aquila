@@ -203,14 +203,14 @@ docker compose exec backend env | grep REDIRECT_BASE
 ```
 
 **Solutions**:
-1. Register all possible redirect URIs in Google Cloud Console:
-   - `http://localhost:8000/api/v1/oauth/google/callback` (local)
-   - `https://your-domain.com/api/v1/oauth/google/callback` (production)
-   - Any Tailscale Funnel or other access URLs
+1. Register the exact redirect URIs in Google Cloud Console. The origin must match **Settings → Connectors → Public URL** (Google rejects raw private IPs). Typical cases:
+   - `http://localhost:3002/api/v1/oauth/google/callback` (local browser on the Docker host only)
+   - `https://your-domain.com/api/v1/oauth/google/callback` (VPS or reverse proxy)
+   - `https://your-machine.your-tailnet.ts.net/api/v1/oauth/google/callback` when using **Tailscale Serve** on the host (`tailscale serve --bg 3002`) — use **Serve**, not **Funnel**, unless you want a public URL
 
-2. For Microsoft OAuth, register URIs in Azure AD app registration
+2. For Microsoft OAuth, register URIs in Azure AD app registration (same origin pattern, path `/api/v1/oauth/microsoft/callback`).
 
-3. The system now dynamically captures request base URL, but Google requires exact URI matching
+3. Google and Microsoft require exact URI matching; set **Public URL** in Aquila to the same HTTPS origin you registered.
 
 ### Token Refresh Errors
 

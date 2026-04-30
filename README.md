@@ -88,75 +88,45 @@ docker compose up --build
 2. Register your first account (automatically becomes the **instance admin**)
 3. Configure your AI provider in **Settings → AI**
 4. Connect external services in **Settings → Connectors**  
-   If Google or Microsoft refuse your redirect URL while you use a **private or Tailscale IP** in the browser, read **Google / Microsoft OAuth without a public domain** below—this is expected until you add a public HTTPS origin.
+   If Google or Microsoft reject your redirect URL, you are probably using a **raw private or Tailscale IP** in the address bar. See **OAuth with Tailscale (or any HTTPS URL)** below.
 
-### Google / Microsoft OAuth without a public domain (Cloudflare quick tunnel)
+### OAuth with Tailscale (or any HTTPS URL)
 
-This subsection is for people who run Agent Aquila at home (or only on Tailscale / a LAN) and **do not** have a normal domain or reverse proxy yet. If you already serve the app at `https://your-domain`, skip this and use that URL everywhere below instead of the tunnel.
+Google and Microsoft need an **HTTPS callback URL** they can put in their developer console. They **reject** plain IPs such as `http://100.x.x.x:3002` or `http://192.168.x.x:3002`.
 
-#### What problem this solves
+**If you already use Aquila at `https://something.example.com`**, put that origin (no trailing slash) in **Settings → Connectors → Public URL** and register the callbacks there—done.
 
-Signing in to Google or Microsoft from Aquila uses **OAuth**. After you approve access in the browser, Google or Microsoft **redirects your browser** to a URL on **your** installation (the “callback”). You must **register that exact callback URL** in Google Cloud Console / Azure.
+**If you use Tailscale** and the stack runs on a machine with the Tailscale client, use **Tailscale Serve** (HTTPS for your tailnet only—not the open internet):
 
-Those consoles **do not accept** addresses like:
-
-- `http://192.168.x.x:3002/…` (LAN)
-- `http://100.x.x.x:3002/…` (Tailscale)
-
-So if you only ever open Aquila with a private IP, you can use the app, but you **cannot** complete “Connect Google” / “Connect Microsoft” until you introduce **some HTTPS address that still reaches this same Docker stack** and that providers treat as a normal hostname.
-
-**You do not need a monitor on the server.** You complete OAuth in a browser on your phone or laptop. The server stays headless.
-
-#### What the optional tunnel does
-
-The Compose file includes a small **Cloudflare Tunnel** sidecar (`cloudflared`) behind the profile `oauth-tunnel`. When you run it, Cloudflare gives you a temporary **`https://….trycloudflare.com`** URL that forwards traffic to the **frontend** container. From the internet’s point of view, your app has a public HTTPS origin—even though it still runs on your machine.
-
-- **Pros**: No domain purchase, no DNS, works through NAT.
-- **Cons**: A **quick tunnel** URL **changes** when the tunnel container is recreated. If it changes, you must update **Public URL** in Aquila and the redirect URIs in Google / Azure (or switch to a stable domain / [named Cloudflare tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/) later).
-
-#### How to use it (step by step)
-
-1. **Start the main stack** (if it is not already running):
+1. On the **same host** where Docker publishes the web UI (default **port 3002**), run:
 
    ```bash
-   docker compose up -d --build
+   tailscale serve --bg 3002
    ```
 
-2. **Start the tunnel** (separate command; only starts `cloudflared`):
+2. See your HTTPS origin (copy it without a path):
 
    ```bash
-   docker compose --profile oauth-tunnel up -d cloudflared
+   tailscale serve status
    ```
 
-3. **Read the public URL from the tunnel logs.** Cloudflare prints a line containing your hostname, for example `https://random-words.trycloudflare.com`:
+   It looks like `https://your-machine.your-tailnet.ts.net`.
 
-   ```bash
-   docker compose logs cloudflared
-   ```
+3. In **Google Cloud Console** → OAuth client (**Web application**) → **Authorized redirect URIs**, add:
 
-   Copy **only the origin**: `https://random-words.trycloudflare.com` (no path, no trailing slash).
+   `https://your-machine.your-tailnet.ts.net/api/v1/oauth/google/callback`
 
-4. **Register redirect URIs** in each provider (replace the origin with yours):
+   For **Microsoft** (Azure app registration → **Redirect URIs**), add:
 
-   - **Google** (OAuth client type **Web application** → **Authorized redirect URIs**):
-     - `https://random-words.trycloudflare.com/api/v1/oauth/google/callback`
-   - **Microsoft** (App registration → **Authentication** → **Redirect URIs**):
-     - `https://random-words.trycloudflare.com/api/v1/oauth/microsoft/callback`
+   `https://your-machine.your-tailnet.ts.net/api/v1/oauth/microsoft/callback`
 
-5. **Open Aquila in a browser** (you can use Tailscale or LAN as usual, or open the trycloudflare URL—either is fine for clicking around).
+4. In Aquila → **Settings → Connectors** → **Public URL**, paste that same origin (example: `https://your-machine.your-tailnet.ts.net`), save your provider credentials, then use **Connect Google** / **Connect Microsoft**.
 
-6. Go to **Settings → Connectors**:
+5. Complete the login in a browser **on a device that is on your tailnet** (Tailscale installed, MagicDNS on). You can still use `http://100.x…:3002` for day-to-day browsing if you want, as long as **Public URL** stays the `https://…ts.net` value.
 
-   - In **Public URL**, paste the same origin: `https://random-words.trycloudflare.com`
-   - Enter your Google / Microsoft client ID and secret, then **Save Google link** / **Save Microsoft link** so Aquila stores that origin.
+To turn off Serve later: `tailscale serve reset`.
 
-7. Click **Connect Google** or **Connect Microsoft**. Your browser will go to the provider; after you approve, the provider will send you back to the **trycloudflare** callback, which reaches your stack and finishes the link.
-
-8. **Keep the tunnel running** whenever you need to **connect or reconnect** OAuth (new tokens / revoked access). Day-to-day chat may keep working for a while with stored tokens, but reconnects always need the callback URL to work again.
-
-#### If you outgrow the quick tunnel
-
-For a URL that does not change on every restart, use a real domain with HTTPS (VPS + Caddy/Let’s Encrypt, or a **named** Cloudflare Tunnel with a hostname you control). Then set **Public URL** to that `https://…` origin and update the provider redirect URIs once.
+**Do not use Tailscale Funnel for this** unless you intentionally want the app reachable from the whole internet.
 
 ### Manual Setup
 
@@ -362,7 +332,7 @@ Modify proposal tools in:
 
 **Frontend 500 errors**: Check backend logs and ensure database migrations are complete
 
-**OAuth failures**: Verify redirect URIs and app credentials in provider console
+**OAuth failures**: Match **Settings → Connectors → Public URL** to your HTTPS origin (see **OAuth with Tailscale** above) and register the exact callback paths in Google / Azure.
 
 **Agent not responding**: Check AI provider configuration and API key validity
 

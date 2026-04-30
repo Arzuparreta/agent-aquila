@@ -109,20 +109,6 @@ services:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
 
-  # Ephemeral HTTPS URL for OAuth redirects when you have no public domain (Tailscale/LAN only).
-  # Google/Microsoft require a browser-reachable HTTPS callback; this is not a "server monitor".
-  # Run: docker compose --profile oauth-tunnel up -d
-  # Then: docker compose logs cloudflared  (copy the trycloudflare.com origin into Settings → Public URL + provider consoles).
-  # For a stable hostname, use a Cloudflare named tunnel or your own domain instead.
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    profiles:
-      - oauth-tunnel
-    command: tunnel --no-autoupdate --url http://frontend:3000
-    depends_on:
-      - frontend
-    restart: unless-stopped
-
 volumes:
   db_data:
   redis_data:
